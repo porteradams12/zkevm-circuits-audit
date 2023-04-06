@@ -1,0 +1,25 @@
+[package]
+name = "zkevm_circuits"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+derivative = "2"
+serde = {version = "1", features = ["derive"]}
+rand = "0.8"
+smallvec = {version = "*", features = ["const_generics", "const_new", "serde"] }
+lazy_static = "*"
+arrayvec = "*"
+zkevm_opcode_defs = {git = "https://github.com/matter-labs/zkevm_opcode_defs.git", branch = "v1.3.2"}
+# boojum = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
+boojum = {path = "../boojum"}
+bincode = "*"
+ethereum-types = "0.12.*"
+cs_derive = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
+serde_json = "*"
+itertools = "0.10"
+
+[dev-dependencies]
+hex = "*"
