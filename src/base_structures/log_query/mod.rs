@@ -52,6 +52,28 @@ impl<F: SmallField> LogQuery<F> {
         let boolean_true = Boolean::allocated_constant(cs, true);
         existing_packing[ROLLBACK_PACKING_FLAG_VARIABLE_IDX] = boolean_true.get_variable();
     }
+    pub fn empty<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        let boolean_false = Boolean::allocated_constant(cs, false);
+        Self {
+            address: UInt160::<F>::zero(cs),
+            key: UInt256::zero(cs),
+            read_value: UInt256::zero(cs),
+            written_value: UInt256::zero(cs),
+            rw_flag: boolean_false,
+            aux_byte: UInt8::zero(cs),
+            rollback: boolean_false,
+            is_service: boolean_false,
+            shard_id: UInt8::zero(cs),
+            tx_number_in_block: UInt32::zero(cs),
+            timestamp: UInt32::zero(cs),
+        }
+    }
+}
+
+impl<F: SmallField> CSPlaceholder<F> for LogQuery<F> {
+    fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        Self::empty(cs)
+    }
 }
 
 impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> {
