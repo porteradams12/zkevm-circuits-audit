@@ -1,19 +1,19 @@
-use cs_derive::*;
+use crate::base_structures::{
+    log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
+    vm_state::*,
+};
+use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
-use boojum::cs::{
-    traits::cs::ConstraintSystem,
-    Variable
-};
-use crate::base_structures::{vm_state::*, 
-    log_query::{LogQuery,LOG_QUERY_PACKED_WIDTH}, 
-};
 use boojum::gadgets::{
+    boolean::Boolean,
     queue::*,
-    traits::{allocatable::*, selectable::Selectable, encodable::CircuitVarLengthEncodable, witnessable::WitnessHookable},
-    boolean::Boolean
+    traits::{
+        allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
+        witnessable::WitnessHookable,
+    },
 };
+use cs_derive::*;
 use derivative::*;
-
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
@@ -49,7 +49,6 @@ pub struct LogDemuxerInputData<F: SmallField> {
 
 impl<F: SmallField> CSPlaceholder<F> for LogDemuxerInputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
-        
         Self {
             initial_log_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
         }
@@ -82,17 +81,17 @@ impl<F: SmallField> CSPlaceholder<F> for LogDemuxerOutputData<F> {
 
 pub type LogDemuxerInputOutput<F> = crate::fsm_input_output::ClosedFormInput<
     F,
-    LogDemuxerFSMInputOutput<F>, 
-    LogDemuxerInputData<F>, 
-    LogDemuxerOutputData<F>
+    LogDemuxerFSMInputOutput<F>,
+    LogDemuxerInputData<F>,
+    LogDemuxerOutputData<F>,
 >;
 
 pub type LogDemuxerInputOutputWitness<F> = crate::fsm_input_output::ClosedFormInputWitness<
-        F, 
-        LogDemuxerFSMInputOutput<F>, 
-        LogDemuxerInputData<F>, 
-        LogDemuxerOutputData<F>
-    >;
+    F,
+    LogDemuxerFSMInputOutput<F>,
+    LogDemuxerInputData<F>,
+    LogDemuxerOutputData<F>,
+>;
 
 pub struct LogDemuxerCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: LogDemuxerInputOutputWitness<F>,
