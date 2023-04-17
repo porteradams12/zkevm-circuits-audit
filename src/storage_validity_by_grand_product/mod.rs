@@ -582,25 +582,19 @@ pub fn sort_and_deduplicate_storage_access_inner<
 
         // accumulate into product
 
-        let mut lhs_lc = LinearCombination::zero();
-        let mut rhs_lc = LinearCombination::zero();
+        let mut lhs_contribution = Num::zero();
+        let mut rhs_contribution = Num::zero();
         for ((original_el, sorted_el), challenge) in extended_original_encoding
             .into_iter()
             .zip(sorted_encoding.into_iter())
             .zip(fs_challenges.iter())
         {
-            let lhs_contribution = original_el.mul(cs, &challenge)?;
-            let rhs_contribution = sorted_el.mul(cs, &challenge)?;
-
-            lhs_lc.add_assign_number_with_coeff(&lhs_contribution, F::one());
-            rhs_lc.add_assign_number_with_coeff(&rhs_contribution, F::one());
+            lhs_contribution += original_el.mul(cs, &challenge)?;
+            rhs_contribution += sorted_el.mul(cs, &challenge)?;
         }
 
-        lhs_lc.add_assign_number_with_coeff(&additive_part, F::one());
-        rhs_lc.add_assign_number_with_coeff(&additive_part, F::one());
-
-        let lhs_contribution = lhs_lc.into_num(cs)?;
-        let rhs_contribution = rhs_lc.into_num(cs)?;
+        lhs_contribution += additive_part;
+        rhs_contribution.add_assign_number_with_coeff(&additive_part, F::one());
 
         let lhs_candidate = lhs.mul(cs, &lhs_contribution)?;
         let rhs_candidate = rhs.mul(cs, &rhs_contribution)?;
