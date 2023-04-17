@@ -1,5 +1,6 @@
 use super::*;
 
+use std::borrow;
 use std::sync::Arc;
 use boojum::field::SmallField;
 use boojum::cs::traits::cs::ConstraintSystem;
@@ -53,71 +54,70 @@ where
     let observable_input = structured_input.observable_input.clone();
     let hidden_fsm_input = structured_input.hidden_fsm_input.clone();
 
-    let mut unsorted_queue_from_fsm_input = MemoryQueriesQueue::<F, R>::empty(cs);
-    unsorted_queue_from_fsm_input.head = hidden_fsm_input.current_unsorted_queue_state.head;
-    unsorted_queue_from_fsm_input.tail = hidden_fsm_input.current_unsorted_queue_state.tail.tail;
-    unsorted_queue_from_fsm_input.length = hidden_fsm_input.current_unsorted_queue_state.tail.length;
+    let zero_el = Num::allocated_constant(cs, F::ZERO);
 
-    let mut unsorted_queue_from_passthrough = MemoryQueriesQueue::<F, R>::empty(cs);
-    unsorted_queue_from_passthrough.tail = observable_input.unsorted_queue_initial_state.tail;
-    unsorted_queue_from_passthrough.length = observable_input.unsorted_queue_initial_state.length;
+    let unsorted_queue_head = <[Num<F>; 12]>::conditionally_select(
+        cs,
+        start_flag,
+        &[zero_el; 12],
+        &hidden_fsm_input.current_unsorted_queue_state.head,
+    ); 
+    let unsorted_queue_tail = <[Num<F>; 12]>::conditionally_select(
+        cs,
+        start_flag,
+        &observable_input.unsorted_queue_initial_state.tail,
+        &hidden_fsm_input.current_unsorted_queue_state.tail.tail,
+    ); 
+    let unsorted_queue_length = UInt32::conditionally_select(
+        cs,
+        start_flag,
+        &observable_input.unsorted_queue_initial_state.length,
+        &hidden_fsm_input.current_unsorted_queue_state.tail.length,
+    );
 
-    let mut unsorted_queue = MemoryQueriesQueue::<F, R>::empty(cs);
-    unsorted_queue.head = <[Num<F>; 12]>::conditionally_select(
+    let mut unsorted_queue = MemoryQueriesQueue::<F, R>::from_raw_parts(
         cs,
-        start_flag,
-        &unsorted_queue_from_passthrough.head,
-        &unsorted_queue_from_fsm_input.head,
-    ); 
-    unsorted_queue.tail = <[Num<F>; 12]>::conditionally_select(
-        cs,
-        start_flag,
-        &unsorted_queue_from_passthrough.tail,
-        &unsorted_queue_from_fsm_input.tail,
-    ); 
-    unsorted_queue.length = UInt32::conditionally_select(
-        cs,
-        start_flag,
-        &unsorted_queue_from_passthrough.length,
-        &unsorted_queue_from_fsm_input.length,
+        unsorted_queue_head,
+        unsorted_queue_tail,
+        unsorted_queue_length,
     );
     unsorted_queue.witness = Arc::new(unsorted_queue_witness);
 
-    let mut sorted_queue_from_fsm_input = MemoryQueriesQueue::<F, R>::empty(cs);
-    sorted_queue_from_fsm_input.head = hidden_fsm_input.current_sorted_queue_state.head;
-    sorted_queue_from_fsm_input.tail = hidden_fsm_input.current_sorted_queue_state.tail.tail;
-    sorted_queue_from_fsm_input.length = hidden_fsm_input.current_sorted_queue_state.tail.length;
 
-    let mut sorted_queue_from_passthrough = MemoryQueriesQueue::<F, R>::empty(cs);
-    sorted_queue_from_passthrough.tail = observable_input.sorted_queue_initial_state.tail;
-    sorted_queue_from_passthrough.length = observable_input.sorted_queue_initial_state.length;
+    let sorted_queue_head = <[Num<F>; 12]>::conditionally_select(
+        cs,
+        start_flag,
+        &[zero_el; 12],
+        &hidden_fsm_input.current_sorted_queue_state.head,
+    ); 
+    let sorted_queue_tail = <[Num<F>; 12]>::conditionally_select(
+        cs,
+        start_flag,
+        &observable_input.sorted_queue_initial_state.tail,
+        &hidden_fsm_input.current_sorted_queue_state.tail.tail,
+    ); 
+    let sorted_queue_length = UInt32::conditionally_select(
+        cs,
+        start_flag,
+        &observable_input.sorted_queue_initial_state.length,
+        &hidden_fsm_input.current_sorted_queue_state.tail.length,
+    );
 
-    let mut sorted_queue = MemoryQueriesQueue::<F, R>::empty(cs);
-    sorted_queue.head = <[Num<F>; 12]>::conditionally_select(
+    let mut sorted_queue = MemoryQueriesQueue::<F, R>::from_raw_parts(
         cs,
-        start_flag,
-        &sorted_queue_from_passthrough.head,
-        &sorted_queue_from_fsm_input.head,
-    ); 
-    sorted_queue.tail = <[Num<F>; 12]>::conditionally_select(
-        cs,
-        start_flag,
-        &sorted_queue_from_passthrough.tail,
-        &sorted_queue_from_fsm_input.tail,
-    ); 
-    sorted_queue.length = UInt32::conditionally_select(
-        cs,
-        start_flag,
-        &sorted_queue_from_passthrough.length,
-        &sorted_queue_from_fsm_input.length,
+        sorted_queue_head,
+        sorted_queue_tail,
+        sorted_queue_length,
     );
     sorted_queue.witness = Arc::new(sorted_queue_witness);
+
 
     let fs_challenges = generate_challenges::<F, CS, R>(
         cs,
         &observable_input.unsorted_queue_initial_state,
         &observable_input.sorted_queue_initial_state,
     );
+
 
     let num_one = Num::allocated_constant(cs, F::ONE);
     let mut lhs = <[Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES]>::conditionally_select(
@@ -145,6 +145,7 @@ where
     let mut previous_full_key = hidden_fsm_input.previous_full_key;
     let mut previous_value = hidden_fsm_input.previous_value;
     let mut previous_is_ptr = hidden_fsm_input.previous_is_ptr;
+
 
     partial_accumulate_inner(
         cs,
@@ -174,15 +175,6 @@ where
         &observable_input
             .non_deterministic_bootloader_memory_snapshot_length,
     );
-    num_nondeterministic_writes_equal.conditionally_enforce_true(cs, completed);
-
-    structured_input.hidden_fsm_output.previous_sorting_key = previous_sorting_key;
-    structured_input.hidden_fsm_output.previous_full_key = previous_full_key;
-    structured_input.hidden_fsm_output.previous_value = previous_value;
-    structured_input.hidden_fsm_output.previous_is_ptr = previous_is_ptr;
-
-    structured_input.hidden_fsm_output.lhs_accumulator = lhs;
-    structured_input.hidden_fsm_output.rhs_accumulator = rhs;
 
     structured_input
         .hidden_fsm_output
@@ -190,25 +182,24 @@ where
 
     structured_input
         .hidden_fsm_output
-        .current_unsorted_queue_state = QueueState {
-            head: unsorted_queue.head,
-            tail: QueueTailState{
-                tail: unsorted_queue.tail,
-                length: unsorted_queue.length,
-            }
-        };
+        .current_unsorted_queue_state = unsorted_queue.into_state();
 
     structured_input
         .hidden_fsm_output
-        .current_sorted_queue_state = QueueState {
-            head: sorted_queue.head,
-            tail: QueueTailState{
-                tail: sorted_queue.tail,
-                length: sorted_queue.length,
-            }
-        };
+        .current_sorted_queue_state = sorted_queue.into_state();
+
+    structured_input.hidden_fsm_output.lhs_accumulator = lhs;
+    structured_input.hidden_fsm_output.rhs_accumulator = rhs;
+
+    structured_input.hidden_fsm_output.previous_sorting_key = previous_sorting_key;
+    structured_input.hidden_fsm_output.previous_full_key = previous_full_key;
+    structured_input.hidden_fsm_output.previous_value = previous_value;
+    structured_input.hidden_fsm_output.previous_is_ptr = previous_is_ptr;
+
+    num_nondeterministic_writes_equal.conditionally_enforce_true(cs, completed);
 
     structured_input.completion_flag = completed;
+
 
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
@@ -248,7 +239,7 @@ where
     Num::enforce_equal(cs, &unsorted_queue.length.into_num(), &sorted_queue.length.into_num());
 
     for _cycle in 0..limit {
-        let can_pop = unsorted_queue.length.is_zero(cs);
+        let can_pop = unsorted_queue.is_empty(cs);
 
         // we do not need any information about unsorted element other than it's encoding
         let (_, unsorted_item_encoding) =
@@ -320,7 +311,7 @@ where
             }
 
             let same_memory_cell = long_equals(cs, &comparison_key, previous_comparison_key);
-            let value_equal = long_equals(cs, &sorted_item.value.inner, &previous_element_value.inner);
+            let value_equal = UInt256::equals(cs, &sorted_item.value, &previous_element_value);
 
             let not_same_cell = same_memory_cell.negated(cs);
             let rw_flag = sorted_item.rw_flag;
@@ -328,7 +319,7 @@ where
 
             // check uninit read
             let uint256_zero = UInt256::zero(cs);
-            let value_is_zero = long_equals(cs, &sorted_item.value.inner, &uint256_zero.inner);
+            let value_is_zero = UInt256::equals(cs, &sorted_item.value, &uint256_zero);
             let is_ptr = sorted_item.is_ptr;
             let not_ptr = is_ptr.negated(cs);
             let is_zero = value_is_zero.and(cs, not_ptr);
@@ -350,7 +341,7 @@ where
 
                 // if we start a fresh argument then our comparison
                 let read_uninitialized_if_continue =
-                    Boolean::multi_and(cs, &[not_start, value_equal, not_rw_flag]);
+                    Boolean::multi_and(cs, &[not_start, not_same_cell, not_rw_flag]);
                 let read_uninit_if_at_the_start = is_start.and(cs, not_rw_flag);
                 let should_enforce = read_uninitialized_if_continue.or(cs, read_uninit_if_at_the_start);
                 is_zero.conditionally_enforce_true(cs, should_enforce);
@@ -475,43 +466,46 @@ fn generate_challenges<
     result
 }
 
-fn le_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
+use boojum::gadgets::traits::allocatable::CSAllocatable;
+fn le_long_comparison<
+    F: SmallField, 
+    CS: ConstraintSystem<F>,
+    const N: usize
+>(
     cs: &mut CS,
-    a: &[UInt32<F>],
-    b: &[UInt32<F>]
+    a: &[UInt32<F>; N],
+    b: &[UInt32<F>; N]
 ) -> (Boolean<F>, Boolean<F>) {
-    assert_eq!(a.len(), b.len());
+    let boolean_default = Boolean::allocate_without_value(cs);
+    let mut equals = [boolean_default; N];
     let mut second_is_greater = Boolean::allocated_constant(cs, false);
-    let mut equal = Boolean::allocated_constant(cs, true);
 
-    for (a, b) in a
-        .iter()
-        .zip(b.iter())
-    {
-        let (diff, borrow, _) = (*a).overflowing_sub_with_borrow_in(cs, *b, second_is_greater);
-        let this_equal = diff.is_zero(cs);
-        equal = equal.and(cs, this_equal);
+    for i in 0..N {
+        let (diff, borrow, _) = a[i].overflowing_sub_with_borrow_in(cs, b[i], second_is_greater);
         second_is_greater = borrow;
+        equals[i] = diff.is_zero(cs);
     }
+
+    let equal = Boolean::multi_and(cs, &equals);
 
     (equal, second_is_greater)
 }
 
-fn long_equals<F: SmallField, CS: ConstraintSystem<F>>(
+fn long_equals<
+    F: SmallField, 
+    CS: ConstraintSystem<F>,
+    const N: usize
+>(
     cs: &mut CS,
-    a: &[UInt32<F>],
-    b: &[UInt32<F>]
+    a: &[UInt32<F>; N],
+    b: &[UInt32<F>; N]
 ) -> Boolean<F> {
-    assert_eq!(a.len(), b.len());
-    let mut equal = Boolean::allocated_constant(cs, true);
+    let boolean_default = Boolean::allocate_without_value(cs);
+    let mut equals = [boolean_default; N];
 
-    for (a, b) in a
-        .iter()
-        .zip(b.iter())
-    {
-        let this_equal = UInt32::equals(cs, a, b);
-        equal = equal.and(cs, this_equal);
+    for i in 0..N {
+        equals[i] = UInt32::equals(cs, &a[i], &b[i]);
     }
 
-    equal
+    Boolean::multi_and(cs, &equals)
 }
