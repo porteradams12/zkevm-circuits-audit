@@ -1,0 +1,517 @@
+use super::*;
+
+use std::sync::Arc;
+use boojum::field::SmallField;
+use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::gadgets::boolean::Boolean;
+use boojum::gadgets::num::Num;
+use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::u32::UInt32;
+use boojum::gadgets::u256::UInt256;
+
+use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use crate::base_structures::memory_query::MemoryQuery;
+use boojum::gadgets::queue::{QueueState, QueueTailState};
+use boojum::gadgets::traits::allocatable::CSAllocatableExt;
+use crate::base_structures::memory_query::MEMORY_QUERY_PACKED_WIDTH;
+use crate::fsm_input_output::ClosedFormInputCompactForm;
+use crate::fsm_input_output::commit_variable_length_encodable_item;
+use boojum::cs::gates::PublicInputGate;
+use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+
+use zkevm_opcode_defs::BOOTLOADER_HEAP_PAGE;
+
+mod input;
+use input::*;
+
+pub fn ram_permutation_entry_point<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+>(
+    cs: &mut CS,
+    closed_form_input_witness: RamPermutationCircuitInstanceWitness<F>,
+    round_function: &R,
+    limit: usize,
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
+where
+    [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
+    // Add tables for the RAM permutation
+
+    let RamPermutationCircuitInstanceWitness {
+        closed_form_input,
+        unsorted_queue_witness,
+        sorted_queue_witness
+    } = closed_form_input_witness;
+
+    let mut structured_input =
+        RamPermutationCycleInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
+
+    let start_flag = structured_input.start_flag;
+    let observable_input = structured_input.observable_input.clone();
+    let hidden_fsm_input = structured_input.hidden_fsm_input.clone();
+
+    let mut unsorted_queue_from_fsm_input = MemoryQueriesQueue::<F, R>::empty(cs);
+    unsorted_queue_from_fsm_input.head = hidden_fsm_input.current_unsorted_queue_state.head;
+    unsorted_queue_from_fsm_input.tail = hidden_fsm_input.current_unsorted_queue_state.tail.tail;
+    unsorted_queue_from_fsm_input.length = hidden_fsm_input.current_unsorted_queue_state.tail.length;
+
+    let mut unsorted_queue_from_passthrough = MemoryQueriesQueue::<F, R>::empty(cs);
+    unsorted_queue_from_passthrough.tail = observable_input.unsorted_queue_initial_state.tail;
+    unsorted_queue_from_passthrough.length = observable_input.unsorted_queue_initial_state.length;
+
+    let mut unsorted_queue = MemoryQueriesQueue::<F, R>::empty(cs);
+    unsorted_queue.head = <[Num<F>; 12]>::conditionally_select(
+        cs,
+        start_flag,
+        &unsorted_queue_from_passthrough.head,
+        &unsorted_queue_from_fsm_input.head,
+    ); 
+    unsorted_queue.tail = <[Num<F>; 12]>::conditionally_select(
+        cs,
+        start_flag,
+        &unsorted_queue_from_passthrough.tail,
+        &unsorted_queue_from_fsm_input.tail,
+    ); 
+    unsorted_queue.length = UInt32::conditionally_select(
+        cs,
+        start_flag,
+        &unsorted_queue_from_passthrough.length,
+        &unsorted_queue_from_fsm_input.length,
+    );
+    unsorted_queue.witness = Arc::new(unsorted_queue_witness);
+
+    let mut sorted_queue_from_fsm_input = MemoryQueriesQueue::<F, R>::empty(cs);
+    sorted_queue_from_fsm_input.head = hidden_fsm_input.current_sorted_queue_state.head;
+    sorted_queue_from_fsm_input.tail = hidden_fsm_input.current_sorted_queue_state.tail.tail;
+    sorted_queue_from_fsm_input.length = hidden_fsm_input.current_sorted_queue_state.tail.length;
+
+    let mut sorted_queue_from_passthrough = MemoryQueriesQueue::<F, R>::empty(cs);
+    sorted_queue_from_passthrough.tail = observable_input.sorted_queue_initial_state.tail;
+    sorted_queue_from_passthrough.length = observable_input.sorted_queue_initial_state.length;
+
+    let mut sorted_queue = MemoryQueriesQueue::<F, R>::empty(cs);
+    sorted_queue.head = <[Num<F>; 12]>::conditionally_select(
+        cs,
+        start_flag,
+        &sorted_queue_from_passthrough.head,
+        &sorted_queue_from_fsm_input.head,
+    ); 
+    sorted_queue.tail = <[Num<F>; 12]>::conditionally_select(
+        cs,
+        start_flag,
+        &sorted_queue_from_passthrough.tail,
+        &sorted_queue_from_fsm_input.tail,
+    ); 
+    sorted_queue.length = UInt32::conditionally_select(
+        cs,
+        start_flag,
+        &sorted_queue_from_passthrough.length,
+        &sorted_queue_from_fsm_input.length,
+    );
+    sorted_queue.witness = Arc::new(sorted_queue_witness);
+
+    let fs_challenges = generate_challenges::<F, CS, R>(
+        cs,
+        &observable_input.unsorted_queue_initial_state,
+        &observable_input.sorted_queue_initial_state,
+    );
+
+    let num_one = Num::allocated_constant(cs, F::ONE);
+    let mut lhs = <[Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES]>::conditionally_select(
+        cs,
+        start_flag,
+        &[num_one; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+        &hidden_fsm_input.lhs_accumulator,
+    );
+    let mut rhs = <[Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES]>::conditionally_select(
+        cs,
+        start_flag,
+        &[num_one; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+        &hidden_fsm_input.rhs_accumulator,
+    );
+
+    let uint32_zero = UInt32::zero(cs);
+    let mut num_nondeterministic_writes = UInt32::conditionally_select(
+        cs, 
+        start_flag, 
+        &uint32_zero, 
+        &hidden_fsm_input.num_nondeterministic_writes
+    );
+
+    let mut previous_sorting_key = hidden_fsm_input.previous_sorting_key;
+    let mut previous_full_key = hidden_fsm_input.previous_full_key;
+    let mut previous_value = hidden_fsm_input.previous_value;
+    let mut previous_is_ptr = hidden_fsm_input.previous_is_ptr;
+
+    partial_accumulate_inner(
+        cs,
+        &mut unsorted_queue,
+        &mut sorted_queue,
+        &fs_challenges,
+        start_flag,
+        &mut lhs,
+        &mut rhs,
+        &mut previous_sorting_key,
+        &mut previous_full_key,
+        &mut previous_value,
+        &mut previous_is_ptr,
+        &mut num_nondeterministic_writes,
+        limit
+    );
+
+    let completed = unsorted_queue.length.is_zero(cs);
+
+    for (lhs, rhs) in lhs.iter().zip(rhs.iter()) {
+        Num::conditionally_enforce_equal(cs, completed, lhs, rhs);
+    }
+
+    let num_nondeterministic_writes_equal = UInt32::equals(
+        cs,
+        &num_nondeterministic_writes,
+        &observable_input
+            .non_deterministic_bootloader_memory_snapshot_length,
+    );
+    num_nondeterministic_writes_equal.conditionally_enforce_true(cs, completed);
+
+    structured_input.hidden_fsm_output.previous_sorting_key = previous_sorting_key;
+    structured_input.hidden_fsm_output.previous_full_key = previous_full_key;
+    structured_input.hidden_fsm_output.previous_value = previous_value;
+    structured_input.hidden_fsm_output.previous_is_ptr = previous_is_ptr;
+
+    structured_input.hidden_fsm_output.lhs_accumulator = lhs;
+    structured_input.hidden_fsm_output.rhs_accumulator = rhs;
+
+    structured_input
+        .hidden_fsm_output
+        .num_nondeterministic_writes = num_nondeterministic_writes;
+
+    structured_input
+        .hidden_fsm_output
+        .current_unsorted_queue_state = QueueState {
+            head: unsorted_queue.head,
+            tail: QueueTailState{
+                tail: unsorted_queue.tail,
+                length: unsorted_queue.length,
+            }
+        };
+
+    structured_input
+        .hidden_fsm_output
+        .current_sorted_queue_state = QueueState {
+            head: sorted_queue.head,
+            tail: QueueTailState{
+                tail: sorted_queue.tail,
+                length: sorted_queue.length,
+            }
+        };
+
+    structured_input.completion_flag = completed;
+
+    let compact_form =
+        ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
+
+    let input_commitment = commit_variable_length_encodable_item(cs, &compact_form, round_function);
+    for el in input_commitment.iter() {
+        let gate = PublicInputGate::new(el.get_variable());
+        gate.add_to_cs(cs);
+    }
+
+    input_commitment
+}
+
+pub fn partial_accumulate_inner<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+>(
+    cs: &mut CS,
+    unsorted_queue: &mut MemoryQueriesQueue<F, R>,
+    sorted_queue: &mut MemoryQueriesQueue<F, R>,
+    fs_challenges: &[[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+    is_start: Boolean<F>,
+    lhs: &mut [Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+    rhs: &mut [Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+    previous_sorting_key: &mut [UInt32<F>; RAM_SORTING_KEY_LENGTH],
+    previous_comparison_key: &mut [UInt32<F>; RAM_FULL_KEY_LENGTH],
+    previous_element_value: &mut UInt256<F>,
+    previous_is_ptr: &mut Boolean<F>,
+    num_nondeterministic_writes: &mut UInt32<F>,
+    limit: usize,
+)
+where
+    [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
+    let not_start = is_start.negated(cs);
+    Num::enforce_equal(cs, &unsorted_queue.length.into_num(), &sorted_queue.length.into_num());
+
+    for _cycle in 0..limit {
+        let can_pop = unsorted_queue.length.is_zero(cs);
+
+        // we do not need any information about unsorted element other than it's encoding
+        let (_, unsorted_item_encoding) =
+            unsorted_queue.pop_front(cs, can_pop);
+        // let unsorted_item_encoding = unsorted_queue.pop_first_encoding_only(cs, &can_pop, round_function)?;
+        let (sorted_item, sorted_item_encoding) =
+            sorted_queue.pop_front(cs, can_pop);
+
+        {
+            let ts_is_zero = sorted_item.timestamp.is_zero(cs);
+            let bootloader_heap_page = UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE);
+
+            let page_is_bootloader_heap = UInt32::equals(
+                cs,
+                &sorted_item.memory_page,
+                &bootloader_heap_page,
+            );
+
+            let is_write = sorted_item.rw_flag;
+            let is_ptr = sorted_item.is_ptr;
+            let not_ptr = is_ptr.negated(cs);
+
+            let is_nondeterministic_write = Boolean::multi_and(
+                cs,
+                &[
+                    can_pop,
+                    ts_is_zero,
+                    page_is_bootloader_heap,
+                    is_write,
+                    not_ptr,
+                ],
+            );
+
+            let num_nondeterministic_writes_incremented = unsafe {
+                UInt32::increment_unchecked(&num_nondeterministic_writes, cs)
+            };
+
+            *num_nondeterministic_writes = UInt32::conditionally_select(
+                cs, 
+                is_nondeterministic_write, 
+                &num_nondeterministic_writes_incremented, 
+                &num_nondeterministic_writes
+            );
+        }
+        {
+            // either continue the argument or do nothing
+
+            let sorting_key = [sorted_item.timestamp, sorted_item.index, sorted_item.memory_page];
+            let comparison_key = [sorted_item.index, sorted_item.memory_page];
+
+            // ensure sorting
+            let (keys_are_equal, previous_key_is_greater) = le_long_comparison(
+                cs,
+                &sorting_key,
+                previous_sorting_key
+            );
+
+            // keys_are_in_ascending_order = !previous_key_is_greater and !keys_are_equal
+            let keys_are_in_ascending_order = {
+                let keys_are_not_in_ascending_order = keys_are_equal.or(cs, previous_key_is_greater);
+                keys_are_not_in_ascending_order.negated(cs)
+            };
+
+            if _cycle != 0 {
+                keys_are_in_ascending_order.conditionally_enforce_true(cs, can_pop);
+            } else {
+                let should_enforce = can_pop.and(cs, not_start);
+                keys_are_in_ascending_order.conditionally_enforce_true(cs, should_enforce);
+            }
+
+            let same_memory_cell = long_equals(cs, &comparison_key, previous_comparison_key);
+            let value_equal = long_equals(cs, &sorted_item.value.inner, &previous_element_value.inner);
+
+            let not_same_cell = same_memory_cell.negated(cs);
+            let rw_flag = sorted_item.rw_flag;
+            let not_rw_flag = rw_flag.negated(cs);
+
+            // check uninit read
+            let uint256_zero = UInt256::zero(cs);
+            let value_is_zero = long_equals(cs, &sorted_item.value.inner, &uint256_zero.inner);
+            let is_ptr = sorted_item.is_ptr;
+            let not_ptr = is_ptr.negated(cs);
+            let is_zero = value_is_zero.and(cs, not_ptr);
+            let ptr_equality = Num::equals(cs, &previous_is_ptr.into_num(), &is_ptr.into_num());
+            let value_and_ptr_equal = value_equal.and(cs, ptr_equality);
+
+
+            // we only have a difference in these flags at the first step
+            if _cycle != 0 {
+                let read_uninitialized = not_same_cell.and(cs, not_rw_flag);
+                is_zero.conditionally_enforce_true(cs, read_uninitialized);
+
+                // check standard RW validity
+                let check_equality = same_memory_cell.and(cs, not_rw_flag);
+                value_and_ptr_equal.conditionally_enforce_true(cs, check_equality);
+            } else {
+                // see if we continue the argument then all our checks should be valid,
+                // otherwise only read uninit should be enforced
+
+                // if we start a fresh argument then our comparison
+                let read_uninitialized_if_continue =
+                    Boolean::multi_and(cs, &[not_start, value_equal, not_rw_flag]);
+                let read_uninit_if_at_the_start = is_start.and(cs, not_rw_flag);
+                let should_enforce = read_uninitialized_if_continue.or(cs, read_uninit_if_at_the_start);
+                is_zero.conditionally_enforce_true(cs, should_enforce);
+
+                // check standard RW validity, but it can break if we are at the very start
+                let check_equality =
+                    Boolean::multi_and(cs, &[same_memory_cell, not_rw_flag, not_start]);
+                value_and_ptr_equal.conditionally_enforce_true(cs, check_equality);
+            }
+
+            *previous_sorting_key = sorting_key;
+            *previous_comparison_key = comparison_key;
+            *previous_element_value = sorted_item.value;
+            *previous_is_ptr = sorted_item.is_ptr;
+        }
+
+        // if we did pop then accumulate
+        for ((challenges, lhs), rhs) in fs_challenges
+            .iter()
+            .zip(lhs.iter_mut())
+            .zip(rhs.iter_mut())
+        {
+            let mut lhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
+            let mut rhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
+
+            for ((unsorted_contribution, sorted_contribution), challenge) in unsorted_item_encoding
+                .iter()
+                .zip(sorted_item_encoding.iter())
+                .zip(challenges.iter())
+            {
+                let l = Num::from_variable(*unsorted_contribution).mul(cs, challenge);
+                lhs_contribution = lhs_contribution.add(cs, &l);
+                let r = Num::from_variable(*sorted_contribution).mul(cs, challenge);
+                rhs_contribution = rhs_contribution.add(cs, &r);
+            }
+
+            let new_lhs = lhs.mul(cs, &lhs_contribution);
+            let new_rhs = rhs.mul(cs, &rhs_contribution);
+
+            *lhs = Num::conditionally_select(cs, can_pop, &new_lhs, &lhs);
+            *rhs = Num::conditionally_select(cs, can_pop, &new_rhs, &rhs);
+        }
+    }
+}
+
+use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
+fn generate_challenges<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>
+>(
+    cs: &mut CS,
+    unsorted_queue_initial_state: &QueueTailState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+    sorted_queue_initial_state: &QueueTailState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+) -> [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARGUMENT_CHALLENGES] {
+    let mut fs_input = vec![];
+    fs_input.extend_from_slice(&unsorted_queue_initial_state.tail);
+    // length must be original of the full queue
+    fs_input.push(
+        unsorted_queue_initial_state
+            .length
+            .into_num()
+    );
+    fs_input.extend_from_slice(&sorted_queue_initial_state.tail);
+    fs_input.push(
+        sorted_queue_initial_state
+            .length
+            .into_num()
+    );
+
+    // Absorb fs_input
+    let total_elements_to_absorb = 2 * (FULL_SPONGE_QUEUE_STATE_WIDTH + 1);
+    let num_rounds = (total_elements_to_absorb + 12 - 1) / 12;
+    let mut elements_source = fs_input
+        .into_iter();
+
+    let zero_element = Num::zero(cs);
+
+    let mut capacity_elements = [zero_element; 4];
+
+    let mut sponge_state = [zero_element; 12];
+
+    for _ in 0..num_rounds {
+        let mut to_absorb = [zero_element; 8];
+        for (dst, src) in to_absorb.iter_mut().zip(&mut elements_source) {
+            *dst = src;
+        }
+
+        let result_state = R::absorb_with_replacement_over_nums(
+            cs, 
+            to_absorb, 
+            capacity_elements
+        );
+        capacity_elements.copy_from_slice(&result_state[8..]);
+        sponge_state = result_state;
+    }
+    
+    let mut taken = 0; // up to absorbtion length
+    let mut fs_challenges = vec![];
+    let total_challenges_num = (MEMORY_QUERY_PACKED_WIDTH + 1) * NUM_PERMUTATION_ARGUMENT_CHALLENGES;
+    for _ in 0..total_challenges_num {
+        if taken == 8 {
+            // run round
+            sponge_state = R::compute_round_function_over_nums(cs, sponge_state);
+            taken = 0;
+        }
+
+        let challenge = sponge_state[taken];
+        fs_challenges.push(challenge);
+
+        taken += 1;
+    }
+
+    let mut result = [[zero_element; MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARGUMENT_CHALLENGES];
+
+    for (src, dst) in fs_challenges
+        .chunks(MEMORY_QUERY_PACKED_WIDTH + 1)
+        .zip(result.iter_mut()) {
+            dst.copy_from_slice(src);
+        }
+
+    result
+}
+
+fn le_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    a: &[UInt32<F>],
+    b: &[UInt32<F>]
+) -> (Boolean<F>, Boolean<F>) {
+    assert_eq!(a.len(), b.len());
+    let mut second_is_greater = Boolean::allocated_constant(cs, false);
+    let mut equal = Boolean::allocated_constant(cs, true);
+
+    for (a, b) in a
+        .iter()
+        .zip(b.iter())
+    {
+        let (diff, borrow, _) = (*a).overflowing_sub_with_borrow_in(cs, *b, second_is_greater);
+        let this_equal = diff.is_zero(cs);
+        equal = equal.and(cs, this_equal);
+        second_is_greater = borrow;
+    }
+
+    (equal, second_is_greater)
+}
+
+fn long_equals<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    a: &[UInt32<F>],
+    b: &[UInt32<F>]
+) -> Boolean<F> {
+    assert_eq!(a.len(), b.len());
+    let mut equal = Boolean::allocated_constant(cs, true);
+
+    for (a, b) in a
+        .iter()
+        .zip(b.iter())
+    {
+        let this_equal = UInt32::equals(cs, a, b);
+        equal = equal.and(cs, this_equal);
+    }
+
+    equal
+}

@@ -12,7 +12,7 @@ use boojum::cs::Place;
 use boojum::cs::Variable;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
-use boojum::gadgets::traits::encodable::CircuitEncodable;
+use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitEncodableExt};
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::castable::WitnessCastable;
@@ -211,6 +211,9 @@ impl<F: SmallField> CircuitEncodable<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQue
         [v0, v1, v2, v3, v4, v5, v6, v7]
     }
 }
+
+impl<F: SmallField> CircuitEncodableExt<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQuery<F> {}
+
 
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug, Hash)]
