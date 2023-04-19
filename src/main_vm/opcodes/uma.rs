@@ -809,7 +809,11 @@ pub(crate) fn apply_uma<
     // pay for growth
     diffs_accumulator.new_ergs_left_candidates.push((should_apply, ergs_left_after_growth));
     // update sponges and queue states
-    diffs_accumulator.sponge_candidates_to_run.push((apply_any, sponge_candidates_after_writes));
+
+    assert!(UMA_HEAP_READ_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
+    assert!(UMA_HEAP_READ_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
+
+    diffs_accumulator.sponge_candidates_to_run.push((false, false, apply_any, sponge_candidates_after_writes));
     diffs_accumulator.memory_queue_candidates.push((should_apply, new_memory_queue_length_after_writes, new_memory_queue_tail_after_writes));
 }
 

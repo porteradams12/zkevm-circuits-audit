@@ -370,9 +370,25 @@ pub(crate) fn apply_calls_and_ret<
 
     // add everything to state diffs
 
+    // we should check that opcode can not use src0/dst0 in memory
+    const FAR_CALL_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::FarCall(zkevm_opcode_defs::FarCallOpcode::Normal);
+    const NEAR_CALL_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::NearCall(zkevm_opcode_defs::NearCallOpcode);
+    const RET_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::Ret(zkevm_opcode_defs::RetOpcode::Ok);
+
+    assert!(FAR_CALL_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
+    assert!(NEAR_CALL_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
+    assert!(RET_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
+
+    assert!(FAR_CALL_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
+    assert!(NEAR_CALL_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
+    assert!(RET_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
+
     diffs_accumulator
         .sponge_candidates_to_run
-        .push((apply_any, common_relations_buffer));
+        .push((false, false, apply_any, common_relations_buffer));
     diffs_accumulator.flags.push((apply_any, new_flags));
 
     // each opcode may have different register updates

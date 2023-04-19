@@ -1,4 +1,4 @@
-use boojum::cs::{gates::reduction_by_powers_gate, traits::cs::DstBuffer};
+use boojum::cs::{traits::cs::DstBuffer};
 use boojum::config::*;
 use crate::base_structures::{register::VMRegister, vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH};
 
@@ -9,7 +9,6 @@ use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use crate::base_structures::vm_state::QUEUE_STATE_WIDTH;
-use boojum::gadgets::traits::allocatable::CSAllocatable;
 
 use arrayvec::ArrayVec;
 

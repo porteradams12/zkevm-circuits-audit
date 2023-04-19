@@ -1,7 +1,6 @@
 use zkevm_opcode_defs::system_params::STORAGE_AUX_BYTE;
 
 use boojum::{
-    cs::gates::reduction_by_powers_gate,
     gadgets::{u160::UInt160, u256::UInt256},
     
 };
@@ -27,7 +26,6 @@ use boojum::cs::traits::cs::DstBuffer;
 use crate::base_structures::decommit_query::DecommitQuery;
 use crate::base_structures::decommit_query::DecommitQueryWitness;
 use crate::main_vm::opcodes::call_ret_impl::far_call::log_query::LogQueryWitness;
-use boojum::gadgets::traits::allocatable::CSAllocatable;
 
 pub(crate) struct FarCallData<F: SmallField> {
     pub(crate) apply_far_call: Boolean<F>,

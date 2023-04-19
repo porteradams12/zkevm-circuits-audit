@@ -82,7 +82,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
     ];
 
     let [
-        initial_log_queue_state_from_fsm,
+        _initial_log_queue_state_from_fsm,
         storage_access_queue_state_from_fsm,
         events_access_queue_state_from_fsm,
         l1messages_access_queue_state_from_fsm,
@@ -98,7 +98,6 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
         )
     });
 
-    let initial_log_queue_state_from_fsm = initial_log_queue_state_from_fsm;
     let storage_access_queue_state_from_fsm = storage_access_queue_state_from_fsm;
     let events_access_queue_state_from_fsm = events_access_queue_state_from_fsm;
     let l1messages_access_queue_state_from_fsm = l1messages_access_queue_state_from_fsm;
