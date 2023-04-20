@@ -112,6 +112,9 @@ pub type StorageDeduplicatorInputOutputWitness<F> = crate::fsm_input_output::Clo
     StorageDeduplicatorOutputData<F>,
 >;
 
+#[derive(Derivative, serde::Serialize, serde::Deserialize)]
+#[derivative(Clone, Debug)]
+#[serde(bound = "")]
 pub struct StorageDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: StorageDeduplicatorInputOutputWitness<F>,
     pub unsorted_queue_witness: CircuitQueueWitness<F, LogQuery<F>, 5, LOG_QUERY_PACKED_WIDTH>,
