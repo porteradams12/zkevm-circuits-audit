@@ -55,7 +55,6 @@ pub(crate) struct FarCallData<F: SmallField> {
 pub(crate) struct FarCallPartialABI<F: SmallField> {
     pub(crate) ergs_passed: UInt32<F>,
     pub(crate) shard_id: UInt8<F>,
-    pub(crate) forwarding_mode_byte: UInt8<F>,
     pub(crate) constructor_call: Boolean<F>,
     pub(crate) system_call: Boolean<F>,
 }
@@ -71,15 +70,13 @@ impl<F: SmallField> FarCallPartialABI<F> {
         let ergs_passed = input.u32x8_view[6];
 
         // higher parts of highest 64 bits
-        let shard_id = input.u8x32_view[28];
-        let forwarding_mode_byte = input.u8x32_view[29];
-        let constructor_call = input.u8x32_view[30].is_zero(cs).negated(cs);
-        let system_call = input.u8x32_view[31].is_zero(cs).negated(cs);
+        let shard_id = input.u8x32_view[zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_SHARD_ID_BYTE_IDX];
+        let constructor_call = input.u8x32_view[zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_CONSTRUCTOR_CALL_BYTE_IDX].is_zero(cs).negated(cs);
+        let system_call = input.u8x32_view[zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_SYSTEM_CALL_BYTE_IDX].is_zero(cs).negated(cs);
 
         let new = Self {
             ergs_passed,
             shard_id,
-            forwarding_mode_byte,
             constructor_call,
             system_call,
         };
@@ -100,7 +97,7 @@ pub(crate) struct CommonCallRetABI<F: SmallField> {
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug)]
 
-pub(crate) struct FarCallForwardingMode<F: SmallField> {
+pub(crate) struct CallRetForwardingMode<F: SmallField> {
     pub(crate) use_heap: Boolean<F>,
     pub(crate) use_aux_heap: Boolean<F>,
     pub(crate) forward_fat_pointer: Boolean<F>,
@@ -141,7 +138,6 @@ impl<F: SmallField> Selectable<F> for FatPtrInABI<F> {
 #[derivative(Clone, Copy, Debug)]
 pub(crate) struct PtrValidationData<F: SmallField> {
     pub(crate) generally_invalid: Boolean<F>, // common invariants
-    pub(crate) offset_is_non_zero: Boolean<F>,
     pub(crate) is_non_addressable: Boolean<F>,
 }
 
@@ -149,6 +145,7 @@ impl<F: SmallField> FatPtrInABI<F> {
     pub(crate) fn parse_and_validate<CS: ConstraintSystem<F>>(
         cs: &mut CS,
         input: &RegisterInputView<F>,
+        as_fresh: Boolean<F>,
     ) -> (Self, UInt32<F>, PtrValidationData<F>) {
         // we can never address a range [2^32 - 32..2^32] this way, but we don't care because
         // it's impossible to pay for such memory growth
@@ -159,23 +156,22 @@ impl<F: SmallField> FatPtrInABI<F> {
 
         let offset_is_zero = offset.is_zero(cs);
         let offset_is_non_zero = offset_is_zero.negated(cs);
-        let length_is_zero = length.is_zero(cs);
 
-        let (end_non_inclusive, of, _) = start.overflowing_add(cs, length);
+        let non_zero_offset_if_should_be_fresh = Boolean::multi_and(cs, &[offset_is_non_zero, as_fresh]);
+
+        let (end_non_inclusive, out_of_bounds, _) = start.overflowing_add(cs, length);
 
         // check that we do not have overflows in addressable range
-        let is_addresable = of.negated(cs);
+        let is_addresable = out_of_bounds.negated(cs);
 
-        // offset < length
-        let (_, uf, _) = offset.overflowing_sub(cs, length);
-        // or it's empty pointer with 0 length and 0 offset
-        let is_trivial = Boolean::multi_and(cs, &[offset_is_zero, length_is_zero]);
-        let is_in_bounds = Boolean::multi_or(cs, &[uf, is_trivial]);
+        // offset <= length, that captures the empty slice (0, 0)
+        let (_, uf, _) = length.overflowing_sub(cs, offset);
+        let is_in_bounds = uf.negated(cs);
 
         let is_out_of_bounds = is_in_bounds.negated(cs);
         let is_non_addressable = is_addresable.negated(cs);
 
-        let ptr_is_invalid = Boolean::multi_or(cs, &[of, is_out_of_bounds, is_non_addressable]);
+        let ptr_is_invalid = Boolean::multi_or(cs, &[non_zero_offset_if_should_be_fresh, out_of_bounds, is_out_of_bounds, is_non_addressable]);
 
         let offset = offset.mask_negated(cs, ptr_is_invalid);
         let page = page.mask_negated(cs, ptr_is_invalid);
@@ -192,7 +188,6 @@ impl<F: SmallField> FatPtrInABI<F> {
         let validation_data = PtrValidationData {
             generally_invalid: ptr_is_invalid,
             is_non_addressable,
-            offset_is_non_zero,
         };
 
         (new, end_non_inclusive, validation_data)
@@ -275,7 +270,7 @@ pub(crate) fn callstack_candidate_for_far_call<
     global_context: &GlobalContext<F>,
     common_abi_parts: &CommonCallRetABI<F>,
     far_call_abi: &FarCallPartialABI<F>,
-    forwarding_data: &FarCallForwardingMode<F>,
+    forwarding_data: &CallRetForwardingMode<F>,
     round_function: &R,
 ) -> FarCallData<F>
 where
@@ -329,6 +324,9 @@ where
 
     // we need a completely fresh one
     let mut new_callstack_entry = ExecutionContextRecord::uninitialized(cs);
+    // apply memory stipends right away
+    new_callstack_entry.heap_upper_bound = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::NEW_FRAME_MEMORY_STIPEND);
+    new_callstack_entry.aux_heap_upper_bound = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::NEW_FRAME_MEMORY_STIPEND);
 
     // now also create target for mimic
     let implicit_mimic_call_reg = draft_vm_state.registers
@@ -500,6 +498,7 @@ where
     let unknown_marker =
         Boolean::multi_or(cs, &[is_normal_call_marker, is_constructor_call_marker]).negated(cs);
 
+    // NOTE: if bytecode hash is trivial then it's 0, so version byte is not valid!
     let code_format_exception = Boolean::multi_or(cs, &[versioned_byte_is_invalid, unknown_marker]);
 
     // we do not remask right away yet
@@ -512,16 +511,6 @@ where
         &[is_constructor_call_marker, far_call_abi.constructor_call],
     );
     let can_call_code = Boolean::multi_or(cs, &[can_call_normally, can_call_constructor]);
-
-    // we also tentatively recompose bytecode hash in it's "storage" format
-
-    let mut code_hash_length_in_words = UInt16::from_le_bytes(
-        cs,
-        [
-            bytecode_hash_upper_decomposition[0],
-            bytecode_hash_upper_decomposition[1],
-        ],
-    );
 
     let marker_byte_masked = UInt8::allocated_constant(
         cs,
@@ -559,12 +548,28 @@ where
 
     // at the end of the day all our exceptions will lead to memory page being 0
 
+    let masked_bytecode_hash_upper_decomposition = masked_bytecode_hash.inner[3].decompose_into_bytes(cs);
+
+    let mut code_hash_length_in_words = UInt16::from_le_bytes(
+        cs,
+        [
+            masked_bytecode_hash_upper_decomposition[0],
+            masked_bytecode_hash_upper_decomposition[1],
+        ],
+    );
     code_hash_length_in_words = code_hash_length_in_words.mask_negated(cs, code_format_exception);
+
+    // if we call now-in-construction system contract, then we formally mask into 0 (even though it's not needed),
+    // and we should put an exception here
+
+    let can_not_call_code = can_call_code.negated(cs);
+    let call_now_in_construction_kernel = Boolean::multi_and(cs, &[can_not_call_code, target_is_kernel]);
 
     // exceptions, along with `bytecode_hash_is_trivial` indicate whether we will or will decommit code
     // into memory, or will just use UNMAPPED_PAGE
-    let mut exceptions = ArrayVec::<Boolean<F>, 3>::new();
+    let mut exceptions = ArrayVec::<Boolean<F>, 4>::new();
     exceptions.push(code_format_exception);
+    exceptions.push(call_now_in_construction_kernel);
 
     // resolve passed ergs, passed calldata page, etc
 
@@ -577,20 +582,13 @@ where
 
     let do_not_forward_ptr = forward_fat_pointer.negated(cs);
 
-    let non_zero_offset_if_not_forwarding = Boolean::multi_and(
-        cs,
-        &[
-            do_not_forward_ptr,
-            common_abi_parts.ptr_validation_data.offset_is_non_zero,
-        ],
-    );
-
-    exceptions.push(non_zero_offset_if_not_forwarding);
-
     let exceptions_collapsed = Boolean::multi_or(cs, &exceptions);
 
     let fat_ptr = common_abi_parts.fat_ptr;
     let upper_bound = common_abi_parts.upper_bound;
+    // first mask to 0 if exceptions happened
+    let upper_bound = upper_bound.mask_negated(cs, exceptions_collapsed);
+    // then compute to penalize for out of memory access attemp
     let memory_region_is_not_addressable = common_abi_parts.ptr_validation_data.is_non_addressable;
 
     let fat_ptr = fat_ptr.mask_into_empty(cs, exceptions_collapsed);
@@ -654,7 +652,7 @@ where
         .preliminary_ergs_left
         .overflowing_sub(cs, growth_cost);
 
-    let mut exceptions = ArrayVec::<Boolean<F>, 4>::new();
+    let mut exceptions = ArrayVec::<Boolean<F>, 5>::new();
     exceptions.push(exceptions_collapsed);
 
     let ergs_left_after_growth = ergs_left_after_growth.mask_negated(cs, uf); // if not enough - set to 0
@@ -674,6 +672,30 @@ where
         &current_callstack_entry.aux_heap_upper_bound,
     );
 
+    // now any extra cost
+    let callee_stipend = {
+        let is_msg_value_simulator_address_low = UInt32::allocated_constant(cs, zkevm_opcode_defs::ADDRESS_MSG_VALUE as u32);
+        let target_low_is_msg_value_simulator = UInt32::equals(cs, &destination_address.inner[0], &is_msg_value_simulator_address_low);
+        // we know that that msg.value simulator is kernel, so we test equality of low address segment and test for kernel
+        let target_is_msg_value = Boolean::multi_and(cs, &[target_is_kernel, target_low_is_msg_value_simulator]);
+        let is_system_abi = far_call_abi.system_call;
+        let require_extra = Boolean::multi_and(cs, &[target_is_msg_value, is_system_abi]);
+
+        let additive_cost = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_ADDITIVE_COST);
+        let max_pubdata_bytes = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_PUBDATA_BYTES_TO_PREPAY);
+        
+        let (pubdata_cost, _) = max_pubdata_bytes.non_widening_mul(cs, &draft_vm_state.ergs_per_pubdata_byte);
+        let (cost, _) = pubdata_cost.add_no_overflow(cs, additive_cost);
+
+        cost.mask(cs, require_extra)
+    };
+
+    let (ergs_left_after_extra_costs, uf, _) = ergs_left_after_growth
+        .overflowing_sub(cs, callee_stipend);
+    let ergs_left_after_extra_costs = ergs_left_after_extra_costs.mask_negated(cs, uf); // if not enough - set to 0
+    let callee_stipend = callee_stipend.mask_negated(cs, uf); // also set to 0 if we were not able to take it
+    exceptions.push(uf);
+
     // now we can indeed decommit
 
     let exception = Boolean::multi_or(cs, &exceptions);
@@ -683,6 +705,7 @@ where
     let target_code_memory_page = target_code_memory_page.mask(cs, should_decommit);
 
     let (
+        not_enough_ergs_to_decommit,
         code_memory_page,
         (new_decommittment_queue_tail, new_decommittment_queue_len),
         ergs_remaining_after_decommit,
@@ -690,7 +713,7 @@ where
         cs,
         &mut all_pending_sponges,
         &should_decommit,
-        &ergs_left_after_growth,
+        &ergs_left_after_extra_costs,
         &masked_bytecode_hash,
         &code_hash_length_in_words,
         &draft_vm_state.code_decommittment_queue_state,
@@ -700,6 +723,8 @@ where
         witness_oracle,
         round_function,
     );
+
+    let exception = Boolean::multi_or(cs, &[exception, not_enough_ergs_to_decommit]);
 
     // on call-like path we continue the forward queue, but have to allocate the rollback queue state from witness
     let call_timestamp = draft_vm_state.timestamp;
@@ -762,6 +787,7 @@ where
 
     let remaining_ergs_if_pass = remaining_for_this_context;
     let passed_ergs_if_pass = ergs_to_pass;
+    let (passed_ergs_if_pass, _) = passed_ergs_if_pass.add_no_overflow(cs, callee_stipend);
 
     current_callstack_entry.ergs_remaining = remaining_ergs_if_pass;
 
@@ -1292,6 +1318,7 @@ pub fn add_to_decommittment_queue<
     witness_oracle: &SynchronizedWitnessOracle<F, W>,
     _round_function: &R,
 ) -> (
+    Boolean<F>,
     UInt32<F>,
     ([Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH], UInt32<F>),
     UInt32<F>,
@@ -1312,6 +1339,7 @@ where
     let (ergs_after_decommit_may_be, uf, _) =
         ergs_remaining.overflowing_sub(cs, cost_of_decommittment);
 
+    let not_enough_ergs_to_decommit = uf;
     let have_enough_ergs_to_decommit = uf.negated(cs);
     let should_decommit = Boolean::multi_and(cs, &[*should_decommit, have_enough_ergs_to_decommit]);
 
@@ -1437,6 +1465,7 @@ where
         UInt32::conditionally_select(cs, should_decommit, &target_memory_page, &unmapped_page);
 
     (
+        not_enough_ergs_to_decommit,
         target_memory_page,
         (new_decommittment_queue_tail, new_decommittment_queue_len),
         ergs_remaining_after_decommit,

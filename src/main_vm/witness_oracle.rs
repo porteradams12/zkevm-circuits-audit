@@ -64,6 +64,13 @@ pub trait WitnessOracle<F: SmallField>:
     fn get_rollback_queue_witness(&mut self, key: &LogQueryWitness<F>, execute: bool) -> [F; 4];
     fn get_rollback_queue_tail_witness_for_call(&mut self, timestamp: u32, execute: bool)
         -> [F; 4];
+    fn report_new_callstack_frame(
+        &mut self,
+        new_record: &ExecutionContextRecordWitness<F>,
+        new_depth: u32,
+        is_call: bool,
+        execute: bool,
+    );
     fn push_callstack_witness(
         &mut self,
         current_record: &ExecutionContextRecordWitness<F>,
@@ -124,6 +131,15 @@ impl<F: SmallField> WitnessOracle<F> for DummyOracle<F> {
         _timestamp: u32,
         _execute: bool,
     ) -> [F; 4] {
+        todo!()
+    }
+    fn report_new_callstack_frame(
+        &mut self,
+        _current_record: &ExecutionContextRecordWitness<F>,
+        _new_depth: u32,
+        _is_call: bool,
+        _execute: bool,
+    ) {
         todo!()
     }
     fn push_callstack_witness(
