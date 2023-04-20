@@ -77,20 +77,25 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
         original_encoding: &[Num<F>; 5],
         timestamp: &UInt32<F>,
     ) -> [Num<F>; 5] {
-        let mut lc = LinearCombination::zero();
-        lc.add_assign_number_with_coeff(&original_encoding[EXTENDED_TIMESTAMP_ENCODING_ELEMENT], 1);
+        let mut inputs = Vec::with_capacity(2);
+        inputs.push((
+            &original_encoding[EXTENDED_TIMESTAMP_ENCODING_ELEMENT],
+            F::one(),
+        ));
         let shift = {
-            let mut shift = 0;
+            let mut shift = F::zero();
             for _ in 0..EXTENDED_TIMESTAMP_ENCODING_OFFSET {
                 shift.double();
             }
         };
 
-        lc.add_assign_number_with_coeff(&timestamp.inner, shift);
-        assert!(EXTENDED_TIMESTAMP_ENCODING_OFFSET + 32 <= E::Fr::CAPACITY as usize);
+        inputs.push(&timestamp.inner, shift);
+        // TODO: what to sub this with
+        // assert!(EXTENDED_TIMESTAMP_ENCODING_OFFSET + 32 <= E::Fr::CAPACITY as usize);
 
         let mut result = *original_encoding;
-        result[EXTENDED_TIMESTAMP_ENCODING_ELEMENT] = lc.into_num(cs)?;
+        result[EXTENDED_TIMESTAMP_ENCODING_ELEMENT] =
+            linear_combination_collapse(cs, inputs, None)?;
 
         Ok(result)
     }
