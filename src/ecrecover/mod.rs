@@ -392,10 +392,26 @@ fn ecrecover_precompile_inner_routine<
     // so we check that all s, r, hash are not zero (as FieldElements):
     // if any of them is zero we reject the signature and in circuit itself replace all zero variables by ones
 
+    let mut recovered_point = (x, y);
+    let mut generator_point = (gen_x, gen_y);
+
     // now we do multiexponentiation
     let mut q = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
     for (x_bit, hash_bit) in s_by_r_inv_normalized_lsb_bits.into_iter().zip(message_hash_by_r_inv_lsb_bits.into_iter()) {
-        todo!();
+        let q_plus_x = q.add_mixed(cs, &mut recovered_point);
+        let mut q = Selectable::conditionally_select(
+            cs,
+            x_bit,
+            &q_plus_x,
+            &q
+        );
+        let q_plux_gen = q.add_mixed(cs, &mut generator_point);
+        let mut q = Selectable::conditionally_select(
+            cs,
+            hash_bit,
+            &q_plux_gen,
+            &q
+        );
 
         q = q.double(cs);
     }
@@ -422,11 +438,10 @@ fn ecrecover_precompile_inner_routine<
 
     
     let mut digest_bytes = keccak256(cs, &bytes_to_hash);
-
     // digest is 32 bytes, but we need only 20 to recover address
     digest_bytes[0..12].copy_from_slice(&[zero_u8; 12]); // empty out top bytes
-    let written_value_unmasked: UInt256<F> = todo!();
-    // let written_value_unmasked = UInt256::from_be_bytes(cs, &digest_bytes);
+    digest_bytes.reverse();
+    let written_value_unmasked = UInt256::from_le_bytes(cs, digest_bytes);
 
     let written_value = written_value_unmasked.mask_negated(cs, any_exception);
     let all_ok = any_exception.negated(cs);
