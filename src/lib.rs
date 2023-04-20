@@ -11,6 +11,9 @@ pub mod tables;
 pub mod fsm_input_output;
 pub mod demux_log_queue;
 pub mod storage_application;
+pub mod ecrecover;
+
+use boojum::pairing::ff;
 
 pub const fn bit_width_to_bitmask(width: usize) -> u64 {
     (1u64 << width) - 1

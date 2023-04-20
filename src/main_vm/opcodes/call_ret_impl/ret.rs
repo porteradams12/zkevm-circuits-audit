@@ -120,7 +120,7 @@ where
             cs.set_values_with_dependencies_vararg(
                 &dependencies,
                 &outputs_to_set,
-                move |inputs: &[F], buffer: &mut DstBuffer<'_, F>| {
+                move |inputs: &[F], buffer: &mut DstBuffer<'_, '_, F>| {
                     let callstack_depth = inputs[0].as_u64() as u32;
 
                     let execute = inputs[1].as_u64();

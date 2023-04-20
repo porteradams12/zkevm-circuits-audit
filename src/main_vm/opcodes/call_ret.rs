@@ -383,7 +383,7 @@ pub(crate) fn apply_calls_and_ret<
     cs.set_values_with_dependencies_vararg(
         &dependencies,
         &[],
-        move |inputs: &[F], _buffer: &mut DstBuffer<'_, F>| {
+        move |inputs: &[F], _buffer: &mut DstBuffer<'_, '_, F>| {
             let execute = inputs[0].as_u64();
             let execute = u64_as_bool(execute);
 
@@ -404,7 +404,7 @@ pub(crate) fn apply_calls_and_ret<
             drop(guard);
         },
     );
-    
+
     // add everything to state diffs
 
     // we should check that opcode can not use src0/dst0 in memory

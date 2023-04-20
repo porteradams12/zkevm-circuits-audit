@@ -63,7 +63,7 @@ impl<F: SmallField> CSAllocatableExt<F> for MemoryQuery<F> {
         ]
     }
 
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, F>) {
+    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
         todo!()
     }
 
@@ -234,7 +234,7 @@ impl<F: SmallField> MemoryValue<F> {
         let outputs = cs.alloc_multiple_variables_without_values::<9>();
 
         if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
-            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, F>| {
+            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, '_, F>| {
                 debug_assert!(F::CAPACITY_BITS >= 32);
                 let witness = (witness_closure)(inputs);
                 let chunks = decompose_u256_as_u32x8(witness.value);
@@ -272,7 +272,7 @@ impl<F: SmallField> MemoryValue<F> {
         let outputs = cs.alloc_multiple_variables_without_values::<8>();
 
         if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
-            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, F>| {
+            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, '_, F>| {
                 debug_assert!(F::CAPACITY_BITS >= 32);
                 let witness = (witness_closure)(inputs);
                 let chunks = decompose_u256_as_u32x8(witness.value);
