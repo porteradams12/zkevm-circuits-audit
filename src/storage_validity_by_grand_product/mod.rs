@@ -83,7 +83,7 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
             F::one(),
         ));
         let shift = {
-            let mut shift = F::zero();
+            let mut shift = F::one();
             for _ in 0..EXTENDED_TIMESTAMP_ENCODING_OFFSET {
                 shift.double();
             }
