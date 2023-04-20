@@ -94,7 +94,10 @@ pub type LogDemuxerInputOutputWitness<F> = crate::fsm_input_output::ClosedFormIn
         LogDemuxerOutputData<F>
     >;
 
+#[derive(Derivative, serde::Serialize, serde::Deserialize)]
+#[derivative(Clone, Debug)]
+#[serde(bound = "")]
 pub struct LogDemuxerCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: LogDemuxerInputOutputWitness<F>,
-    pub initial_queue_witness: CircuitQueueWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
+    pub initial_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
 }
