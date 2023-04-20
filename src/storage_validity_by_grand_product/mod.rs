@@ -13,6 +13,7 @@ use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
 use boojum::gadgets::{
     boolean::Boolean,
+    impls::lc::linear_combination_collapse,
     num::Num,
     poseidon::CircuitRoundFunction,
     queue::*,
@@ -582,19 +583,25 @@ pub fn sort_and_deduplicate_storage_access_inner<
 
         // accumulate into product
 
-        let mut lhs_contribution = Num::zero();
-        let mut rhs_contribution = Num::zero();
+        let mut lhs_lc = Vec::with_capacity(extended_original_encoding + 1);
+        let mut rhs_lc = Vec::with_capacity(extended_original_encoding + 1);
         for ((original_el, sorted_el), challenge) in extended_original_encoding
             .into_iter()
             .zip(sorted_encoding.into_iter())
             .zip(fs_challenges.iter())
         {
-            lhs_contribution += original_el.mul(cs, &challenge)?;
-            rhs_contribution += sorted_el.mul(cs, &challenge)?;
+            let lhs_contribution = original_el.mul(cs, &challenge)?;
+            let rhs_contribution = sorted_el.mul(cs, &challenge)?;
+
+            lhs_lc.push((&lhs_contribution, F::one()));
+            rhs_lc.push((&rhs_contribution, F::one()));
         }
 
-        lhs_contribution += additive_part;
-        rhs_contribution.add_assign_number_with_coeff(&additive_part, F::one());
+        lhs_lc.push((&additive_part, F::one()));
+        rhs_lc.push((&additive_part, F::one()));
+
+        let lhs_contribution = linear_combination_collapse(cs, lhs_lc, None);
+        let rhs_contribution = linear_combination_collapse(cs, rhs_lc, None);
 
         let lhs_candidate = lhs.mul(cs, &lhs_contribution)?;
         let rhs_candidate = rhs.mul(cs, &rhs_contribution)?;
