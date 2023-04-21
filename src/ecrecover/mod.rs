@@ -17,16 +17,31 @@ use boojum::gadgets::non_native_field::implementations::*;
 use ethereum_types::U256;
 use boojum::crypto_bigint::{U1024, Zero};
 use boojum::gadgets::num::Num;
-use std::sync::Arc;
+use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
+use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use std::collections::VecDeque;
+use std::sync::{Arc, RwLock};
 use boojum::pairing::{CurveAffine, GenericCurveProjective};
 use boojum::gadgets::u8::UInt8;
+use boojum::gadgets::queue::QueueState;
+use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
+use crate::base_structures::log_query::*;
+use crate::fsm_input_output::*;
+use boojum::gadgets::u160::UInt160;
+use crate::demux_log_queue::StorageLogQueue;
+use boojum::gadgets::queue::CircuitQueueWitness;
+use crate::base_structures::memory_query::*;
+use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
+
 
 pub mod input;
 pub use self::input::*;
 
 mod secp256k1;
 
-
+pub const MEMORY_QUERIES_PER_CALL: usize = 4;
 
 #[derive(
     Derivative,
@@ -80,10 +95,12 @@ use self::secp256k1::PointAffine as Secp256Affine;
 const NUM_WORDS: usize = 17;
 const SECP_B_COEF: u64 = 7;
 const EXCEPTION_FLAGS_ARR_LEN: usize = 8;
-const NUM_MEMORY_READS_PER_CYCLE: usize = 3;
+const NUM_MEMORY_READS_PER_CYCLE: usize = 4;
 const X_POWERS_ARR_LEN: usize = 256;
 const UNPADDED_KECCAK_INPUT_WORDS_LEN: usize = 8;
 const KECCAK_DIGEST_WORDS_SIZE: usize = 3;
+const VALID_Y_IN_EXTERNAL_FIELD: u64 = 4;
+const VALID_X_CUBED_IN_EXTERNAL_FIELD: u64 = 9;
 
 type Secp256BaseNNFieldParams = NonNativeFieldOverU16Params<Secp256Fq, 17>;
 type Secp256ScalarNNFieldParams = NonNativeFieldOverU16Params<Secp256Fr, 17>;
@@ -464,298 +481,262 @@ fn ecrecover_precompile_inner_routine<
     (all_ok, written_value)
 }
 
-// use crate::glue::aux_byte_markers::aux_byte_for_precompile_call;
+pub fn ecrecover_function_entry_point<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+>(
+    cs: &mut CS,
+    witness: EcrecoverCircuitInstanceWitness<F>,
+    round_function: &R,
+    limit: usize,
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
+where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]: 
+{
+    assert!(limit <= u32::MAX as usize);
 
-// pub fn ecrecover_function_entry_point<
-//     E: Engine,
-//     CS: ConstraintSystem<E>,
-//     R: CircuitArithmeticRoundFunction<E, 2, 3, StateElement = Num<E>>,
-// >(
-//     cs: &mut CS,
-//     witness: Option<EcrecoverCircuitInstanceWitness<E>>,
-//     round_function: &R,
-//     limit: usize,
-// ) -> Result<AllocatedNum<E>, SynthesisError> {
-//     use crate::bellman::plonk::better_better_cs::cs::LookupTableApplication;
-//     use crate::bellman::plonk::better_better_cs::data_structures::PolyIdentifier;
-//     use crate::vm::tables::BitwiseLogicTable;
-//     use crate::vm::VM_BITWISE_LOGICAL_OPS_TABLE_NAME;
+    let EcrecoverCircuitInstanceWitness {
+        closed_form_input,
+        requests_queue_witness,
+        memory_reads_witness,
+    } = witness;
 
-//     let columns3 = vec![
-//         PolyIdentifier::VariablesPolynomial(0),
-//         PolyIdentifier::VariablesPolynomial(1),
-//         PolyIdentifier::VariablesPolynomial(2),
-//     ];
+    let memory_reads_witness: VecDeque<_> = memory_reads_witness.into_iter().flatten().collect();
 
-//     if cs.get_table(VM_BITWISE_LOGICAL_OPS_TABLE_NAME).is_err() {
-//         let name = VM_BITWISE_LOGICAL_OPS_TABLE_NAME;
-//         let bitwise_logic_table = LookupTableApplication::new(
-//             name,
-//             BitwiseLogicTable::new(&name, 8),
-//             columns3.clone(),
-//             None,
-//             true,
-//         );
-//         cs.add_table(bitwise_logic_table)?;
-//     };
+    let precompile_address = UInt160::allocated_constant(cs, *zkevm_opcode_defs::system_params::ECRECOVER_INNER_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
+    let aux_byte_for_precompile = UInt8::allocated_constant(cs, PRECOMPILE_AUX_BYTE);
 
-//     inscribe_default_range_table_for_bit_width_over_first_three_columns(cs, 16)?;
+    let scalar_params = Arc::new(secp256k1_scalar_field_params());
+    let base_params = Arc::new(secp256k1_base_field_params());
 
-//     type G = crate::secp256k1::PointAffine;
+    use boojum::pairing::ff::PrimeField;
 
-//     assert!(limit <= u32::MAX as usize);
-//     let keccak_gadget = Keccak256Gadget::new(cs, None, None, None, None, false, "")?;
+    let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
+        cs,
+        Secp256Fq::from_str(&VALID_X_CUBED_IN_EXTERNAL_FIELD.to_string()).unwrap(),
+        &base_params,
+    );
+    let valid_t_in_external_field = Secp256BaseNNField::allocated_constant(
+        cs,
+        Secp256Fq::from_str(&(VALID_X_CUBED_IN_EXTERNAL_FIELD + SECP_B_COEF).to_string()).unwrap(),
+        &base_params,
+    );
+    let valid_y_in_external_field = Secp256BaseNNField::allocated_constant(
+        cs,
+        Secp256Fq::from_str(&VALID_Y_IN_EXTERNAL_FIELD.to_string()).unwrap(),
+        &base_params,
+    );
 
-//     let precompile_address = UInt160::<E>::from_uint(u160::from_u64(
-//         zkevm_opcode_defs::system_params::ECRECOVER_INNER_FUNCTION_PRECOMPILE_ADDRESS as u64,
-//     ));
-//     let aux_byte_for_precompile = aux_byte_for_precompile_call::<E>();
+    let mut structured_input = EcrecoverCircuitInputOutput::alloc_ignoring_outputs(
+        cs,
+        closed_form_input.clone(),
+    );
+    let start_flag = structured_input.start_flag;
 
-//     let secp_p_as_u64x4 = UInt256::<E>::constant(
-//         franklin_crypto::plonk::circuit::bigint_new::bigint::repr_to_biguint::<Secp256Fq>(
-//             &Secp256Fq::char(),
-//         ),
-//     );
-//     let secp_n_as_u64x4 = UInt256::<E>::constant(
-//         franklin_crypto::plonk::circuit::bigint_new::bigint::repr_to_biguint::<Secp256Fr>(
-//             &Secp256Fr::char(),
-//         ),
-//     );
-//     assert_eq!(CHUNK_BITLEN, 64);
-//     let rns_strategy_for_base_field =
-//         RnsParameters::<E, <G as GenericCurveAffine>::Base>::new_optimal(cs, CHUNK_BITLEN);
-//     let rns_strategy_for_scalar_field =
-//         RnsParameters::<E, <G as GenericCurveAffine>::Scalar>::new_optimal(cs, CHUNK_BITLEN);
+    let requests_queue_state_from_input = 
+        structured_input
+            .observable_input
+            .initial_log_queue_state;
 
-//     let one_in_external_field =
-//         FieldElement::<E, <G as GenericCurveAffine>::Base>::one(&rns_strategy_for_base_field);
-//     let mut minus_one_in_external_field = one_in_external_field.negate(cs)?;
-//     let b_coef_in_external_field = FieldElement::<E, <G as GenericCurveAffine>::Base>::constant(
-//         u64_to_fe::<<G as GenericCurveAffine>::Base>(SECP_B_COEF),
-//         &rns_strategy_for_base_field,
-//     );
-//     let valid_x_in_external_field = FieldElement::<E, <G as GenericCurveAffine>::Base>::constant(
-//         u64_to_fe::<<G as GenericCurveAffine>::Base>(9),
-//         &rns_strategy_for_base_field,
-//     );
-//     let valid_t_in_external_field = FieldElement::<E, <G as GenericCurveAffine>::Base>::constant(
-//         u64_to_fe::<<G as GenericCurveAffine>::Base>(9 + SECP_B_COEF),
-//         &rns_strategy_for_base_field,
-//     );
+    // it must be trivial
+    requests_queue_state_from_input.enforce_trivial_head(cs);
 
-//     let structured_input_witness = project_ref!(witness, closed_form_input).cloned();
-//     let requests_queue_witness = project_ref!(witness, requests_queue_witness).cloned();
-//     let mut memory_reads_witness = project_ref!(witness, memory_reads_witness).cloned();
+    let requests_queue_state_from_fsm = 
+        structured_input
+            .hidden_fsm_input
+            .log_queue_state;
 
-//     let mut structured_input =
-//         EcrecoverCircuitInputOutput::alloc_ignoring_outputs(cs, structured_input_witness.clone())?;
+    let requests_queue_state = QueueState::conditionally_select(
+        cs,
+        start_flag,
+        &requests_queue_state_from_input,
+        &requests_queue_state_from_fsm,
+    );
 
-//     let requests_queue_from_fsm_input = StorageLogQueue::from_raw_parts(
-//         cs,
-//         structured_input.hidden_fsm_input.log_queue_state.head_state,
-//         structured_input.hidden_fsm_input.log_queue_state.tail_state,
-//         structured_input.hidden_fsm_input.log_queue_state.num_items,
-//     )?;
+    let memory_queue_state_from_input = 
+        structured_input
+            .observable_input
+            .initial_memory_queue_state;
 
-//     let requests_queue_from_passthrough = StorageLogQueue::from_raw_parts(
-//         cs,
-//         structured_input
-//             .observable_input
-//             .initial_log_queue_state
-//             .head_state,
-//         structured_input
-//             .observable_input
-//             .initial_log_queue_state
-//             .tail_state,
-//         structured_input
-//             .observable_input
-//             .initial_log_queue_state
-//             .num_items,
-//     )?;
+    // it must be trivial
+    memory_queue_state_from_input.enforce_trivial_head(cs);
 
-//     let mut requests_queue = StorageLogQueue::conditionally_select(
-//         cs,
-//         &structured_input.start_flag,
-//         &requests_queue_from_passthrough,
-//         &requests_queue_from_fsm_input,
-//     )?;
+    let memory_queue_state_from_fsm = 
+        structured_input
+            .hidden_fsm_input
+            .memory_queue_state;
 
-//     if let Some(wit) = requests_queue_witness {
-//         requests_queue.witness = wit;
-//     }
+    let memory_queue_state = QueueState::conditionally_select(
+        cs,
+        start_flag,
+        &memory_queue_state_from_input,
+        &memory_queue_state_from_fsm,
+    );
 
-//     let memory_queue_from_fsm_input = MemoryQueriesQueue::from_raw_parts(
-//         cs,
-//         structured_input.hidden_fsm_input.memory_queue_state.head,
-//         structured_input.hidden_fsm_input.memory_queue_state.tail,
-//         structured_input.hidden_fsm_input.memory_queue_state.length,
-//     )?;
+    let mut requests_queue = StorageLogQueue::<F, R>::from_state(
+        cs,
+        requests_queue_state
+    );
+    let queue_witness = CircuitQueueWitness::from_inner_witness(requests_queue_witness);
+    requests_queue.witness = Arc::new(queue_witness);
 
-//     let memory_queue_from_passthrough = MemoryQueriesQueue::from_raw_parts(
-//         cs,
-//         structured_input.observable_input.initial_memory_state.head,
-//         structured_input.observable_input.initial_memory_state.tail,
-//         structured_input
-//             .observable_input
-//             .initial_memory_state
-//             .length,
-//     )?;
+    let mut memory_queue = MemoryQueue::<F, R>::from_state(
+        cs,
+        memory_queue_state,
+    );
 
-//     let mut memory_queue = MemoryQueriesQueue::conditionally_select(
-//         cs,
-//         &structured_input.start_flag,
-//         &memory_queue_from_passthrough,
-//         &memory_queue_from_fsm_input,
-//     )?;
+    let one_u32 = UInt32::allocated_constant(cs, 1u32);
+    let zero_u256 = UInt256::zero(cs);
+    let boolean_false = Boolean::allocated_constant(cs, false);
+    let boolean_true = Boolean::allocated_constant(cs, false);
 
-//     for _cycle in 0..limit {
-//         let is_empty = requests_queue.is_empty(cs)?;
-//         let request = requests_queue.pop_first(cs, &is_empty.not(), round_function)?;
-//         let mut precompile_call_params =
-//             EcrecoverPrecompileCallParams::from_encoding(cs, request.key)?;
-//         let timestamp_to_use_for_read = request.timestamp;
-//         let (timestamp_to_use_for_write, of) = timestamp_to_use_for_read.increment_checked(cs)?;
-//         Boolean::enforce_equal(cs, &of, &Boolean::constant(false))?;
+    use crate::storage_application::ConditionalWitnessAllocator;
+    let read_queries_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
+        witness_source: Arc::new(RwLock::new(memory_reads_witness))
+    };
 
-//         use crate::glue::code_unpacker_sha256::memory_query_updated::MemoryQuery;
+    for _cycle in 0..limit {
+        let is_empty = requests_queue.is_empty(cs);
+        let should_process = is_empty.negated(cs);
+        let (request, _) = requests_queue.pop_front(cs, should_process);
 
-//         Num::conditionally_enforce_equal(
-//             cs,
-//             &is_empty.not(),
-//             &request.aux_byte.inner,
-//             &aux_byte_for_precompile.inner,
-//         )?;
-//         Num::conditionally_enforce_equal(
-//             cs,
-//             &is_empty.not(),
-//             &request.address.inner,
-//             &precompile_address.inner,
-//         )?;
+        let mut precompile_call_params =
+            EcrecoverPrecompileCallParams::from_encoding(cs, request.key);
 
-//         let mut read_values = [UInt256::zero(); 4];
-//         let mut read_values_le_bytes = [[Num::zero(); 32]; 4];
+        let timestamp_to_use_for_read = request.timestamp;
+        let (timestamp_to_use_for_write, _) = timestamp_to_use_for_read.add_no_overflow(cs, one_u32);
 
-//         for idx in 0..4 {
-//             let (memory_query_witness, _) = get_vec_vec_witness_raw_with_hint_on_more_in_subset(
-//                 &mut memory_reads_witness,
-//                 BigUint::from(0u64),
-//             );
-//             let (u256_value, le_bytes) =
-//                 UInt256::alloc_from_biguint_and_return_u8_chunks(cs, memory_query_witness)?;
-//             let mut memory_query = MemoryQuery::<E>::empty();
-//             memory_query.timestamp = timestamp_to_use_for_read;
-//             memory_query.memory_page = precompile_call_params.input_page;
-//             memory_query.memory_index = precompile_call_params.input_offset;
-//             memory_query.rw_flag = Boolean::constant(false);
-//             memory_query.value = u256_value;
+        Num::conditionally_enforce_equal(
+            cs,
+            should_process,
+            &Num::from_variable(request.aux_byte.get_variable()),
+            &Num::from_variable(aux_byte_for_precompile.get_variable()),
+        );
+        for (a, b) in request.address.inner.iter().zip(precompile_address.inner.iter()) {
+            Num::conditionally_enforce_equal(
+                cs,
+                should_process,
+                &Num::from_variable(a.get_variable()),
+                &Num::from_variable(b.get_variable()),
+            );
+        }
 
-//             read_values[idx] = u256_value;
-//             read_values_le_bytes[idx] = le_bytes;
+        let mut read_values = [zero_u256; NUM_MEMORY_READS_PER_CYCLE];
+        for dst in read_values.iter_mut() {
+            let read_query_value: UInt256<F> = read_queries_allocator.conditionally_allocate(cs, should_process);
 
-//             let memory_query = memory_query.into_raw_query(cs)?;
-//             let _ = memory_queue.push(cs, &memory_query, &is_empty.not(), round_function)?;
+            *dst = read_query_value;
 
-//             precompile_call_params.input_offset = precompile_call_params
-//                 .input_offset
-//                 .increment_unchecked(cs)?;
-//         }
+            let read_query = MemoryQuery {
+                timestamp: timestamp_to_use_for_read,
+                memory_page: precompile_call_params.input_page,
+                index: precompile_call_params.input_offset,
+                rw_flag: boolean_false,
+                is_ptr: boolean_false,
+                value: read_query_value
+            };
 
-//         let [message_hash_as_u64x4, _v, r_as_u64x4, s_as_u64x4] = read_values;
-//         let [_, v_bytes, _, _] = read_values_le_bytes;
-//         let recid = UInt32::from_num_unchecked(v_bytes[0]);
+            let _ = memory_queue.push(cs, read_query, should_process);
 
-//         let (success, written_value) = ecrecover_precompile_inner_routine::<E, CS, G>(
-//             cs,
-//             &recid,
-//             &r_as_u64x4,
-//             &s_as_u64x4,
-//             &message_hash_as_u64x4,
-//             &secp_p_as_u64x4,
-//             &secp_n_as_u64x4,
-//             &b_coef_in_external_field,
-//             &valid_x_in_external_field,
-//             &valid_t_in_external_field,
-//             &mut minus_one_in_external_field,
-//             &rns_strategy_for_base_field,
-//             &rns_strategy_for_scalar_field,
-//             &keccak_gadget,
-//         )?;
+            precompile_call_params.input_offset = precompile_call_params
+                .input_offset
+                .add_no_overflow(cs, one_u32).0;
+        }
 
-//         let mut success_as_u256 = UInt256::zero();
-//         let mut lc = LinearCombination::zero();
-//         lc.add_assign_boolean_with_coeff(&success, E::Fr::one());
-//         success_as_u256.inner[0] = UInt64::from_num_unchecked(lc.into_num(cs)?);
+        let [message_hash_as_u256, v_as_u256, r_as_u256, s_as_u256] = read_values;
+        let rec_id = v_as_u256.inner[0].to_le_bytes(cs)[0];
 
-//         let success_query = MemoryQuery {
-//             timestamp: timestamp_to_use_for_write,
-//             memory_page: precompile_call_params.output_page,
-//             memory_index: precompile_call_params.output_offset,
-//             rw_flag: Boolean::constant(true),
-//             value: success_as_u256,
-//             value_is_ptr: Boolean::constant(false),
-//         };
-//         let success_query = success_query.into_raw_query(cs)?;
+        let (success, written_value) = ecrecover_precompile_inner_routine(
+            cs,
+            &rec_id,
+            &r_as_u256,
+            &s_as_u256,
+            &message_hash_as_u256,
+            valid_x_in_external_field.clone(),
+            valid_y_in_external_field.clone(),
+            valid_t_in_external_field.clone(),
+            &base_params,
+            &scalar_params,
+        );
 
-//         precompile_call_params.output_offset = precompile_call_params
-//             .output_offset
-//             .increment_unchecked(cs)?;
-//         let _ = memory_queue.push(cs, &success_query, &is_empty.not(), round_function)?;
-//         let value_query = MemoryQuery {
-//             timestamp: timestamp_to_use_for_write,
-//             memory_page: precompile_call_params.output_page,
-//             memory_index: precompile_call_params.output_offset,
-//             rw_flag: Boolean::constant(true),
-//             value: written_value,
-//             value_is_ptr: Boolean::constant(false),
-//         };
-//         let value_query = value_query.into_raw_query(cs)?;
+        let success_as_u32 = unsafe {UInt32::from_variable_unchecked(success.get_variable())};
+        let mut success_as_u256 = zero_u256;
+        success_as_u256.inner[0] = success_as_u32;
 
-//         precompile_call_params.output_offset = precompile_call_params
-//             .output_offset
-//             .increment_unchecked(cs)?;
-//         let _ = memory_queue.push(cs, &value_query, &is_empty.not(), round_function)?;
-//     }
+        let success_query = MemoryQuery {
+            timestamp: timestamp_to_use_for_write,
+            memory_page: precompile_call_params.output_page,
+            index: precompile_call_params.output_offset,
+            rw_flag: boolean_true,
+            value: success_as_u256,
+            is_ptr: boolean_false,
+        };
 
-//     // form the final state
-//     let done = requests_queue.is_empty(cs)?;
-//     structured_input.completion_flag = done;
-//     structured_input.observable_output = PrecompileFunctionOutputData::empty();
+        precompile_call_params.output_offset = precompile_call_params
+            .output_offset
+            .add_no_overflow(cs, one_u32).0;
 
-//     let final_memory_state = memory_queue.into_state();
-//     let final_requets_state = requests_queue.into_state();
+        let _ = memory_queue.push(cs, success_query, should_process);
 
-//     structured_input.observable_output.final_memory_state =
-//         FullSpongeLikeQueueState::conditionally_select(
-//             cs,
-//             &structured_input.completion_flag,
-//             &final_memory_state,
-//             &structured_input.observable_output.final_memory_state,
-//         )?;
+        let value_query = MemoryQuery {
+            timestamp: timestamp_to_use_for_write,
+            memory_page: precompile_call_params.output_page,
+            index: precompile_call_params.output_offset,
+            rw_flag: boolean_true,
+            value: written_value,
+            is_ptr: boolean_false,
+        };
 
-//     structured_input.hidden_fsm_output.log_queue_state = final_requets_state;
-//     structured_input.hidden_fsm_output.memory_queue_state = final_memory_state;
+        let _ = memory_queue.push(cs, value_query, should_process);
+    }
 
-//     if let Some(circuit_result) = structured_input.create_witness() {
-//         if let Some(passed_input) = structured_input_witness {
-//             assert_eq!(circuit_result, passed_input);
-//         }
-//     }
+    // form the final state
+    let done = requests_queue.is_empty(cs);
+    structured_input.completion_flag = done;
+    structured_input.observable_output = PrecompileFunctionOutputData::placeholder(cs);
 
-//     use crate::inputs::ClosedFormInputCompactForm;
-//     let compact_form =
-//         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function)?;
+    let final_memory_state = memory_queue.into_state();
+    let final_requets_state = requests_queue.into_state();
 
-//     // dbg!(compact_form.create_witness());
-//     use crate::glue::optimizable_queue::commit_encodable_item;
-//     let input_committment = commit_encodable_item(cs, &compact_form, round_function)?;
-//     let input_committment_value = input_committment.get_value();
-//     let public_input = AllocatedNum::alloc_input(cs, || Ok(input_committment_value.grab()?))?;
-//     public_input.enforce_equal(cs, &input_committment.get_variable())?;
+    structured_input.observable_output.final_memory_state =
+        QueueState::conditionally_select(
+            cs,
+            structured_input.completion_flag,
+            &final_memory_state,
+            &structured_input.observable_output.final_memory_state,
+        );
 
-//     Ok(public_input)
-// }
+    structured_input.hidden_fsm_output.log_queue_state = final_requets_state;
+    structured_input.hidden_fsm_output.memory_queue_state = final_memory_state;
 
+    if let Some(circuit_result) = (structured_input.witness_hook(&*cs))() {
+        use boojum::gadgets::traits::auxiliary::PrettyComparison;
+        let comparison_lines = <EcrecoverCircuitFSMInputOutput<F> as PrettyComparison<F>>::find_diffs(&circuit_result.hidden_fsm_output, &closed_form_input.hidden_fsm_output);
+        if comparison_lines.is_empty() == false {
+            panic!("Difference in FSM:\n{}", comparison_lines.join("\n"));
+        }
+        let comparison_lines = <PrecompileFunctionOutputData<F> as PrettyComparison<F>>::find_diffs(&circuit_result.observable_output, &closed_form_input.observable_output);
+        if comparison_lines.is_empty() == false {
+            panic!("Difference in observable output:\n{}", comparison_lines.join("\n"));
+        }
+        assert_eq!(circuit_result, closed_form_input);
+    }
 
+    use boojum::cs::gates::PublicInputGate;
+
+    let compact_form =
+        ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
+    let input_commitment = commit_variable_length_encodable_item(cs, &compact_form, round_function);
+    for el in input_commitment.iter() {
+        let gate = PublicInputGate::new(el.get_variable());
+        gate.add_to_cs(cs);
+    }
+
+    input_commitment
+}
 
 #[cfg(test)]
 mod test {

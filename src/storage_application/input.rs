@@ -18,11 +18,13 @@ use derivative::*;
 use boojum::serde_utils::BigArraySerde;
 use boojum::gadgets::keccak256;
 use std::collections::VecDeque;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 
 pub const STORAGE_DEPTH: usize = 256;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct StorageApplicationFSMInputOutput<F: SmallField> {
     pub current_root_hash: [UInt8<F>; 32],
     pub next_enumeration_counter: [UInt32<F>; 2],
@@ -43,6 +45,7 @@ impl<F: SmallField> CSPlaceholder<F> for StorageApplicationFSMInputOutput<F> {
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct StorageApplicationInputData<F: SmallField> {
     pub shard: UInt8<F>,
     pub initial_root_hash: [UInt8<F>; 32],
@@ -64,6 +67,7 @@ impl<F: SmallField> CSPlaceholder<F> for StorageApplicationInputData<F> {
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct StorageApplicationOutputData<F: SmallField> {
     pub new_root_hash: [UInt8<F>; 32],
     pub new_next_enumeration_counter: [UInt32<F>; 2],

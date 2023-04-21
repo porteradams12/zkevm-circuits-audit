@@ -2,6 +2,7 @@ use super::*;
 
 use boojum::field::SmallField;
 
+use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueue;
 use boojum::gadgets::u256::UInt256;
 
 use boojum::gadgets::boolean::Boolean;
@@ -18,6 +19,7 @@ use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use ethereum_types::U256;
 use boojum::config::*;
+use boojum::gadgets::traits::encodable::CircuitEncodableExt;
 
 use cs_derive::*;
 
@@ -33,6 +35,8 @@ pub struct MemoryQuery<F: SmallField> {
     pub is_ptr: Boolean<F>,
     pub value: UInt256<F>,
 }
+
+impl<F: SmallField> CircuitEncodableExt<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQuery<F> {}
 
 // in practice we use memory queue, so we need to have a nice way to pack memory query into
 // 8 field elements. In addition we can exploit the fact that when we will process the elements
@@ -295,3 +299,6 @@ impl<F: SmallField> MemoryValue<F> {
         }
     }
 }
+
+pub type MemoryQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
+pub type MemoryQueue<F, R> = MemoryQueryQueue<F, 8, 12, 4, R>;
