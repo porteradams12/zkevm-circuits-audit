@@ -60,14 +60,6 @@ pub struct TimestampedStorageLogRecord<F: SmallField> {
     pub timestamp: UInt32<F>,
 }
 
-#[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug, PartialEq(bound = ""), Eq(bound = ""))]
-#[serde(bound = "")]
-pub struct TimestampedStorageLogRecordWitness<F: SmallField> {
-    pub timestamp: u32,
-    pub record: LogQueryWitness<F>,
-}
-
 pub const EXTENDED_TIMESTAMP_ENCODING_ELEMENT: usize = 19;
 pub const EXTENDED_TIMESTAMP_ENCODING_OFFSET: usize = 8;
 
@@ -122,15 +114,10 @@ impl<F: SmallField> CircuitEncodable<F, TIMESTAMPED_STORAGE_LOG_ENCODING_LEN>
     }
 }
 
-impl<F: SmallField> CircuitEncodableExt<F, TIMESTAMPED_STORAGE_LOG_ENCODING_LEN>
-    for TimestampedStorageLogRecord<F>
-{
-}
-
 pub fn sort_and_deduplicate_storage_access_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
-    R: CircuitRoundFunction<F, 2, 3, 4>,
+    R: CircuitRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
     closed_form_input: Option<StorageDeduplicatorInstanceWitness<F>>,
@@ -218,8 +205,8 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     let intermediate_sorted_queue_from_passthrough = CircuitQueue::<
         F,
         TimestampedStorageLogRecord<F>,
-        2,
-        3,
+        8,
+        12,
         4,
         QUEUE_STATE_WIDTH,
         TIMESTAMPED_STORAGE_LOG_ENCODING_LEN,
@@ -243,8 +230,8 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     let intermediate_sorted_queue_from_fsm_input = CircuitQueue::<
         F,
         TimestampedStorageLogRecord<F>,
-        2,
-        3,
+        8,
+        12,
         4,
         QUEUE_STATE_WIDTH,
         TIMESTAMPED_STORAGE_LOG_ENCODING_LEN,
@@ -273,8 +260,8 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     let mut intermediate_sorted_queue = CircuitQueue::<
         F,
         TimestampedStorageLogRecord<F>,
-        2,
-        3,
+        8,
+        12,
         4,
         QUEUE_STATE_WIDTH,
         TIMESTAMPED_STORAGE_LOG_ENCODING_LEN,
@@ -473,7 +460,6 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         }
     }
 
-    use crate::fsm_input_output::ClosedFormInputCompactForm;
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function)?;
 
@@ -491,7 +477,7 @@ const NUM_PERMUTATION_ARG_CHALLENGES: usize = TIMESTAMPED_STORAGE_LOG_ENCODING_L
 pub fn sort_and_deduplicate_storage_access_inner<
     F: SmallField,
     CS: ConstraintSystem<F>,
-    R: CircuitRoundFunction<F, 2, 3, 4>,
+    R: CircuitRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
     mut lhs: Num<F>,
@@ -500,8 +486,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
     intermediate_sorted_queue: &mut CircuitQueue<
         F,
         TimestampedStorageLogRecord<F>,
-        2,
-        3,
+        8,
+        12,
         4,
         QUEUE_STATE_WIDTH,
         TIMESTAMPED_STORAGE_LOG_ENCODING_LEN,
