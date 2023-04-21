@@ -9,7 +9,7 @@ use crate::base_structures::{
     vm_state::*,
 };
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
+use boojum::cs::{gates::*, traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
 use boojum::gadgets::{
     boolean::Boolean,
@@ -49,7 +49,7 @@ use crate::{
 // for "forward" and "rollback" items, while we do need to have them
 // on different timestamps
 
-const TIMESTAMPED_STORAGE_LOG_ENCODING_LEN: usize = 21;
+const TIMESTAMPED_STORAGE_LOG_ENCODING_LEN: usize = 20;
 
 use cs_derive::*;
 
@@ -68,36 +68,32 @@ pub struct TimestampedStorageLogRecordWitness<F: SmallField> {
     pub record: LogQueryWitness<F>,
 }
 
-pub const EXTENDED_TIMESTAMP_ENCODING_ELEMENT: usize = 1;
-pub const EXTENDED_TIMESTAMP_ENCODING_OFFSET: usize = 192;
+pub const EXTENDED_TIMESTAMP_ENCODING_ELEMENT: usize = 19;
+pub const EXTENDED_TIMESTAMP_ENCODING_OFFSET: usize = 8;
 
 impl<F: SmallField> TimestampedStorageLogRecord<F> {
     pub fn append_timestamp_to_raw_query_encoding<CS: ConstraintSystem<F>>(
         cs: &mut CS,
-        original_encoding: &[Num<F>; 5],
+        original_encoding: &[Variable; 20],
         timestamp: &UInt32<F>,
-    ) -> [Num<F>; 5] {
-        let mut inputs = Vec::with_capacity(2);
-        inputs.push((
-            &original_encoding[EXTENDED_TIMESTAMP_ENCODING_ELEMENT],
-            F::one(),
-        ));
-        let shift = {
-            let mut shift = F::one();
-            for _ in 0..EXTENDED_TIMESTAMP_ENCODING_OFFSET {
-                shift.double();
-            }
-        };
-
-        inputs.push(&timestamp.inner, shift);
-        // TODO: what to sub this with
-        // assert!(EXTENDED_TIMESTAMP_ENCODING_OFFSET + 32 <= E::Fr::CAPACITY as usize);
-        debug_assert!(F::CAPACITY_BITS >= 56);
+    ) -> [Variable; 20] {
+        let encoding = Num::linear_combination(
+            cs,
+            &[
+                (
+                    &original_encoding[EXTENDED_TIMESTAMP_ENCODING_ELEMENT],
+                    F::one(),
+                ),
+                (&timestamp.inner[0], F::from_u64_unchecked(1u64 << 8)),
+                (&timestamp.inner[1], F::from_u64_unchecked(1u64 << 16)),
+                (&timestamp.inner[2], F::from_u64_unchecked(1u64 << 24)),
+                (&timestamp.inner[3], F::from_u64_unchecked(1u64 << 32)),
+            ],
+        )
+        .get_variable();
 
         let mut result = *original_encoding;
-        result[EXTENDED_TIMESTAMP_ENCODING_ELEMENT] =
-            linear_combination_collapse(cs, inputs, None)?;
-
+        result[EXTENDED_TIMESTAMP_ENCODING_ELEMENT] = encoding;
         Ok(result)
     }
 }
@@ -875,7 +871,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
 pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     key_tuple: (UInt8<F>, UInt160<F>, UInt256<F>),
-) -> [Variable<F>; 7] {
+) -> [Variable; 7] {
     debug_assert!(F::CAPACITY_BITS >= 56);
 
     // LE packing
