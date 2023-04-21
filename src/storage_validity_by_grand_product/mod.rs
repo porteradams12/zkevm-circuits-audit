@@ -49,7 +49,7 @@ use crate::{
 // for "forward" and "rollback" items, while we do need to have them
 // on different timestamps
 
-const TIMESTAMPED_STORAGE_LOG_ENCODING_LEN: usize = 5;
+const TIMESTAMPED_STORAGE_LOG_ENCODING_LEN: usize = 21;
 
 use cs_derive::*;
 
@@ -92,6 +92,7 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
         inputs.push(&timestamp.inner, shift);
         // TODO: what to sub this with
         // assert!(EXTENDED_TIMESTAMP_ENCODING_OFFSET + 32 <= E::Fr::CAPACITY as usize);
+        debug_assert!(F::CAPACITY_BITS >= 56);
 
         let mut result = *original_encoding;
         result[EXTENDED_TIMESTAMP_ENCODING_ELEMENT] =
@@ -874,26 +875,258 @@ pub fn sort_and_deduplicate_storage_access_inner<
 pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     key_tuple: (UInt8<F>, UInt160<F>, UInt256<F>),
-) -> [Num<F>; 2] {
-    assert!(E::Fr::CAPACITY >= 232);
-    let shifts = compute_shifts::<F>();
+) -> [Variable<F>; 7] {
+    debug_assert!(F::CAPACITY_BITS >= 56);
 
     // LE packing
+    // Attempting to stick to previous packing methods shown in this repo
 
     let (shard_id, address, key) = key_tuple;
-    let mut lc_0 = LinearCombination::zero();
-    lc_0.add_assign_number_with_coeff(&key.inner[0].inner, shifts[0]);
-    lc_0.add_assign_number_with_coeff(&key.inner[1].inner, shifts[64]);
-    lc_0.add_assign_number_with_coeff(&key.inner[2].inner, shifts[128]);
-    // 192 in total
-    let value_0 = lc_0.into_num(cs)?;
+    let key_bytes = key.inner.map(|el| el.decompose_into_bytes(cs));
+    let address_bytes = address.inner.map(|el| el.decompose_into_bytes(cs));
+    let v0 = Num::linear_combination(
+        cs,
+        &[
+            (key_bytes[0][0].get_variable(), F::one()),
+            (
+                key_bytes[0][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 8),
+            ),
+            (
+                key_bytes[0][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 16),
+            ),
+            (
+                key_bytes[0][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 24),
+            ),
+            (
+                key_bytes[1][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 32),
+            ),
+            (
+                key_bytes[1][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 40),
+            ),
+            (
+                key_bytes[1][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 48),
+            ),
+        ],
+    )
+    .get_variable();
 
-    let mut lc_1 = LinearCombination::zero();
-    lc_1.add_assign_number_with_coeff(&key.inner[3].inner, shifts[0]);
-    lc_1.add_assign_number_with_coeff(&address.inner, shifts[64]);
-    lc_1.add_assign_number_with_coeff(&shard_id.inner, shifts[160 + 64]);
-    let value_1 = lc_1.into_num(cs)?;
-    // 64 + 160 + 8 = 232 in total
+    let v1 = Num::linear_combination(
+        cs,
+        &[
+            (key_bytes[1][3].get_variable(), F::one()),
+            (
+                key_bytes[2][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 8),
+            ),
+            (
+                key_bytes[2][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 16),
+            ),
+            (
+                key_bytes[2][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 24),
+            ),
+            (
+                key_bytes[2][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 32),
+            ),
+            (
+                key_bytes[3][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 40),
+            ),
+            (
+                key_bytes[3][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 48),
+            ),
+        ],
+    )
+    .get_variable();
 
-    Ok([value_0, value_1])
+    let v2 = Num::linear_combination(
+        cs,
+        &[
+            (key_bytes[3][2].get_variable(), F::one()),
+            (
+                key_bytes[3][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 8),
+            ),
+            (
+                key_bytes[4][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 16),
+            ),
+            (
+                key_bytes[4][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 24),
+            ),
+            (
+                key_bytes[4][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 32),
+            ),
+            (
+                key_bytes[4][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 40),
+            ),
+            (
+                key_bytes[5][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 48),
+            ),
+        ],
+    )
+    .get_variable();
+
+    let v3 = Num::linear_combination(
+        cs,
+        &[
+            (key_bytes[5][1].get_variable(), F::one()),
+            (
+                key_bytes[5][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 8),
+            ),
+            (
+                key_bytes[5][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 16),
+            ),
+            (
+                key_bytes[6][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 24),
+            ),
+            (
+                key_bytes[6][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 32),
+            ),
+            (
+                key_bytes[6][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 40),
+            ),
+            (
+                key_bytes[6][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 48),
+            ),
+        ],
+    )
+    .get_variable();
+
+    let v4 = Num::linear_combination(
+        cs,
+        &[
+            (key_bytes[7][0].get_variable(), F::one()),
+            (
+                key_bytes[7][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 8),
+            ),
+            (
+                key_bytes[7][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 16),
+            ),
+            (
+                key_bytes[7][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 24),
+            ),
+            (
+                address_bytes[0][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 32),
+            ),
+            (
+                address_bytes[0][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 40),
+            ),
+            (
+                address_bytes[0][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 48),
+            ),
+        ],
+    )
+    .get_variable();
+
+    let v5 = Num::linear_combination(
+        cs,
+        &[
+            (address_bytes[0][3].get_variable(), F::one()),
+            (
+                address_bytes[1][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 8),
+            ),
+            (
+                address_bytes[1][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 16),
+            ),
+            (
+                address_bytes[2][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 24),
+            ),
+            (
+                address_bytes[1][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 32),
+            ),
+            (
+                address_bytes[2][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 40),
+            ),
+            (
+                address_bytes[2][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 48),
+            ),
+        ],
+    )
+    .get_variable();
+
+    let v6 = Num::linear_combination(
+        cs,
+        &[
+            (address_bytes[2][2].get_variable(), F::one()),
+            (
+                address_bytes[2][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 8),
+            ),
+            (
+                address_bytes[3][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 16),
+            ),
+            (
+                address_bytes[3][1].get_variable(),
+                F::from_u64_unchecked(1u64 << 24),
+            ),
+            (
+                address_bytes[3][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 32),
+            ),
+            (
+                address_bytes[3][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 40),
+            ),
+            (
+                address_bytes[4][0].get_variable(),
+                F::from_u64_unchecked(1u64 << 48),
+            ),
+        ],
+    )
+    .get_variable();
+
+    let v7 = Num::linear_combination(
+        cs,
+        &[
+            (address_bytes[4][1].get_variable(), F::one()),
+            (
+                address_bytes[4][2].get_variable(),
+                F::from_u64_unchecked(1u64 << 8),
+            ),
+            (
+                address_bytes[4][3].get_variable(),
+                F::from_u64_unchecked(1u64 << 16),
+            ),
+            (
+                shard_id.inner.get_variable(),
+                F::from_u64_unchecked(1u64 << 24),
+            ),
+        ],
+    )
+    .get_variable();
+
+    [v0, v1, v2, v3, v4, v5, v6, v7]
 }
