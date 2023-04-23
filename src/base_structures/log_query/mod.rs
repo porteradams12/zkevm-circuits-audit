@@ -4,7 +4,7 @@ use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::u160::{UInt160, recompose_address_from_u32x5};
 use boojum::gadgets::u256::{UInt256, recompose_u256_as_u32x8};
 use boojum::gadgets::u32::UInt32;
-
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::Variable;
 use boojum::gadgets::num::Num;

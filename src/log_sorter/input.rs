@@ -1,19 +1,20 @@
+use derivative::*;
 use cs_derive::*;
-use crate::cs::{
+use boojum::cs::{
     traits::cs::ConstraintSystem,
     Variable
 };
-use crate::field::SmallField;
-use crate::gadgets::num::Num;
-use crate::gadgets::queue::QueueState;
-use crate::zksync::base_structures::{vm_state::*, 
+use boojum::serde_utils::BigArraySerde;
+use boojum::field::SmallField;
+use boojum::gadgets::queue::QueueState;
+use crate::base_structures::{vm_state::*, 
     log_query::{LogQuery,LOG_QUERY_PACKED_WIDTH}, 
 };
-use crate::zksync::Derivative;
-use crate::gadgets::{
+use boojum::gadgets::{
     queue::*,
     traits::{allocatable::*, selectable::Selectable, encodable::CircuitVarLengthEncodable, witnessable::WitnessHookable},
-    boolean::Boolean
+    boolean::Boolean,
+    num::Num
 };
 
 pub const DEFAULT_NUM_CHUNKS: usize = 4;
@@ -77,14 +78,14 @@ impl<F: SmallField> CSPlaceholder<F> for EventsDeduplicatorOutputData<F> {
 }
 
 pub type EventsDeduplicatorInputOutput<F> = 
-crate::zksync::fsm_input_output::ClosedFormInput<
+crate::fsm_input_output::ClosedFormInput<
     F,
     EventsDeduplicatorFSMInputOutput<F>,
     EventsDeduplicatorInputData<F>,
     EventsDeduplicatorOutputData<F>,
 >;
 pub type EventsDeduplicatorInputOutputWitness<F> = 
-crate::zksync::fsm_input_output::ClosedFormInputWitness<
+crate::fsm_input_output::ClosedFormInputWitness<
     F,
     EventsDeduplicatorFSMInputOutput<F>,
     EventsDeduplicatorInputData<F>,

@@ -1,35 +1,34 @@
 mod input;
 use super::*;
-use crate::field::SmallField;
-use crate::gadgets::poseidon::CircuitRoundFunction;
-use crate::cs::traits::cs::ConstraintSystem;
-use crate::gadgets::num::Num;
-use crate::gadgets::queue::QueueState;
-use crate::zksync::fsm_input_output::{ClosedFormInputCompactForm, commit_variable_length_encodable_item};
-use crate::zksync::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
-use crate::zksync::base_structures::log_query::LogQuery;
-use crate::gadgets::{
-    traits::{selectable::Selectable, allocatable::CSAllocatableExt, encodable::CircuitEncodableExt},
+use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
+use boojum::field::SmallField;
+use boojum::gadgets::{
+    poseidon::CircuitRoundFunction,
+    traits::{selectable::Selectable, allocatable::{CSAllocatableExt, CSPlaceholder}, encodable::CircuitEncodableExt},
+    num::Num,
     boolean::Boolean,
     u160::*,
     u32::UInt32,
-    queue::*
+    queue::*,
+    u256::UInt256,
+    u8::UInt8
 };
-use crate::zksync::base_structures::{vm_state::*, 
+use boojum::serde_utils::BigArraySerde;
+use crate::fsm_input_output::{ClosedFormInputCompactForm, commit_variable_length_encodable_item};
+use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use crate::base_structures::log_query::LogQuery;
+use crate::base_structures::{vm_state::*, 
     log_query::{LOG_QUERY_PACKED_WIDTH}};
 
-use crate::zksync::demux_log_queue::StorageLogQueue;
-use crate::gadgets::u256::UInt256;
-use crate::cs::gates::{ConstantAllocatableCS, PublicInputGate};
-use crate::algebraic_props::round_function::AlgebraicRoundFunction;
-use crate::gadgets::u8::UInt8;
+use crate::demux_log_queue::StorageLogQueue;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 // This is a sorter of logs that are kind-of "pure", e.g. event emission or L2 -> L1 messages.
 // Those logs do not affect a global state and may either be rolled back in full or not.
 // We identify equality of logs using "timestamp" field that is a monotonic unique counter
 // across the block
 pub const STORAGE_LOG_RECORD_ENCODING_LEN: usize = 5;
 
-use crate::zksync::log_sorter::input::*;
+use crate::log_sorter::input::*;
 const NUM_PERMUTATION_ARG_CHALLENGES: usize = STORAGE_LOG_RECORD_ENCODING_LEN + 1;
 
 pub fn sort_and_deduplicate_events_entry_point<
@@ -345,7 +344,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
 
     input_commitment
 }
-use crate::zksync::base_structures::memory_query::MEMORY_QUERY_PACKED_WIDTH;
+use crate::base_structures::memory_query::MEMORY_QUERY_PACKED_WIDTH;
 pub fn repack_and_prove_events_rollbacks_inner<
     F: SmallField,
     CS: ConstraintSystem<F>,
@@ -455,7 +454,6 @@ pub fn repack_and_prove_events_rollbacks_inner<
 
             // it's enough to compare timestamps as VM circuit guarantees uniqueness of the if it's not a padding
             let same_log = UInt32::equals(cs, &sorted_item.timestamp, &previous_item.timestamp);
-            use crate::gadgets::u256::*;
 
             let mut tmp = vec![];
             for (a, b) in sorted_item.written_value.inner.iter().zip(previous_item.written_value.inner.iter()){
