@@ -16,11 +16,13 @@ use boojum::gadgets::{
     boolean::Boolean,
     num::Num
 };
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 
 pub const DEFAULT_NUM_CHUNKS: usize = 4;
 
 #[derive(Derivative, CSAllocatable, CSVarLengthEncodable, CSSelectable, WitnessHookable)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct EventsDeduplicatorFSMInputOutput<F: SmallField> {
     pub lhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
     pub rhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
@@ -47,6 +49,7 @@ impl<F: SmallField> CSPlaceholder<F> for EventsDeduplicatorFSMInputOutput<F> {
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct EventsDeduplicatorInputData<F: SmallField>  {
     pub initial_log_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub intermediate_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
@@ -64,6 +67,7 @@ impl<F: SmallField> CSPlaceholder<F> for EventsDeduplicatorInputData<F> {
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct EventsDeduplicatorOutputData<F: SmallField> {
     pub final_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
 }
@@ -91,9 +95,11 @@ crate::fsm_input_output::ClosedFormInputWitness<
     EventsDeduplicatorInputData<F>,
     EventsDeduplicatorOutputData<F>,
 >;
-
+#[derive(Derivative, serde::Serialize, serde::Deserialize)]
+#[derivative(Clone, Debug)]
+#[serde(bound = "")]
 pub struct EventsDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: EventsDeduplicatorInputOutputWitness<F>,
-    pub initial_queue_witness: CircuitQueueWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
-    pub intermediate_sorted_queue_witness: CircuitQueueWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
+    pub initial_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
+    pub intermediate_sorted_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
 }

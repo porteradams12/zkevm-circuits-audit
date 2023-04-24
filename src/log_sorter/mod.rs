@@ -4,7 +4,7 @@ use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
 use boojum::gadgets::{
     poseidon::CircuitRoundFunction,
-    traits::{selectable::Selectable, allocatable::{CSAllocatableExt, CSPlaceholder}, encodable::CircuitEncodableExt},
+    traits::{selectable::Selectable, allocatable::{CSAllocatableExt}},
     num::Num,
     boolean::Boolean,
     u32::UInt32,
@@ -41,16 +41,15 @@ pub fn sort_and_deduplicate_events_entry_point<
 ) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]  
 where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
 
-//use table
+    //use table
+    let EventsDeduplicatorInstanceWitness {
+        closed_form_input,
+        initial_queue_witness,
+        intermediate_sorted_queue_witness
+    } = witness;
 
-    let structured_input_witness = witness.closed_form_input;
-    let initial_queue_witness = witness.initial_queue_witness;
-    let intermediate_sorted_queue_witness = witness.intermediate_sorted_queue_witness;
-
-    let mut structured_input = EventsDeduplicatorInputOutput::alloc_ignoring_outputs(
-        cs,
-        structured_input_witness.clone(),
-    );
+    let mut structured_input =
+        EventsDeduplicatorInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
 
     let unsorted_queue_from_passthrough: CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R> = StorageLogQueue::from_raw_parts(
         cs,
@@ -67,7 +66,6 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
             .initial_log_queue_state
             .tail.length,
     );
-
 
     // passthrough must be trivial
     let zero_num = Num::zero(cs);
@@ -91,7 +89,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
             .tail.length,
     );
 
-    let mut state = QueueState::conditionally_select(
+    let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &unsorted_queue_from_passthrough.into_state(),
@@ -106,6 +104,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     );
 
     use std::sync::Arc;
+    let initial_queue_witness = CircuitQueueWitness::from_inner_witness(initial_queue_witness);
     unsorted_queue.witness = Arc::new(initial_queue_witness);
 
     let intermediate_sorted_queue_from_passthrough: CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R> = StorageLogQueue::from_raw_parts(
@@ -146,7 +145,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
             .tail.length,
     );
 
-    let mut state = QueueState::conditionally_select(
+    let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &intermediate_sorted_queue_from_passthrough.into_state(),
@@ -158,7 +157,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         state.tail.tail, 
         state.tail.length
     );
-
+    let intermediate_sorted_queue_witness = CircuitQueueWitness::from_inner_witness(intermediate_sorted_queue_witness);
     intermediate_sorted_queue.witness = Arc::new(intermediate_sorted_queue_witness);
 
 
@@ -179,7 +178,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     );
     let empty_state = QueueState::empty(cs);
 
-    let mut final_sorted_state = QueueState::conditionally_select(
+    let final_sorted_state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &empty_state,
@@ -262,7 +261,6 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     );
 
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
-    // let make_zero_chunks: [Num<F>; DEFAULT_NUM_CHUNKS] = [zero, zero, zero, zero];
     let zero = Num::zero(cs);
     let previous_packed_key = Num::conditionally_select(
         cs,
@@ -296,7 +294,6 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         fs_challenge,
         previous_packed_key,
         previous_item,
-        round_function,
         limit,
     );
 
@@ -366,7 +363,6 @@ pub fn repack_and_prove_events_rollbacks_inner<
     fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARG_CHALLENGES],
     mut previous_packed_key: Num<F>,
     mut previous_item: LogQuery<F>,
-    round_function: &R,
     limit: usize,
 ) -> (
     [Num<F>; 4], 
