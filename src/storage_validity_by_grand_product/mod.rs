@@ -9,8 +9,10 @@ use crate::base_structures::{
     vm_state::*,
 };
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
+use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::{
     boolean::Boolean,
     impls::lc::linear_combination_collapse,
@@ -23,14 +25,11 @@ use boojum::gadgets::{
         selectable::Selectable,
         witnessable::*,
     },
-    u16::UInt16,
     u160::*,
     u256::*,
     u32::UInt32,
     u8::UInt8,
 };
-
-use zkevm_opcode_defs::system_params::*;
 
 use crate::{
     demux_log_queue::StorageLogQueue,
@@ -129,6 +128,142 @@ impl<F: SmallField> CircuitEncodable<F, TIMESTAMPED_STORAGE_LOG_ENCODING_LEN>
     }
 }
 
+impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
+    const INTERNAL_STRUCT_LEN: usize = 37;
+
+    fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
+        let address: [u32; 5] = [
+            WitnessCastable::cast_from_source(values[0]),
+            WitnessCastable::cast_from_source(values[1]),
+            WitnessCastable::cast_from_source(values[2]),
+            WitnessCastable::cast_from_source(values[3]),
+            WitnessCastable::cast_from_source(values[4]),
+        ];
+        let address = recompose_address_from_u32x5(address);
+
+        let key: [u32; 8] = [
+            WitnessCastable::cast_from_source(values[5]),
+            WitnessCastable::cast_from_source(values[6]),
+            WitnessCastable::cast_from_source(values[7]),
+            WitnessCastable::cast_from_source(values[8]),
+            WitnessCastable::cast_from_source(values[9]),
+            WitnessCastable::cast_from_source(values[10]),
+            WitnessCastable::cast_from_source(values[11]),
+            WitnessCastable::cast_from_source(values[12]),
+        ];
+        let key = recompose_u256_as_u32x8(key);
+
+        let read_value: [u32; 8] = [
+            WitnessCastable::cast_from_source(values[13]),
+            WitnessCastable::cast_from_source(values[14]),
+            WitnessCastable::cast_from_source(values[15]),
+            WitnessCastable::cast_from_source(values[16]),
+            WitnessCastable::cast_from_source(values[17]),
+            WitnessCastable::cast_from_source(values[18]),
+            WitnessCastable::cast_from_source(values[19]),
+            WitnessCastable::cast_from_source(values[20]),
+        ];
+        let read_value = recompose_u256_as_u32x8(read_value);
+
+        let written_value: [u32; 8] = [
+            WitnessCastable::cast_from_source(values[21]),
+            WitnessCastable::cast_from_source(values[22]),
+            WitnessCastable::cast_from_source(values[23]),
+            WitnessCastable::cast_from_source(values[24]),
+            WitnessCastable::cast_from_source(values[25]),
+            WitnessCastable::cast_from_source(values[26]),
+            WitnessCastable::cast_from_source(values[27]),
+            WitnessCastable::cast_from_source(values[28]),
+        ];
+        let written_value = recompose_u256_as_u32x8(written_value);
+
+        let aux_byte: u8 = WitnessCastable::cast_from_source(values[29]);
+        let rw_flag: bool = WitnessCastable::cast_from_source(values[30]);
+        let rollback: bool = WitnessCastable::cast_from_source(values[31]);
+        let is_service: bool = WitnessCastable::cast_from_source(values[32]);
+        let shard_id: u8 = WitnessCastable::cast_from_source(values[33]);
+        let tx_number_in_block: u32 = WitnessCastable::cast_from_source(values[34]);
+        let timestamp: u32 = WitnessCastable::cast_from_source(values[35]);
+        let other_timestamp: u32 = WitnessCastable::cast_from_source(values[36]);
+
+        Self::Witness {
+            record: <LogQuery<F> as CSAllocatable<F>>::Witness {
+                address,
+                key,
+                read_value,
+                written_value,
+                aux_byte,
+                rw_flag,
+                rollback,
+                is_service,
+                shard_id,
+                tx_number_in_block,
+                timestamp,
+            },
+            timestamp: other_timestamp,
+        }
+    }
+
+    // we should be able to allocate without knowing values yet
+    fn create_without_value<CS: ConstraintSystem<F>>(_cs: &mut CS) -> Self {
+        todo!()
+    }
+
+    fn flatten_as_variables(&self) -> [Variable; Self::INTERNAL_STRUCT_LEN]
+    where
+        [(); Self::INTERNAL_STRUCT_LEN]:,
+    {
+        [
+            self.record.address.inner[0].get_variable(),
+            self.record.address.inner[1].get_variable(),
+            self.record.address.inner[2].get_variable(),
+            self.record.address.inner[3].get_variable(),
+            self.record.address.inner[4].get_variable(),
+            self.record.key.inner[0].get_variable(),
+            self.record.key.inner[1].get_variable(),
+            self.record.key.inner[2].get_variable(),
+            self.record.key.inner[3].get_variable(),
+            self.record.key.inner[4].get_variable(),
+            self.record.key.inner[5].get_variable(),
+            self.record.key.inner[6].get_variable(),
+            self.record.key.inner[7].get_variable(),
+            self.record.read_value.inner[0].get_variable(),
+            self.record.read_value.inner[1].get_variable(),
+            self.record.read_value.inner[2].get_variable(),
+            self.record.read_value.inner[3].get_variable(),
+            self.record.read_value.inner[4].get_variable(),
+            self.record.read_value.inner[5].get_variable(),
+            self.record.read_value.inner[6].get_variable(),
+            self.record.read_value.inner[7].get_variable(),
+            self.record.written_value.inner[0].get_variable(),
+            self.record.written_value.inner[1].get_variable(),
+            self.record.written_value.inner[2].get_variable(),
+            self.record.written_value.inner[3].get_variable(),
+            self.record.written_value.inner[4].get_variable(),
+            self.record.written_value.inner[5].get_variable(),
+            self.record.written_value.inner[6].get_variable(),
+            self.record.written_value.inner[7].get_variable(),
+            self.record.aux_byte.get_variable(),
+            self.record.rw_flag.get_variable(),
+            self.record.rollback.get_variable(),
+            self.record.is_service.get_variable(),
+            self.record.shard_id.get_variable(),
+            self.record.tx_number_in_block.get_variable(),
+            self.record.timestamp.get_variable(),
+            self.timestamp.get_variable(),
+        ]
+    }
+
+    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
+        todo!();
+    }
+}
+
+impl<F: SmallField> CircuitEncodableExt<F, TIMESTAMPED_STORAGE_LOG_ENCODING_LEN>
+    for TimestampedStorageLogRecord<F>
+{
+}
+
 pub fn sort_and_deduplicate_storage_access_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
@@ -138,7 +273,11 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     closed_form_input: StorageDeduplicatorInstanceWitness<F>,
     round_function: &R,
     limit: usize,
-) -> [Num<F>; 1] {
+) -> [Num<F>; 1]
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <TimestampedStorageLogRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
     // let columns3 = vec![
     //     PolyIdentifier::VariablesPolynomial(0),
     //     PolyIdentifier::VariablesPolynomial(1),
@@ -598,7 +737,11 @@ pub fn sort_and_deduplicate_storage_access_inner<
     UInt256<F>,
     UInt32<F>,
     UInt8<F>,
-) {
+)
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <TimestampedStorageLogRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
     assert!(limit <= u32::MAX as usize);
 
     // we can recreate it here, there are two cases:
@@ -644,14 +787,14 @@ pub fn sort_and_deduplicate_storage_access_inner<
         assert_eq!(extended_original_encoding.len(), fs_challenges.len() - 1);
 
         // accumulate into product
-        let original_encoding = original_encoding
+        let extended_original_encoding = extended_original_encoding
             .iter()
             .map(|v| Num::from_variable(*v))
-            .collect();
+            .collect::<Vec<Num<F>>>();
         let sorted_encoding = sorted_encoding
             .iter()
             .map(|v| Num::from_variable(*v))
-            .collect();
+            .collect::<Vec<Num<F>>>();
 
         let mut lhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
         let mut rhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
@@ -660,18 +803,18 @@ pub fn sort_and_deduplicate_storage_access_inner<
             .zip(sorted_encoding.into_iter())
             .zip(fs_challenges.iter())
         {
-            let lhs_contribution = original_el.mul(cs, &challenge)?;
-            let rhs_contribution = sorted_el.mul(cs, &challenge)?;
+            let lhs_contribution = original_el.mul(cs, &challenge);
+            let rhs_contribution = sorted_el.mul(cs, &challenge);
 
-            lhs_lc.push((&lhs_contribution, F::ONE));
-            rhs_lc.push((&rhs_contribution, F::ONE));
+            lhs_lc.push((lhs_contribution.get_variable(), F::ONE));
+            rhs_lc.push((rhs_contribution.get_variable(), F::ONE));
         }
 
-        lhs_lc.push((&additive_part, F::ONE));
-        rhs_lc.push((&additive_part, F::ONE));
+        lhs_lc.push((additive_part.get_variable(), F::ONE));
+        rhs_lc.push((additive_part.get_variable(), F::ONE));
 
-        linear_combination_collapse(cs, &mut lhs_lc, None);
-        linear_combination_collapse(cs, &mut rhs_lc, None);
+        let lhs_lc = Num::linear_combination(cs, &lhs_lc);
+        let rhs_lc = Num::linear_combination(cs, &rhs_lc);
 
         let lhs_candidate = lhs.mul(cs, &lhs_lc);
         let rhs_candidate = rhs.mul(cs, &rhs_lc);

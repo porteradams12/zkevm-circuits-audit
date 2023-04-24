@@ -1,6 +1,6 @@
 #![feature(generic_const_exprs)]
 #![feature(array_chunks)]
-#![feature(box_into_inner)]
+#![feature(more_qualified_paths)]
 
 use derivative::*;
 
