@@ -53,6 +53,8 @@ const TIMESTAMPED_STORAGE_LOG_ENCODING_LEN: usize = 20;
 
 use cs_derive::*;
 
+use std::sync::Arc;
+
 #[derive(Derivative, CSAllocatable)]
 #[derivative(Clone, Debug)]
 pub struct TimestampedStorageLogRecord<F: SmallField> {
@@ -203,18 +205,21 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     );
 
     // passthrought must be trivial
-    unsorted_queue_from_passthrough
-        .head
-        .enforce_equal(cs, &Num::zero(cs));
+    unsorted_queue_from_passthrough.enforce_trivial_head(cs);
 
-    let mut unsorted_queue = StorageLogQueue::conditionally_select(
+    let mut unsorted_queue = StorageLogQueue::from_state(
         cs,
-        &structured_input.start_flag,
-        &unsorted_queue_from_passthrough,
-        &unsorted_queue_from_fsm_input,
+        QueueState::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &unsorted_queue_from_passthrough.into_state(),
+            &unsorted_queue_from_fsm_input.into_state(),
+        ),
     );
 
-    unsorted_queue.witness = unsorted_queue_witness;
+    unsorted_queue.witness = Arc::new(CircuitQueueWitness::from_inner_witness(
+        unsorted_queue_witness,
+    ));
 
     // same logic from sorted
     let intermediate_sorted_queue_from_passthrough = CircuitQueue::<
@@ -272,9 +277,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     );
 
     // passthrought must be trivial
-    intermediate_sorted_queue_from_passthrough
-        .head
-        .enforce_equal(cs, &Num::zero(cs));
+    intermediate_sorted_queue_from_passthrough.enforce_trivial_head(cs);
 
     let mut intermediate_sorted_queue = CircuitQueue::<
         F,
@@ -285,14 +288,19 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         QUEUE_STATE_WIDTH,
         TIMESTAMPED_STORAGE_LOG_ENCODING_LEN,
         R,
-    >::conditionally_select(
+    >::from_state(
         cs,
-        &structured_input.start_flag,
-        &intermediate_sorted_queue_from_passthrough,
-        &intermediate_sorted_queue_from_fsm_input,
+        QueueState::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &intermediate_sorted_queue_from_passthrough.into_state(),
+            &intermediate_sorted_queue_from_fsm_input.into_state(),
+        ),
     );
 
-    intermediate_sorted_queue.witness = intermediate_sorted_queue_witness;
+    intermediate_sorted_queue.witness = Arc::new(CircuitQueueWitness::from_inner_witness(
+        intermediate_sorted_queue_witness,
+    ));
 
     // for final sorted queue it's easier
 
@@ -315,11 +323,14 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
             .length,
     );
 
-    let mut final_sorted_queue = StorageLogQueue::conditionally_select(
+    let mut final_sorted_queue = StorageLogQueue::from_state(
         cs,
-        structured_input.start_flag,
-        &empty_final_sorted_queue,
-        &final_sorted_queue_from_fsm_input,
+        QueueState::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &empty_final_sorted_queue.into_state(),
+            &final_sorted_queue_from_fsm_input.into_state(),
+        ),
     );
 
     // we can always ensure this
@@ -391,10 +402,10 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     );
 
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
-    let previous_packed_key = <[Variable; 8]>::conditionally_select(
+    let previous_packed_key = <[Num<F>; 8]>::conditionally_select(
         cs,
         structured_input.start_flag,
-        &[Variable::placeholder(); 8],
+        &[Num::<F>::zero(cs); 8],
         &structured_input.hidden_fsm_input.previous_packed_key,
     );
 
@@ -443,13 +454,13 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         limit,
     );
 
-    let unsorted_is_empty = unsorted_queue.is_empty(cs)?;
-    let sorted_is_empty = intermediate_sorted_queue.is_empty(cs)?;
+    let unsorted_is_empty = unsorted_queue.is_empty(cs);
+    let sorted_is_empty = intermediate_sorted_queue.is_empty(cs);
 
     Boolean::enforce_equal(cs, &unsorted_is_empty, &sorted_is_empty);
 
-    let completed = unsorted_is_empty.and(cs, sorted_is_empty)?;
-    Num::conditionally_enforce_equal(cs, &completed, &new_lhs, &new_rhs);
+    let completed = unsorted_is_empty.and(cs, sorted_is_empty);
+    Num::conditionally_enforce_equal(cs, completed, &new_lhs, &new_rhs);
 
     // form the input/output
 
@@ -479,11 +490,14 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
 
     structured_input.completion_flag = completed;
 
-    let final_queue_for_observable_output = CircuitQueue::conditionally_select(
+    let final_queue_for_observable_output = CircuitQueue::from_state(
         cs,
-        &completed,
-        &final_sorted_queue,
-        &CircuitQueue::empty(cs),
+        QueueState::conditionally_select(
+            cs,
+            completed,
+            &final_sorted_queue.into_state(),
+            &QueueState::empty(cs),
+        ),
     );
 
     structured_input.observable_output.final_sorted_queue_state =
@@ -493,7 +507,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         .hidden_fsm_output
         .current_final_sorted_queue_state = final_sorted_queue.into_state();
 
-    if let Some(circuit_result) = structured_input.create_witness() {
+    if let Some(circuit_result) = structured_input.get_witness() {
         assert_eq!(circuit_result, structured_input_witness);
     }
 
@@ -535,7 +549,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
     is_start: Boolean<F>,
     mut cycle_idx: UInt32<F>,
     fs_challenges: [Num<F>; NUM_PERMUTATION_ARG_CHALLENGES],
-    mut previous_packed_key: [Variable; 8],
+    mut previous_packed_key: [Num<F>; 8],
     mut previous_key: UInt256<F>,
     mut previous_address: UInt160<F>,
     mut previous_timestamp: UInt32<F>,
@@ -550,7 +564,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
     Num<F>,
     Num<F>,
     UInt32<F>,
-    [Num<F>; 2],
+    [Num<F>; 8],
     UInt256<F>,
     UInt160<F>,
     UInt32<F>,
@@ -592,13 +606,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
         let should_pop = original_is_empty.negated(cs);
         let item_is_trivial = original_is_empty;
 
-        let original_encoding = original_queue.pop_first_encoding_only::<_, _, 2, 3>(
-            cs,
-            &should_pop,
-            round_function,
-        )?;
-        let (sorted_item, sorted_encoding) = intermediate_sorted_queue
-            .pop_first_and_return_encoding(cs, &should_pop, round_function)?;
+        let (_, original_encoding) = original_queue.pop_front(cs, should_pop);
+        let (sorted_item, sorted_encoding) = intermediate_sorted_queue.pop_front(cs, should_pop);
         let extended_original_encoding =
             TimestampedStorageLogRecord::append_timestamp_to_raw_query_encoding(
                 cs,
@@ -610,6 +619,14 @@ pub fn sort_and_deduplicate_storage_access_inner<
         assert_eq!(extended_original_encoding.len(), fs_challenges.len() - 1);
 
         // accumulate into product
+        let original_encoding = original_encoding
+            .iter()
+            .map(|v| Num::from_variable(*v))
+            .collect();
+        let sorted_encoding = sorted_encoding
+            .iter()
+            .map(|v| Num::from_variable(*v))
+            .collect();
 
         let mut lhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
         let mut rhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
@@ -776,10 +793,22 @@ pub fn sort_and_deduplicate_storage_access_inner<
             let write_rollback = non_trivial_write_of_same_cell.and(cs, record.rollback);
 
             // update rollback depth the is a result of this action
-            this_cell_current_depth =
-                this_cell_current_depth.conditionally_increment(cs, &write_no_rollback);
-            this_cell_current_depth =
-                this_cell_current_depth.conditionally_decrement(cs, &write_rollback);
+            let (incremented_depth, _) =
+                this_cell_current_depth.add_no_overflow(cs, UInt32::allocated_constant(cs, 1));
+            this_cell_current_depth = UInt32::conditionally_select(
+                cs,
+                write_no_rollback,
+                &incremented_depth,
+                &this_cell_current_depth,
+            );
+            let (decremented_depth, _) =
+                this_cell_current_depth.sub_no_overflow(cs, UInt32::allocated_constant(cs, 1));
+            this_cell_current_depth = UInt32::conditionally_select(
+                cs,
+                write_rollback,
+                &this_cell_current_depth,
+                &decremented_depth,
+            );
 
             // check consistency
             let read_is_equal_to_current =
@@ -865,7 +894,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
             .negated(cs)
             .and(cs, should_update.and(cs, queues_exhausted));
 
-        sorted_queue.push(cs, &query, round_function);
+        sorted_queue.push(cs, query, should_push);
 
         // reset flag to match simple witness generation convensions
         this_cell_has_explicit_read_and_rollback_depth_zero = Boolean::conditionally_select(
@@ -897,7 +926,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
 pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     key_tuple: (UInt8<F>, UInt160<F>, UInt256<F>),
-) -> [Variable; 8] {
+) -> [Num<F>; 8] {
     debug_assert!(F::CAPACITY_BITS >= 56);
 
     // LE packing
@@ -935,8 +964,7 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
                 F::from_u64_unchecked(1u64 << 48),
             ),
         ],
-    )
-    .get_variable();
+    );
 
     let v1 = Num::linear_combination(
         cs,
@@ -967,8 +995,7 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
                 F::from_u64_unchecked(1u64 << 48),
             ),
         ],
-    )
-    .get_variable();
+    );
 
     let v2 = Num::linear_combination(
         cs,
@@ -999,8 +1026,7 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
                 F::from_u64_unchecked(1u64 << 48),
             ),
         ],
-    )
-    .get_variable();
+    );
 
     let v3 = Num::linear_combination(
         cs,
@@ -1031,8 +1057,7 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
                 F::from_u64_unchecked(1u64 << 48),
             ),
         ],
-    )
-    .get_variable();
+    );
 
     let v4 = Num::linear_combination(
         cs,
@@ -1063,8 +1088,7 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
                 F::from_u64_unchecked(1u64 << 48),
             ),
         ],
-    )
-    .get_variable();
+    );
 
     let v5 = Num::linear_combination(
         cs,
@@ -1095,8 +1119,7 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
                 F::from_u64_unchecked(1u64 << 48),
             ),
         ],
-    )
-    .get_variable();
+    );
 
     let v6 = Num::linear_combination(
         cs,
@@ -1127,8 +1150,7 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
                 F::from_u64_unchecked(1u64 << 48),
             ),
         ],
-    )
-    .get_variable();
+    );
 
     let v7 = Num::linear_combination(
         cs,
@@ -1144,8 +1166,7 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
             ),
             (shard_id.get_variable(), F::from_u64_unchecked(1u64 << 24)),
         ],
-    )
-    .get_variable();
+    );
 
     [v0, v1, v2, v3, v4, v5, v6, v7]
 }
@@ -1155,8 +1176,8 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
 #[track_caller]
 pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
-    a: &[Variable],
-    b: &[Variable],
+    a: &[Num<F>],
+    b: &[Num<F>],
     width_data: &[usize],
 ) -> (Boolean<F>, Boolean<F>) {
     assert_eq!(a.len(), b.len());
@@ -1169,29 +1190,33 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
     let mut limbs_are_equal = vec![];
 
     for ((a, b), width) in a.iter().zip(b.iter()).zip(width_data.iter()) {
-        let (result_witness, borrow_witness) =
-            match (a.get_value(), b.get_value(), previous_borrow.get_value()) {
-                (Some(a), Some(b), Some(previous_borrow_value)) => {
-                    let a = a.as_raw_u64();
-                    let b = b.as_raw_u64();
-                    let borrow_guard = 1u64 << width;
+        let (result_witness, borrow_witness) = {
+            use num_integer::Integer;
+            use num_traits::Zero;
 
-                    let tmp = borrow_guard.clone() + b - a - (previous_borrow_value as u64);
-                    let (q, r) = tmp.div_rem(&borrow_guard);
+            let a = cs.get_value(a.get_variable().into()).wait().unwrap()[0].as_raw_u64();
+            let b = cs.get_value(b.get_variable().into()).wait().unwrap()[0].as_raw_u64();
+            let borrow_guard = 1u64 << width;
 
-                    let borrow = q.is_zero();
-                    let wit = F::from_u64_unchecked(r);
+            let tmp = borrow_guard.clone() + b
+                - a
+                - cs.get_value(previous_borrow.get_variable().into())
+                    .wait()
+                    .unwrap()[0]
+                    .as_raw_u64();
+            let (q, r) = tmp.div_rem(&borrow_guard);
 
-                    (Some(wit), Some(borrow))
-                }
-                _ => (None, None),
-            };
+            let borrow = q.is_zero();
+            let wit = F::from_u64_unchecked(r);
 
-        let borrow = Boolean::alloc(cs, borrow_witness)?;
-        let intermediate_result = Num::alloc(cs, result_witness)?;
+            (wit, borrow)
+        };
+
+        let borrow = Boolean::allocate(cs, borrow_witness);
+        let intermediate_result = Num::allocate(cs, result_witness);
         intermediate_result.constraint_into_bit_length_bytes(cs, *width)?;
 
-        let intermediate_is_zero = intermediate_result.is_zero(cs)?;
+        let intermediate_is_zero = intermediate_result.is_zero(cs);
         limbs_are_equal.push(intermediate_is_zero);
 
         // b - a - previous_borrow + 2^X * borrow = intermediate
@@ -1201,9 +1226,9 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
             &[
                 (b.get_variable(), F::ONE),
                 (a.get_variable(), minus_one),
-                (previous_borrow, minus_one),
-                (intermediate_result, minus_one),
-                (borrow, F::from_u64_unchecked(1u64 << width)),
+                (previous_borrow.get_variable(), minus_one),
+                (intermediate_result.get_variable(), minus_one),
+                (borrow.get_variable(), F::from_u64_unchecked(1u64 << width)),
             ],
         )
         .get_variable();
@@ -1213,7 +1238,7 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
     }
 
     let final_borrow = previous_borrow;
-    let eq = limbs_are_equal[0].multi_and(cs, &limbs_are_equal[1..]);
+    let eq = Boolean::multi_and(cs, &limbs_are_equal);
 
-    Ok((eq, final_borrow))
+    (eq, final_borrow)
 }

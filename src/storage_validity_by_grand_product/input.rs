@@ -23,6 +23,8 @@ use boojum::{
 use cs_derive::*;
 use derivative::*;
 
+use super::TimestampedStorageLogRecord;
+
 // FSM
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
@@ -34,7 +36,7 @@ pub struct StorageDeduplicatorFSMInputOutput<F: SmallField> {
     pub current_intermediate_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub current_final_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub cycle_idx: UInt32<F>,
-    pub previous_packed_key: [Num<F>; 2],
+    pub previous_packed_key: [Num<F>; 8],
     pub previous_key: UInt256<F>,
     pub previous_address: UInt160<F>,
     pub previous_timestamp: UInt32<F>,
@@ -55,7 +57,7 @@ impl<F: SmallField> CSPlaceholder<F> for StorageDeduplicatorFSMInputOutput<F> {
                 QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             current_final_sorted_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             cycle_idx: UInt32::<F>::zero(cs),
-            previous_packed_key: [Num::zero(cs); 2],
+            previous_packed_key: [Num::<F>::zero(cs); 8],
             previous_key: UInt256::<F>::zero(cs),
             previous_address: UInt160::<F>::zero(cs),
             previous_timestamp: UInt32::<F>::zero(cs),
@@ -117,7 +119,7 @@ pub type StorageDeduplicatorInputOutputWitness<F> = crate::fsm_input_output::Clo
 #[serde(bound = "")]
 pub struct StorageDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: StorageDeduplicatorInputOutputWitness<F>,
-    pub unsorted_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 5, LOG_QUERY_PACKED_WIDTH>,
+    pub unsorted_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
     pub intermediate_sorted_queue_witness:
-        CircuitQueueRawWitness<F, LogQuery<F>, 5, LOG_QUERY_PACKED_WIDTH>,
+        CircuitQueueRawWitness<F, TimestampedStorageLogRecord<F>, 4, LOG_QUERY_PACKED_WIDTH>,
 }
