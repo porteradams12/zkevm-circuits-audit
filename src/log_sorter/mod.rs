@@ -70,6 +70,13 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
             .tail.length,
     );
 
+
+    // passthrough must be trivial
+    let zero_num = Num::zero(cs);
+     for el in unsorted_queue_from_passthrough.head.iter() {
+        Num::enforce_equal(cs, el, &zero_num);
+    }
+
     let unsorted_queue_from_fsm: CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R> = StorageLogQueue::from_raw_parts(
         cs,
         structured_input
@@ -119,10 +126,11 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
             .tail.length,
     );
 
-//     // it must be trivial
-//     intermediate_sorted_queue_from_passthrough
-//         .head
-//         .enforce_equal(cs, &Num::zero());
+    // passthrough must be trivial
+    let zero_num = Num::zero(cs);
+    for el in intermediate_sorted_queue_from_passthrough.head.iter() {
+        Num::enforce_equal(cs, el, &zero_num);
+    }
 
     let intermediate_sorted_queue_from_fsm: CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R> = StorageLogQueue::from_raw_parts(
         cs,
