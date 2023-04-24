@@ -168,7 +168,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         structured_input_witness.clone(),
     );
 
-    let unsorted_queue_from_passthrough = StorageLogQueue::from_raw_parts(
+    let unsorted_queue_from_passthrough = StorageLogQueue::<F, R>::from_raw_parts(
         cs,
         structured_input
             .observable_input
@@ -186,7 +186,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
             .length,
     );
 
-    let unsorted_queue_from_fsm_input = StorageLogQueue::from_raw_parts(
+    let unsorted_queue_from_fsm_input = StorageLogQueue::<F, R>::from_raw_parts(
         cs,
         structured_input
             .hidden_fsm_input
@@ -207,7 +207,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     // passthrought must be trivial
     unsorted_queue_from_passthrough.enforce_trivial_head(cs);
 
-    let mut unsorted_queue = StorageLogQueue::from_state(
+    let mut unsorted_queue = StorageLogQueue::<F, R>::from_state(
         cs,
         QueueState::conditionally_select(
             cs,
@@ -305,7 +305,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     // for final sorted queue it's easier
 
     let empty_final_sorted_queue = StorageLogQueue::<F, R>::empty(cs);
-    let final_sorted_queue_from_fsm_input = StorageLogQueue::from_raw_parts(
+    let final_sorted_queue_from_fsm_input = StorageLogQueue::<F, R>::from_raw_parts(
         cs,
         structured_input
             .hidden_fsm_input
@@ -323,7 +323,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
             .length,
     );
 
-    let mut final_sorted_queue = StorageLogQueue::from_state(
+    let mut final_sorted_queue = StorageLogQueue::<F, R>::from_state(
         cs,
         QueueState::conditionally_select(
             cs,
@@ -505,7 +505,16 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
 
     structured_input.completion_flag = completed;
 
-    let final_queue_for_observable_output = CircuitQueue::from_state(
+    let final_queue_for_observable_output = CircuitQueue::<
+        F,
+        LogQuery<F>,
+        8,
+        12,
+        4,
+        QUEUE_STATE_WIDTH,
+        LOG_QUERY_PACKED_WIDTH,
+        R,
+    >::from_state(
         cs,
         QueueState::conditionally_select(
             cs,
