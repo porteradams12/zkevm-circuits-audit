@@ -383,8 +383,6 @@ pub fn repack_and_prove_events_rollbacks_inner<
 
     Num::enforce_equal(cs,  &unsorted_queue_lenght, &intermediate_sorted_queue_lenght);
 
-    let additive_part = fs_challenges[NUM_PERMUTATION_ARG_CHALLENGES - 1];
-
     // reallocate and simultaneously collapse rollbacks
 
     const PACKED_WIDTHS: [usize; 1] = [33];
