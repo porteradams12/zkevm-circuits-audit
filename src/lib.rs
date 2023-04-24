@@ -3,6 +3,8 @@
 
 use derivative::*;
 
+pub use boojum;
+
 pub mod config;
 
 pub mod base_structures;
