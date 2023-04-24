@@ -12,6 +12,8 @@ pub mod fsm_input_output;
 pub mod demux_log_queue;
 pub mod storage_application;
 pub mod ecrecover;
+pub mod sha256_round_function;
+pub mod keccak256_round_function;
 
 use boojum::pairing::ff;
 

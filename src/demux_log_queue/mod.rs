@@ -42,11 +42,13 @@ pub fn demultiplex_storage_logs_enty_point<
     limit: usize,
 ) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH] 
 where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
-    let structured_input_witness = witness.closed_form_input;
-    let initial_queue_witness = witness.initial_queue_witness;
+    let LogDemuxerCircuitInstanceWitness {
+        closed_form_input,
+        initial_queue_witness,
+    } = witness;
 
     let mut structured_input =
-        LogDemuxerInputOutput::alloc_ignoring_outputs(cs, structured_input_witness.clone());
+        LogDemuxerInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
 
     let queue_states_from_fsm = [
         &structured_input.hidden_fsm_input.initial_log_queue_state,
@@ -245,6 +247,9 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
         &structured_input.hidden_fsm_output.ecrecover_access_queue_state,
         &structured_input.observable_output.ecrecover_access_queue_state
     );
+
+    // self-check
+    structured_input.hook_compare_witness(cs, &closed_form_input);
 
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
