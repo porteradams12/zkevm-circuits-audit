@@ -731,6 +731,7 @@ mod test {
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::traits::allocatable::CSAllocatable;
     use boojum::pairing::ff::{Field, PrimeField, SqrtField};
+    use boojum::worker::Worker;
 
     use super::*;
 
@@ -920,8 +921,11 @@ mod test {
         let recovered_address = recovered_address.witness_hook(cs)().unwrap();
         assert_eq!(&recovered_address[12..], &eth_address[..]);
 
-        // cs.pad_and_shrink();
         dbg!(cs.next_available_row());
-        cs.print_gate_stats()
+        cs.print_gate_stats();
+
+        cs.pad_and_shrink();
+        let worker = Worker::new();
+        assert!(owned_cs.check_if_satisfied(&worker));
     }
 }
