@@ -436,9 +436,12 @@ pub(crate) fn apply_log<
         .new_ergs_left_candidates
         .push((should_apply, ergs_remaining));
 
+    assert!(STORAGE_READ_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
+    assert!(STORAGE_READ_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
+
     diffs_accumulator
         .sponge_candidates_to_run
-        .push((should_apply, relations));
+        .push((false, false, should_apply, relations));
 }
 
 use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;

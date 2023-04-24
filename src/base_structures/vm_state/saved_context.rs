@@ -384,7 +384,7 @@ impl<F: SmallField> CSAllocatableExt<F> for ExecutionContextRecord<F> {
         }
     }
 
-    fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, F>) {
+    fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, '_, F>) {
         let src = WitnessCastable::cast_into_source(witness.this);
         dst.extend(src);
 

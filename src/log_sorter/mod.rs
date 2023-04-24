@@ -7,13 +7,11 @@ use boojum::gadgets::{
     traits::{selectable::Selectable, allocatable::{CSAllocatableExt, CSPlaceholder}, encodable::CircuitEncodableExt},
     num::Num,
     boolean::Boolean,
-    u160::*,
     u32::UInt32,
     queue::*,
     u256::UInt256,
     u8::UInt8
 };
-use boojum::serde_utils::BigArraySerde;
 use crate::fsm_input_output::{ClosedFormInputCompactForm, commit_variable_length_encodable_item};
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::base_structures::log_query::LogQuery;
@@ -196,11 +194,11 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
 
     // get challenges for permutation argument
     let mut fs_input = vec![];
-    fs_input.extend_from_slice(&unsorted_queue_from_passthrough.tail.map(|el| el.variable));
-    fs_input.push(unsorted_queue_from_passthrough.length.variable);
+    fs_input.extend_from_slice(&unsorted_queue_from_passthrough.tail.map(|el| el.get_variable()));
+    fs_input.push(unsorted_queue_from_passthrough.length.get_variable());
 
-    fs_input.extend_from_slice(&intermediate_sorted_queue_from_passthrough.tail.map(|el| el.variable));
-    fs_input.push(intermediate_sorted_queue_from_passthrough.length.variable);
+    fs_input.extend_from_slice(&intermediate_sorted_queue_from_passthrough.tail.map(|el| el.get_variable()));
+    fs_input.push(intermediate_sorted_queue_from_passthrough.length.get_variable());
 
 
     let total_elements_to_absorb = MEMORY_QUERY_PACKED_WIDTH;
@@ -346,7 +344,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     // dbg!(compact_form.create_witness());
     let input_commitment = commit_variable_length_encodable_item(cs, &compact_form, round_function);
     for el in input_commitment.iter() {
-        let gate = PublicInputGate::new(el.variable);
+        let gate = PublicInputGate::new(el.get_variable());
         gate.add_to_cs(cs);
     }
 
@@ -384,8 +382,8 @@ pub fn repack_and_prove_events_rollbacks_inner<
     let no_work = unsorted_queue.is_empty(cs);
     let mut previous_is_trivial = Boolean::multi_or(cs, &[no_work, is_start]);
 
-    let unsorted_queue_lenght = Num::from_variable(unsorted_queue.length.variable);
-    let intermediate_sorted_queue_lenght = Num::from_variable(intermediate_sorted_queue.length.variable);
+    let unsorted_queue_lenght = Num::from_variable(unsorted_queue.length.get_variable());
+    let intermediate_sorted_queue_lenght = Num::from_variable(intermediate_sorted_queue.length.get_variable());
 
     Num::enforce_equal(cs,  &unsorted_queue_lenght, &intermediate_sorted_queue_lenght);
 
@@ -580,8 +578,8 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
     // 32 + 1 = 33 in total
     let value_0 = Num::linear_combination(
         cs,
-        &[(rollback.variable, F::ONE),
-        (timestamp.variable, F::from_u64_unchecked(1u64 << 32)),
+        &[(rollback.get_variable(), F::ONE),
+        (timestamp.get_variable(), F::from_u64_unchecked(1u64 << 32)),
         ]
     );
     value_0
@@ -602,10 +600,10 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
     let mut limbs_are_equal = vec![];
     for (a, b) in a.iter().zip(b.iter()) {
         let a_uint32 = unsafe {
-            UInt32::from_variable_unchecked(a.variable)
+            UInt32::from_variable_unchecked(a.get_variable())
         };
         let b_uint32 = unsafe {
-            UInt32::from_variable_unchecked(b.variable)
+            UInt32::from_variable_unchecked(b.get_variable())
         };
         let (diff, borrow, _) = a_uint32.overflowing_sub_with_borrow_in(cs, b_uint32, previous_borrow);
         let equal = diff.is_zero(cs);

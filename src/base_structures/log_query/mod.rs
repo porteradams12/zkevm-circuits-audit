@@ -15,10 +15,11 @@ use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::cs::traits::cs::DstBuffer;
+use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use boojum::gadgets::traits::encodable::CircuitEncodableExt;
 use cs_derive::*;
 
-#[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable)]
+#[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable, CSVarLengthEncodable)]
 #[derivative(Clone, Copy, Debug, Hash)]
 pub struct LogQuery<F: SmallField> {
     pub address: UInt160<F>,
@@ -491,11 +492,12 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
         ]
     }
     
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, F>) {
+    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
         todo!();
     }
 }
 
 use boojum::gadgets::queue::CircuitQueue;
 use crate::base_structures::vm_state::{QUEUE_STATE_WIDTH};
+
 pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = CircuitQueue<F, LogQuery<F>, AW, SW, CW, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;

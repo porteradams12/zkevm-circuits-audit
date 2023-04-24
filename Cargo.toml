@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 derivative = "2"
 serde = {version = "1", features = ["derive"]}
-rand = "0.8"
+rand = "0.4"
 smallvec = {version = "*", features = ["const_generics", "const_new", "serde"] }
 lazy_static = "*"
 arrayvec = "*"
@@ -19,6 +19,8 @@ ethereum-types = "0.12.*"
 cs_derive = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
 serde_json = "*"
 itertools = "0.10"
+rand_new = {package = "rand", version = "0.8"}
+
 
 [dev-dependencies]
 hex = "*"

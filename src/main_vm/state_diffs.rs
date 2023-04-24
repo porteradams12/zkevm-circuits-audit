@@ -68,6 +68,8 @@ pub struct StateDiffsAccumulator<F: SmallField> {
     pub log_queue_rollback_candidates: Vec<(Boolean<F>, UInt32<F>, [Num<F>; QUEUE_STATE_WIDTH])>,
     // sponges to run. Should not include common sponges for src/dst operands
     pub sponge_candidates_to_run: Vec<(
+        bool,
+        bool,
         Boolean<F>,
         ArrayVec<
             (

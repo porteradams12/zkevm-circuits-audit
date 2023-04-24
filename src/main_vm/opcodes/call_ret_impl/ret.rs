@@ -1,4 +1,4 @@
-use boojum::cs::{gates::reduction_by_powers_gate, traits::cs::DstBuffer};
+use boojum::cs::{traits::cs::DstBuffer};
 use boojum::config::*;
 use crate::base_structures::{register::VMRegister, vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH};
 
@@ -9,7 +9,6 @@ use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use crate::base_structures::vm_state::QUEUE_STATE_WIDTH;
-use boojum::gadgets::traits::allocatable::CSAllocatable;
 
 use arrayvec::ArrayVec;
 
@@ -27,36 +26,6 @@ pub(crate) struct RetData<F: SmallField> {
     pub(crate) remove_ptr_on_specific_registers: [Option<Boolean<F>>; REGISTERS_COUNT],
 }
 
-pub(crate) struct PartialRetABI<F: SmallField> {
-    pub(crate) forwarding_mode_byte: UInt8<F>,
-}
-
-#[derive(Derivative)]
-#[derivative(Clone, Copy, Debug)]
-
-pub(crate) struct RetForwardingMode<F: SmallField> {
-    pub(crate) use_heap: Boolean<F>,
-    pub(crate) use_aux_heap: Boolean<F>,
-    pub(crate) forward_fat_pointer: Boolean<F>,
-}
-
-use crate::main_vm::register_input_view::RegisterInputView;
-
-impl<F: SmallField> PartialRetABI<F> {
-    pub(crate) fn from_register_view<CS: ConstraintSystem<F>>(
-        _cs: &mut CS,
-        input: &RegisterInputView<F>,
-    ) -> Self {
-        let forwarding_mode_byte = input.u8x32_view[28];
-
-        let new = Self {
-            forwarding_mode_byte,
-        };
-
-        new
-    }
-}
-
 pub(crate) fn callstack_candidate_for_ret<
     F: SmallField,
     CS: ConstraintSystem<F>,
@@ -68,7 +37,7 @@ pub(crate) fn callstack_candidate_for_ret<
     opcode_carry_parts: &AfterDecodingCarryParts<F>,
     witness_oracle: &SynchronizedWitnessOracle<F, W>,
     common_abi_parts: &CommonCallRetABI<F>,
-    forwarding_data: &RetForwardingMode<F>,
+    forwarding_data: &CallRetForwardingMode<F>,
 ) -> RetData<F>
 where
     [(); <ExecutionContextRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
@@ -151,7 +120,7 @@ where
             cs.set_values_with_dependencies_vararg(
                 &dependencies,
                 &outputs_to_set,
-                move |inputs: &[F], buffer: &mut DstBuffer<'_, F>| {
+                move |inputs: &[F], buffer: &mut DstBuffer<'_, '_, F>| {
                     let callstack_depth = inputs[0].as_u64() as u32;
 
                     let execute = inputs[1].as_u64();
@@ -195,17 +164,6 @@ where
     non_local_frame_exceptions.push(fat_ptr_expected_exception);
 
     let do_not_forward_ptr = forward_fat_pointer.negated(cs);
-
-    let non_zero_offset_if_not_forwarding = Boolean::multi_and(
-        cs,
-        &[
-            do_not_forward_ptr,
-            common_abi_parts.ptr_validation_data.offset_is_non_zero,
-            is_far_return,
-        ],
-    );
-
-    non_local_frame_exceptions.push(non_zero_offset_if_not_forwarding);
 
     // we also want unidirectional movement of returndata
     // check if fat_ptr.memory_page < ctx.base_page and throw if it's the case
@@ -262,6 +220,9 @@ where
 
     let memory_region_is_not_addressable = common_abi_parts.ptr_validation_data.is_non_addressable;
     let upper_bound = common_abi_parts.upper_bound;
+    // first mask to 0 if exceptions happened
+    let upper_bound = upper_bound.mask_negated(cs, exceptions_collapsed);
+    // then compute to penalize for out of memory access attemp
 
     // and penalize if pointer is fresh and not addressable
     let penalize_heap_overflow =
