@@ -138,7 +138,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     closed_form_input: StorageDeduplicatorInstanceWitness<F>,
     round_function: &R,
     limit: usize,
-) -> Num<F> {
+) -> [Num<F>; 1] {
     // let columns3 = vec![
     //     PolyIdentifier::VariablesPolynomial(0),
     //     PolyIdentifier::VariablesPolynomial(1),
@@ -334,22 +334,27 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     );
 
     // we can always ensure this
-    unsorted_queue
-        .len()
-        .inner
-        .enforce_equal(cs, &intermediate_sorted_queue.len().inner)?;
+    UInt32::equals(
+        cs,
+        &unsorted_queue.length,
+        &intermediate_sorted_queue.length,
+    );
 
     // get challenges for permutation argument
 
     let mut fs_input = vec![];
-    fs_input.push(unsorted_queue_from_passthrough.get_tail_state());
-    fs_input.push(unsorted_queue_from_passthrough.len().inner);
-    fs_input.push(intermediate_sorted_queue_from_passthrough.get_tail_state());
-    fs_input.push(intermediate_sorted_queue_from_passthrough.len().inner);
+    fs_input.extend(unsorted_queue_from_passthrough.tail);
+    fs_input.push(unsorted_queue_from_passthrough.length.into_num());
+    fs_input.extend(intermediate_sorted_queue_from_passthrough.tail);
+    fs_input.push(intermediate_sorted_queue_from_passthrough.length.into_num());
 
     // this is a permutation proof through the grand product
     let mut state = R::create_empty_state(cs);
-    R::apply_length_specialization(cs, &mut state, fs_input.len());
+    R::apply_length_specialization(
+        cs,
+        &mut state,
+        Num::allocate(cs, F::from_u64_unchecked(fs_input.len() as u64)).get_variable(),
+    );
     for chunk in fs_input.chunks(12) {
         let padding_els = 12 - chunk.len();
         let input_fixed_len: [Num<F>; 12] = if padding_els == 0 {
@@ -367,7 +372,13 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
                 .expect("length must match")
         };
 
-        state = R::compute_round_function_over_nums(cs, input_fixed_len);
+        // Create an array of variables so that we can continue hashing into the appropriate state.
+        let mut input_fixed_len_variable = [Variable::placeholder(); 12];
+        input_fixed_len_variable
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, e)| *e = input_fixed_len[i].get_variable());
+        state = R::compute_round_function(cs, input_fixed_len_variable);
     }
 
     let mut taken = 0; // up to absorbtion length
@@ -385,7 +396,11 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         taken += 1;
     }
 
-    let fs_challenges: [Num<F>; NUM_PERMUTATION_ARG_CHALLENGES] = fs_challenges.try_into().unwrap();
+    let mut fs_challenges_nums = [Num::zero(cs); NUM_PERMUTATION_ARG_CHALLENGES];
+    fs_challenges_nums
+        .iter_mut()
+        .zip(fs_challenges)
+        .for_each(|(e, v)| *e = Num::from_variable(v));
 
     let initial_lhs = Num::conditionally_select(
         cs,
@@ -438,7 +453,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         &mut final_sorted_queue,
         structured_input.start_flag,
         cycle_idx,
-        fs_challenges,
+        fs_challenges_nums,
         previous_packed_key,
         structured_input.hidden_fsm_input.previous_key,
         structured_input.hidden_fsm_input.previous_address,
@@ -507,7 +522,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         .hidden_fsm_output
         .current_final_sorted_queue_state = final_sorted_queue.into_state();
 
-    if let Some(circuit_result) = structured_input.get_witness() {
+    if let Some(circuit_result) = structured_input.witness_hook(&*cs)() {
         assert_eq!(circuit_result, structured_input_witness);
     }
 
@@ -517,11 +532,12 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     // dbg!(compact_form.create_witness());
     let input_committment =
         commit_variable_length_encodable_item(cs, &compact_form, round_function);
-    let input_committment_value = input_committment.get_value();
-    let public_input = Num::<F>::alloc_input(cs, || Ok(input_committment_value.grab()?))?;
-    public_input.enforce_equal(cs, &input_committment.get_variable())?;
+    for el in input_committment.iter() {
+        let gate = PublicInputGate::new(el.get_variable());
+        gate.add_to_cs(cs);
+    }
 
-    Ok(public_input)
+    input_committment
 }
 
 const NUM_PERMUTATION_ARG_CHALLENGES: usize = TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1;
@@ -729,7 +745,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
                 .negated(cs)
                 .and(cs, keys_are_equal.negated(cs).and(cs, should_update));
 
-            sorted_queue.push(cs, &query, round_function);
+            sorted_queue.push(cs, query, should_push);
 
             let new_non_trivial_cell = item_is_trivial
                 .negated(cs)
@@ -1194,16 +1210,12 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
             use num_integer::Integer;
             use num_traits::Zero;
 
-            let a = cs.get_value(a.get_variable().into()).wait().unwrap()[0].as_raw_u64();
-            let b = cs.get_value(b.get_variable().into()).wait().unwrap()[0].as_raw_u64();
+            let a = a.witness_hook(&*cs)().unwrap().as_raw_u64();
+            let b = b.witness_hook(&*cs)().unwrap().as_raw_u64();
             let borrow_guard = 1u64 << width;
 
-            let tmp = borrow_guard.clone() + b
-                - a
-                - cs.get_value(previous_borrow.get_variable().into())
-                    .wait()
-                    .unwrap()[0]
-                    .as_raw_u64();
+            let tmp =
+                borrow_guard.clone() + b - a - previous_borrow.witness_hook(&*cs)().unwrap() as u64;
             let (q, r) = tmp.div_rem(&borrow_guard);
 
             let borrow = q.is_zero();
@@ -1214,7 +1226,7 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
 
         let borrow = Boolean::allocate(cs, borrow_witness);
         let intermediate_result = Num::allocate(cs, result_witness);
-        intermediate_result.constraint_into_bit_length_bytes(cs, *width)?;
+        intermediate_result.constraint_bit_length_as_bytes(cs, *width);
 
         let intermediate_is_zero = intermediate_result.is_zero(cs);
         limbs_are_equal.push(intermediate_is_zero);
