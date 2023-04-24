@@ -346,15 +346,13 @@ where
     // passthrought must be trivial
     unsorted_queue_from_passthrough.enforce_trivial_head(cs);
 
-    let mut unsorted_queue = StorageLogQueue::<F, R>::from_state(
+    let state = QueueState::conditionally_select(
         cs,
-        QueueState::conditionally_select(
-            cs,
-            structured_input.start_flag,
-            &unsorted_queue_from_passthrough.into_state(),
-            &unsorted_queue_from_fsm_input.into_state(),
-        ),
+        structured_input.start_flag,
+        &unsorted_queue_from_passthrough.into_state(),
+        &unsorted_queue_from_fsm_input.into_state(),
     );
+    let mut unsorted_queue = StorageLogQueue::<F, R>::from_state(cs, state);
 
     unsorted_queue.witness = Arc::new(CircuitQueueWitness::from_inner_witness(
         unsorted_queue_witness,
@@ -418,6 +416,12 @@ where
     // passthrought must be trivial
     intermediate_sorted_queue_from_passthrough.enforce_trivial_head(cs);
 
+    let state = QueueState::conditionally_select(
+        cs,
+        structured_input.start_flag,
+        &intermediate_sorted_queue_from_passthrough.into_state(),
+        &intermediate_sorted_queue_from_fsm_input.into_state(),
+    );
     let mut intermediate_sorted_queue = CircuitQueue::<
         F,
         TimestampedStorageLogRecord<F>,
@@ -427,15 +431,7 @@ where
         QUEUE_STATE_WIDTH,
         TIMESTAMPED_STORAGE_LOG_ENCODING_LEN,
         R,
-    >::from_state(
-        cs,
-        QueueState::conditionally_select(
-            cs,
-            structured_input.start_flag,
-            &intermediate_sorted_queue_from_passthrough.into_state(),
-            &intermediate_sorted_queue_from_fsm_input.into_state(),
-        ),
-    );
+    >::from_state(cs, state);
 
     intermediate_sorted_queue.witness = Arc::new(CircuitQueueWitness::from_inner_witness(
         intermediate_sorted_queue_witness,
@@ -462,15 +458,13 @@ where
             .length,
     );
 
-    let mut final_sorted_queue = StorageLogQueue::<F, R>::from_state(
+    let state = QueueState::conditionally_select(
         cs,
-        QueueState::conditionally_select(
-            cs,
-            structured_input.start_flag,
-            &empty_final_sorted_queue.into_state(),
-            &final_sorted_queue_from_fsm_input.into_state(),
-        ),
+        structured_input.start_flag,
+        &empty_final_sorted_queue.into_state(),
+        &final_sorted_queue_from_fsm_input.into_state(),
     );
+    let mut final_sorted_queue = StorageLogQueue::<F, R>::from_state(cs, state);
 
     // we can always ensure this
     UInt32::equals(
@@ -489,11 +483,8 @@ where
 
     // this is a permutation proof through the grand product
     let mut state = R::create_empty_state(cs);
-    R::apply_length_specialization(
-        cs,
-        &mut state,
-        Num::allocate(cs, F::from_u64_unchecked(fs_input.len() as u64)).get_variable(),
-    );
+    let length = Num::allocate(cs, F::from_u64_unchecked(fs_input.len() as u64)).get_variable();
+    R::apply_length_specialization(cs, &mut state, length);
     for chunk in fs_input.chunks(12) {
         let padding_els = 12 - chunk.len();
         let input_fixed_len: [Num<F>; 12] = if padding_els == 0 {
@@ -541,32 +532,35 @@ where
         .zip(fs_challenges)
         .for_each(|(e, v)| *e = Num::from_variable(v));
 
+    let one = Num::allocated_constant(cs, F::ONE);
     let initial_lhs = Num::conditionally_select(
         cs,
         structured_input.start_flag,
-        &Num::allocated_constant(cs, F::ONE),
+        &one,
         &structured_input.hidden_fsm_input.lhs_accumulator,
     );
 
     let initial_rhs = Num::conditionally_select(
         cs,
         structured_input.start_flag,
-        &Num::allocated_constant(cs, F::ONE),
+        &one,
         &structured_input.hidden_fsm_input.rhs_accumulator,
     );
 
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
+    let zeros = [Num::<F>::zero(cs); 8];
     let previous_packed_key = <[Num<F>; 8]>::conditionally_select(
         cs,
         structured_input.start_flag,
-        &[Num::<F>::zero(cs); 8],
+        &zeros,
         &structured_input.hidden_fsm_input.previous_packed_key,
     );
 
+    let zero = UInt32::zero(cs);
     let cycle_idx = UInt32::conditionally_select(
         cs,
         structured_input.start_flag,
-        &UInt32::zero(cs),
+        &zero,
         &structured_input.hidden_fsm_input.cycle_idx,
     );
 
@@ -644,6 +638,13 @@ where
 
     structured_input.completion_flag = completed;
 
+    let empty_queue_state = QueueState::empty(cs);
+    let state = QueueState::conditionally_select(
+        cs,
+        completed,
+        &final_sorted_queue.into_state(),
+        &empty_queue_state,
+    );
     let final_queue_for_observable_output = CircuitQueue::<
         F,
         LogQuery<F>,
@@ -653,15 +654,7 @@ where
         QUEUE_STATE_WIDTH,
         LOG_QUERY_PACKED_WIDTH,
         R,
-    >::from_state(
-        cs,
-        QueueState::conditionally_select(
-            cs,
-            completed,
-            &final_sorted_queue.into_state(),
-            &QueueState::empty(cs),
-        ),
-    );
+    >::from_state(cs, state);
 
     structured_input.observable_output.final_sorted_queue_state =
         final_queue_for_observable_output.into_state();
@@ -834,14 +827,15 @@ where
         let (keys_are_equal, previous_key_is_greater) =
             prepacked_long_comparison(cs, &previous_packed_key, &packed_key, &PACKED_WIDTHS);
 
+        let not_item_is_trivial = item_is_trivial.negated(cs);
         previous_key_is_greater
             .negated(cs)
-            .conditionally_enforce_true(cs, item_is_trivial.negated(cs));
+            .conditionally_enforce_true(cs, not_item_is_trivial);
 
         // if keys are the same then timestamps are sorted
         let (_, previous_timestamp_is_less, _) = previous_timestamp.overflowing_sub(cs, timestamp);
         // enforce if keys are the same and not trivial
-        let must_enforce = keys_are_equal.and(cs, item_is_trivial.negated(cs));
+        let must_enforce = keys_are_equal.and(cs, not_item_is_trivial);
         previous_timestamp_is_less.conditionally_enforce_true(cs, must_enforce);
 
         // we follow the procedure:
@@ -871,8 +865,9 @@ where
             //   In this case we would not need to write IF prover is honest and provides a true witness to "read value"
             //   field at the first write. But we can not rely on this and have to check this fact!
             let current_depth_is_zero = this_cell_current_depth.is_zero(cs);
+            let not_current_depth_is_zero = current_depth_is_zero.negated(cs);
             let unchanged_but_not_by_rollback =
-                value_is_unchanged.and(cs, current_depth_is_zero.negated(cs));
+                value_is_unchanged.and(cs, not_current_depth_is_zero);
             let issue_protective_read = this_cell_has_explicit_read_and_rollback_depth_zero
                 .or(cs, unchanged_but_not_by_rollback);
             let should_write = value_is_unchanged.negated(cs);
@@ -893,15 +888,15 @@ where
 
             // if we did only writes and rollbacks then we don't need to update
             let should_update = issue_protective_read.or(cs, should_write);
+            let not_keys_are_equal = keys_are_equal.negated(cs);
+            let not_keys_are_equal_and_should_update = not_keys_are_equal.and(cs, should_update);
             let should_push = previous_item_is_trivial
                 .negated(cs)
-                .and(cs, keys_are_equal.negated(cs).and(cs, should_update));
+                .and(cs, not_keys_are_equal_and_should_update);
 
             sorted_queue.push(cs, query, should_push);
 
-            let new_non_trivial_cell = item_is_trivial
-                .negated(cs)
-                .and(cs, keys_are_equal.negated(cs));
+            let new_non_trivial_cell = item_is_trivial.negated(cs).and(cs, not_keys_are_equal);
 
             // and update as we switch to the new cell with extra logic
             let meaningful_value = UInt256::conditionally_select(
@@ -926,12 +921,10 @@ where
                 &this_cell_current_value,
             );
 
-            let rollback_depth_for_new_cell = UInt32::conditionally_select(
-                cs,
-                record.rw_flag,
-                &UInt32::allocated_constant(cs, 1),
-                &UInt32::zero(cs),
-            );
+            let one = UInt32::allocated_constant(cs, 1);
+            let zero = UInt32::zero(cs);
+            let rollback_depth_for_new_cell =
+                UInt32::conditionally_select(cs, record.rw_flag, &one, &zero);
 
             this_cell_current_depth = UInt32::conditionally_select(
                 cs,
@@ -942,35 +935,35 @@ where
 
             // we have new non-trivial
             // and if it's read then it's definatelly at depth 0
+            let not_rw_flag = record.rw_flag.negated(cs);
             this_cell_has_explicit_read_and_rollback_depth_zero = Boolean::conditionally_select(
                 cs,
                 new_non_trivial_cell,
-                &record.rw_flag.negated(cs),
+                &not_rw_flag,
                 &this_cell_has_explicit_read_and_rollback_depth_zero,
             );
         }
 
         // if same cell - update
         {
+            let not_rw_flag = record.rw_flag.negated(cs);
             let non_trivial_and_same_cell = item_is_trivial.negated(cs).and(cs, keys_are_equal);
-            let non_trivial_read_of_same_cell =
-                non_trivial_and_same_cell.and(cs, record.rw_flag.negated(cs));
+            let non_trivial_read_of_same_cell = non_trivial_and_same_cell.and(cs, not_rw_flag);
             let non_trivial_write_of_same_cell = non_trivial_and_same_cell.and(cs, record.rw_flag);
-            let write_no_rollback =
-                non_trivial_write_of_same_cell.and(cs, record.rollback.negated(cs));
+            let not_rollback = record.rollback.negated(cs);
+            let write_no_rollback = non_trivial_write_of_same_cell.and(cs, not_rollback);
             let write_rollback = non_trivial_write_of_same_cell.and(cs, record.rollback);
 
             // update rollback depth the is a result of this action
-            let (incremented_depth, _) =
-                this_cell_current_depth.add_no_overflow(cs, UInt32::allocated_constant(cs, 1));
+            let one = UInt32::allocated_constant(cs, 1);
+            let (incremented_depth, _) = this_cell_current_depth.add_no_overflow(cs, one);
             this_cell_current_depth = UInt32::conditionally_select(
                 cs,
                 write_no_rollback,
                 &incremented_depth,
                 &this_cell_current_depth,
             );
-            let (decremented_depth, _) =
-                this_cell_current_depth.sub_no_overflow(cs, UInt32::allocated_constant(cs, 1));
+            let (decremented_depth, _) = this_cell_current_depth.sub_no_overflow(cs, one);
             this_cell_current_depth = UInt32::conditionally_select(
                 cs,
                 write_rollback,
@@ -1011,10 +1004,11 @@ where
             );
 
             // we definately read non-trivial, and that is on depth 0, so set to true
+            let constant_true = Boolean::allocated_constant(cs, true);
             this_cell_has_explicit_read_and_rollback_depth_zero = Boolean::conditionally_select(
                 cs,
                 read_at_rollback_depth_zero_of_same_cell,
-                &Boolean::allocated_constant(cs, true),
+                &constant_true,
                 &this_cell_has_explicit_read_and_rollback_depth_zero,
             );
         }
@@ -1036,8 +1030,8 @@ where
         let value_is_unchanged =
             UInt256::equals(cs, &this_cell_current_value, &this_cell_base_value);
         let current_depth_is_zero = this_cell_current_depth.is_zero(cs);
-        let unchanged_but_not_by_rollback =
-            value_is_unchanged.and(cs, current_depth_is_zero.negated(cs));
+        let not_current_depth_is_zero = current_depth_is_zero.negated(cs);
+        let unchanged_but_not_by_rollback = value_is_unchanged.and(cs, not_current_depth_is_zero);
         let issue_protective_read = this_cell_has_explicit_read_and_rollback_depth_zero
             .or(cs, unchanged_but_not_by_rollback);
         let should_write = value_is_unchanged.negated(cs);
@@ -1058,17 +1052,19 @@ where
 
         // if we did only writes and rollbacks then we don't need to update
         let should_update = issue_protective_read.or(cs, should_write);
+        let should_update_and_queues_exhausted = should_update.and(cs, queues_exhausted);
         let should_push = previous_item_is_trivial
             .negated(cs)
-            .and(cs, should_update.and(cs, queues_exhausted));
+            .and(cs, should_update_and_queues_exhausted);
 
         sorted_queue.push(cs, query, should_push);
 
         // reset flag to match simple witness generation convensions
+        let constant_false = Boolean::allocated_constant(cs, false);
         this_cell_has_explicit_read_and_rollback_depth_zero = Boolean::conditionally_select(
             cs,
             queues_exhausted,
-            &Boolean::allocated_constant(cs, false),
+            &constant_false,
             &this_cell_has_explicit_read_and_rollback_depth_zero,
         );
     }
