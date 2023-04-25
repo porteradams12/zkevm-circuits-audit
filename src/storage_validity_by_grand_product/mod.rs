@@ -188,7 +188,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     // passthrought must be trivial
     unsorted_queue_from_passthrough
         .head_state
-        .enforce_equal(cs, &Num::zero())?;
+        .enforce_equal(cs, &Num::zero(cs))?;
 
     let mut unsorted_queue = StorageLogQueue::conditionally_select(
         cs,
@@ -255,7 +255,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     // passthrought must be trivial
     intermediate_sorted_queue_from_passthrough
         .head_state
-        .enforce_equal(cs, &Num::zero())?;
+        .enforce_equal(cs, &Num::zero(cs))?;
 
     let mut intermediate_sorted_queue = CircuitQueue::<
         F,
@@ -279,7 +279,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
 
     // for final sorted queue it's easier
 
-    let empty_final_sorted_queue = StorageLogQueue::<F, R>::empty();
+    let empty_final_sorted_queue = StorageLogQueue::<F, R>::empty(cs);
     let final_sorted_queue_from_fsm_input = StorageLogQueue::from_raw_parts(
         cs,
         structured_input
@@ -318,18 +318,38 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     fs_input.push(intermediate_sorted_queue_from_passthrough.len().inner);
 
     // this is a permutation proof through the grand product
-    let mut sponge_state = variable_length_absorb_into_empty_state(cs, &fs_input, round_function)?;
+    let state = R::empty_state();
+    let mut state = round_function.apply_length_specialization(state, fs_input.len());
+    for chunk in fs_input.chunks(8) {
+        let padding_els = 8 - chunk.len();
+        let input_fixed_len: [Num<F>; 8] = if padding_els == 0 {
+            chunk.try_into().expect("length must match")
+        } else {
+            let tmp = Num::one(cs);
+            let it = chunk
+                .iter()
+                .chain(std::iter::repeat(&tmp).take(padding_els));
+
+            it.copied()
+                .collect::<Vec<_>>()
+                .as_slice()
+                .try_into()
+                .expect("length must match")
+        };
+
+        state = round_function.round_function_absorb_nums(cs, state, &input_fixed_len)?;
+    }
 
     let mut taken = 0; // up to absorbtion length
     let mut fs_challenges = vec![];
     for _ in 0..NUM_PERMUTATION_ARG_CHALLENGES {
         if taken == 2 {
             // run round
-            sponge_state = round_function.round_function(cs, sponge_state)?;
+            state = round_function.round_function(cs, state)?;
             taken = 0;
         }
 
-        let challenge = sponge_state[taken];
+        let challenge = state[taken];
         fs_challenges.push(challenge);
 
         taken += 1;
@@ -355,14 +375,14 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
     let previous_packed_key = <[Num<F>; 2]>::conditionally_select(
         cs,
         &structured_input.start_flag,
-        &[Num::zero(); 2],
+        &[Num::zero(cs); 2],
         &structured_input.hidden_fsm_input.previous_packed_key,
     )?;
 
     let cycle_idx = UInt32::conditionally_select(
         cs,
         &structured_input.start_flag,
-        &UInt32::zero(),
+        &UInt32::zero(cs),
         &structured_input.hidden_fsm_input.cycle_idx,
     )?;
 
@@ -444,7 +464,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         cs,
         &completed,
         &final_sorted_queue,
-        &CircuitQueue::empty(),
+        &CircuitQueue::empty(cs),
     )?;
 
     structured_input.observable_output.final_sorted_queue_state =
@@ -464,7 +484,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function)?;
 
     // dbg!(compact_form.create_witness());
-    let input_committment = commit_encodable_item(cs, &compact_form, round_function)?;
+    let input_committment = commit_variable_length_encodable_item(cs, &compact_form, round_function)?;
     let input_committment_value = input_committment.get_value();
     let public_input = Num::<F>::alloc_input(cs, || Ok(input_committment_value.grab()?))?;
     public_input.enforce_equal(cs, &input_committment.get_variable())?;
@@ -537,12 +557,12 @@ pub fn sort_and_deduplicate_storage_access_inner<
 
     // to ensure uniqueness we place timestamps in a addition to the
 
-    const PACKED_WIDTHS: [usize; 2] = [192, 232];
+    const PACKED_WIDTHS: [usize; 8] = [56, 56, 56, 56, 56, 56, 56, 32];
 
     for _cycle in 0..limit {
         let original_timestamp = cycle_idx;
         // increment it immediatelly
-        let new_cycle_idx = cycle_idx.increment_unchecked(cs)?;
+        let new_cycle_idx = cycle_idx.increment(cs);
         cycle_idx = new_cycle_idx;
 
         let original_is_empty = original_queue.is_empty(cs)?;
@@ -588,8 +608,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
         lhs_lc.push((&additive_part, F::one()));
         rhs_lc.push((&additive_part, F::one()));
 
-        let lhs_contribution = linear_combination_collapse(cs, lhs_lc, None);
-        let rhs_contribution = linear_combination_collapse(cs, rhs_lc, None);
+        let lhs_contribution = linear_combination_collapse(cs, &mut lhs_lc, None);
+        let rhs_contribution = linear_combination_collapse(cs, &mut rhs_lc, None);
 
         let lhs_candidate = lhs.mul(cs, &lhs_contribution)?;
         let rhs_candidate = rhs.mul(cs, &rhs_contribution)?;
@@ -657,13 +677,13 @@ pub fn sort_and_deduplicate_storage_access_inner<
                 key: previous_key,
                 read_value: this_cell_base_value,
                 written_value: this_cell_current_value,
-                r_w_flag: should_write,
-                aux_byte: UInt8::zero(),
+                rw_flag: should_write,
+                aux_byte: UInt8::zero(cs),
                 rollback: Boolean::constant(false),
                 is_service: Boolean::constant(false),
                 shard_id: previous_shard_id,
-                tx_number_in_block: UInt16::zero(),
-                timestamp: UInt32::zero(),
+                tx_number_in_block: UInt16::zero(cs),
+                timestamp: UInt32::zero(cs),
             };
 
             // if we did only writes and rollbacks then we don't need to update
@@ -672,7 +692,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
                 .not()
                 .and(cs, keys_are_equal.not().and(cs, should_update))?;
 
-            sorted_queue.push(cs, &query, &should_push, round_function)?;
+            sorted_queue.push(cs, &query, round_function)?;
 
             let new_non_trivial_cell = item_is_trivial.not().and(cs, keys_are_equal.not())?;
 
@@ -703,7 +723,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
                 cs,
                 &record.r_w_flag,
                 &UInt32::from_uint(1),
-                &UInt32::zero(),
+                &UInt32::zero(cs),
             )?;
 
             this_cell_current_depth = UInt32::conditionally_select(
@@ -810,13 +830,13 @@ pub fn sort_and_deduplicate_storage_access_inner<
             key: previous_key,
             read_value: this_cell_base_value,
             written_value: this_cell_current_value,
-            r_w_flag: should_write,
-            aux_byte: UInt8::zero(),
+            rw_flag: should_write,
+            aux_byte: UInt8::zero(cs),
             rollback: Boolean::constant(false),
             is_service: Boolean::constant(false),
             shard_id: previous_shard_id,
-            tx_number_in_block: UInt16::zero(),
-            timestamp: UInt32::zero(),
+            tx_number_in_block: UInt16::zero(cs),
+            timestamp: UInt32::zero(cs),
         };
 
         // if we did only writes and rollbacks then we don't need to update
@@ -825,7 +845,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
             .not()
             .and(cs, should_update.and(cs, queues_exhausted))?;
 
-        sorted_queue.push(cs, &query, &should_push, round_function)?;
+        sorted_queue.push(cs, &query, round_function)?;
 
         // reset flag to match simple witness generation convensions
         this_cell_has_explicit_read_and_rollback_depth_zero = Boolean::conditionally_select(
@@ -857,7 +877,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
 pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     key_tuple: (UInt8<F>, UInt160<F>, UInt256<F>),
-) -> [Variable; 7] {
+) -> [Variable; 8] {
     debug_assert!(F::CAPACITY_BITS >= 56);
 
     // LE packing
@@ -1111,4 +1131,69 @@ pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
     .get_variable();
 
     [v0, v1, v2, v3, v4, v5, v6, v7]
+}
+
+/// Check that a == b and a > b by performing a long subtraction b - a with borrow.
+/// Both a and b are considered as least significant word first
+#[track_caller]
+pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    a: &[Num<F>],
+    b: &[Num<F>],
+    width_data: &[usize],
+) -> (Boolean<F>, Boolean<F>) {
+    assert_eq!(a.len(), b.len());
+    assert_eq!(a.len(), width_data.len());
+
+    let mut minus_one = F::one(cs);
+    minus_one.negate();
+
+    let mut previous_borrow = Boolean::constant(false);
+    let mut limbs_are_equal = vec![];
+
+    for ((a, b), width) in a.iter().zip(b.iter()).zip(width_data.iter()) {
+        let (result_witness, borrow_witness) =
+            match (a.get_value(), b.get_value(), previous_borrow.get_value()) {
+                (Some(a), Some(b), Some(previous_borrow_value)) => {
+                    let a = a.as_raw_u64();
+                    let b = b.as_raw_u64();
+                    let borrow_guard = 1u64 << width;
+
+                    let tmp =
+                        borrow_guard.clone() + b - a - (previous_borrow_value as u64);
+                    let (q, r) = tmp.div_rem(&borrow_guard);
+
+                    let borrow = q.is_zero();
+                    let wit = F::from_u64_unchecked(r);
+
+                    (Some(wit), Some(borrow))
+                }
+                _ => (None, None),
+            };
+
+        let borrow = Boolean::alloc(cs, borrow_witness)?;
+        let intermediate_result = Num::alloc(cs, result_witness)?;
+        intermediate_result.constraint_into_bit_length_bytes(cs, *width)?;
+
+        let intermediate_is_zero = intermediate_result.is_zero(cs)?;
+        limbs_are_equal.push(intermediate_is_zero);
+
+        // b - a - previous_borrow + 2^X * borrow = intermediate
+
+        let result = Num::<F>::linear_combination(cs, &[
+            (b, F::one(cs)),
+            (a, minus_one),
+            (previous_borrow, minus_one),
+            (intermediate_result, minus_one),
+            (borrow, 1u64 << width),
+        ]).get_variable();
+        ZeroCheckGate::check_if_zero(cs, result);
+
+        previous_borrow = borrow;
+    }
+
+    let final_borrow = previous_borrow;
+    let eq = limbs_are_equal[0].multi_and(cs, &limbs_are_equal[1..]);
+
+    Ok((eq, final_borrow))
 }
