@@ -1,21 +1,21 @@
 use super::*;
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::u160::{UInt160, recompose_address_from_u32x5};
-use boojum::gadgets::u256::{UInt256, recompose_u256_as_u32x8};
+use boojum::gadgets::u160::{recompose_address_from_u32x5, UInt160};
+use boojum::gadgets::u256::{recompose_u256_as_u32x8, UInt256};
 use boojum::gadgets::u32::UInt32;
 
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::Variable;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
-use boojum::gadgets::traits::encodable::CircuitEncodable;
-use boojum::gadgets::traits::selectable::Selectable;
-use boojum::gadgets::u8::UInt8;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::traits::castable::WitnessCastable;
-use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::encodable::CircuitEncodableExt;
+use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitVarLengthEncodable};
+use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
+use boojum::gadgets::u8::UInt8;
 use cs_derive::*;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable)]
@@ -37,6 +37,9 @@ impl<F: SmallField> CircuitEncodableExt<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<
 
 pub const LOG_QUERY_PACKED_WIDTH: usize = 20;
 
+// NOTE: (shamatar): workaround for cost generics for now
+pub(crate) const FLATTENED_VARIABLE_LENGTH: usize = 36;
+
 // because two logs that we add to the queue on write-like operation only differ by
 // rollback flag, we want to specially define offset for rollback, so we can
 // pack two cases for free. Also packing of the rollback should go into variable
@@ -51,6 +54,47 @@ impl<F: SmallField> LogQuery<F> {
     ) {
         let boolean_true = Boolean::allocated_constant(cs, true);
         existing_packing[ROLLBACK_PACKING_FLAG_VARIABLE_IDX] = boolean_true.get_variable();
+    }
+
+    pub(crate) fn flatten_as_variables_impl(&self) -> [Variable; FLATTENED_VARIABLE_LENGTH] {
+        [
+            self.address.inner[0].get_variable(),
+            self.address.inner[1].get_variable(),
+            self.address.inner[2].get_variable(),
+            self.address.inner[3].get_variable(),
+            self.address.inner[4].get_variable(),
+            self.key.inner[0].get_variable(),
+            self.key.inner[1].get_variable(),
+            self.key.inner[2].get_variable(),
+            self.key.inner[3].get_variable(),
+            self.key.inner[4].get_variable(),
+            self.key.inner[5].get_variable(),
+            self.key.inner[6].get_variable(),
+            self.key.inner[7].get_variable(),
+            self.read_value.inner[0].get_variable(),
+            self.read_value.inner[1].get_variable(),
+            self.read_value.inner[2].get_variable(),
+            self.read_value.inner[3].get_variable(),
+            self.read_value.inner[4].get_variable(),
+            self.read_value.inner[5].get_variable(),
+            self.read_value.inner[6].get_variable(),
+            self.read_value.inner[7].get_variable(),
+            self.written_value.inner[0].get_variable(),
+            self.written_value.inner[1].get_variable(),
+            self.written_value.inner[2].get_variable(),
+            self.written_value.inner[3].get_variable(),
+            self.written_value.inner[4].get_variable(),
+            self.written_value.inner[5].get_variable(),
+            self.written_value.inner[6].get_variable(),
+            self.written_value.inner[7].get_variable(),
+            self.aux_byte.get_variable(),
+            self.rw_flag.get_variable(),
+            self.rollback.get_variable(),
+            self.is_service.get_variable(),
+            self.shard_id.get_variable(),
+            self.tx_number_in_block.get_variable(),
+            self.timestamp.get_variable(),
+        ]
     }
 }
 
@@ -68,9 +112,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[0].get_variable(), F::ONE),
-                (key_bytes[0][0].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[0][1].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[0][2].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[0][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[0][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[0][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -79,9 +132,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[1].get_variable(), F::ONE),
-                (key_bytes[0][3].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[1][0].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[1][1].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[0][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[1][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[1][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -90,9 +152,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[2].get_variable(), F::ONE),
-                (key_bytes[1][2].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[1][3].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[2][0].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[1][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[1][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[2][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -101,9 +172,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[3].get_variable(), F::ONE),
-                (key_bytes[2][1].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[2][2].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[2][3].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[2][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[2][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[2][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -112,9 +192,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[4].get_variable(), F::ONE),
-                (key_bytes[3][0].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[3][1].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[3][2].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[3][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[3][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[3][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -123,9 +212,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[5].get_variable(), F::ONE),
-                (key_bytes[3][3].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[4][0].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[4][1].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[3][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[4][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[4][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -134,9 +232,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[6].get_variable(), F::ONE),
-                (key_bytes[4][2].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[4][3].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[5][0].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[4][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[4][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[5][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -145,9 +252,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[7].get_variable(), F::ONE),
-                (key_bytes[5][1].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[5][2].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[5][3].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[5][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[5][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[5][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -158,9 +274,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.written_value.inner[0].get_variable(), F::ONE),
-                (key_bytes[6][0].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[6][1].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[6][2].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[6][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[6][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[6][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -169,9 +294,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.written_value.inner[1].get_variable(), F::ONE),
-                (key_bytes[6][3].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[7][0].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[7][1].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[6][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[7][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[7][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -182,8 +316,14 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.written_value.inner[2].get_variable(), F::ONE),
-                (key_bytes[7][2].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[7][3].get_variable(), F::from_u64_unchecked(1u64 << 40)),
+                (
+                    key_bytes[7][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[7][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
                 (
                     address_bytes[0][0].get_variable(),
                     F::from_u64_unchecked(1u64 << 48),
@@ -322,8 +462,14 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
                     address_bytes[4][3].get_variable(),
                     F::from_u64_unchecked(1u64 << 32),
                 ),
-                (self.aux_byte.get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (self.shard_id.get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    self.aux_byte.get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    self.shard_id.get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -339,6 +485,8 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
 
         // and the final variable is just rollback flag itself
 
+        // NOTE: if you even change this encoding please ensure that corresponding part
+        // is updated in TimestampedStorageLogRecord
         let v19 = self.rollback.get_variable();
 
         [
@@ -348,76 +496,80 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
     }
 }
 
+pub(crate) fn log_query_witness_from_values<F: SmallField>(values: [F; FLATTENED_VARIABLE_LENGTH]) -> <LogQuery<F> as CSAllocatable<F>>::Witness {
+    let address: [u32; 5] = [
+        WitnessCastable::cast_from_source(values[0]),
+        WitnessCastable::cast_from_source(values[1]),
+        WitnessCastable::cast_from_source(values[2]),
+        WitnessCastable::cast_from_source(values[3]),
+        WitnessCastable::cast_from_source(values[4]),
+    ];
+    let address = recompose_address_from_u32x5(address);
+
+    let key: [u32; 8] = [
+        WitnessCastable::cast_from_source(values[5]),
+        WitnessCastable::cast_from_source(values[6]),
+        WitnessCastable::cast_from_source(values[7]),
+        WitnessCastable::cast_from_source(values[8]),
+        WitnessCastable::cast_from_source(values[9]),
+        WitnessCastable::cast_from_source(values[10]),
+        WitnessCastable::cast_from_source(values[11]),
+        WitnessCastable::cast_from_source(values[12]),
+    ];
+    let key = recompose_u256_as_u32x8(key);
+
+    let read_value: [u32; 8] = [
+        WitnessCastable::cast_from_source(values[13]),
+        WitnessCastable::cast_from_source(values[14]),
+        WitnessCastable::cast_from_source(values[15]),
+        WitnessCastable::cast_from_source(values[16]),
+        WitnessCastable::cast_from_source(values[17]),
+        WitnessCastable::cast_from_source(values[18]),
+        WitnessCastable::cast_from_source(values[19]),
+        WitnessCastable::cast_from_source(values[20]),
+    ];
+    let read_value = recompose_u256_as_u32x8(read_value);
+
+    let written_value: [u32; 8] = [
+        WitnessCastable::cast_from_source(values[21]),
+        WitnessCastable::cast_from_source(values[22]),
+        WitnessCastable::cast_from_source(values[23]),
+        WitnessCastable::cast_from_source(values[24]),
+        WitnessCastable::cast_from_source(values[25]),
+        WitnessCastable::cast_from_source(values[26]),
+        WitnessCastable::cast_from_source(values[27]),
+        WitnessCastable::cast_from_source(values[28]),
+    ];
+    let written_value = recompose_u256_as_u32x8(written_value);
+
+    let aux_byte: u8 = WitnessCastable::cast_from_source(values[29]);
+    let rw_flag: bool = WitnessCastable::cast_from_source(values[30]);
+    let rollback: bool = WitnessCastable::cast_from_source(values[31]);
+    let is_service: bool = WitnessCastable::cast_from_source(values[32]);
+    let shard_id: u8 = WitnessCastable::cast_from_source(values[33]);
+    let tx_number_in_block: u32 = WitnessCastable::cast_from_source(values[34]);
+    let timestamp: u32 = WitnessCastable::cast_from_source(values[35]);
+
+    <LogQuery<F> as CSAllocatable<F>>::Witness {
+        address,
+        key,
+        read_value,
+        written_value,
+        aux_byte,
+        rw_flag,
+        rollback,
+        is_service,
+        shard_id,
+        tx_number_in_block,
+        timestamp,
+    }
+}
+
 impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
-    const INTERNAL_STRUCT_LEN: usize = 36;
+    const INTERNAL_STRUCT_LEN: usize = FLATTENED_VARIABLE_LENGTH;
 
     fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
-        let address: [u32; 5] = [
-            WitnessCastable::cast_from_source(values[0]),
-            WitnessCastable::cast_from_source(values[1]),
-            WitnessCastable::cast_from_source(values[2]),
-            WitnessCastable::cast_from_source(values[3]),
-            WitnessCastable::cast_from_source(values[4]),
-        ];
-        let address = recompose_address_from_u32x5(address);
-
-        let key: [u32; 8] = [
-            WitnessCastable::cast_from_source(values[5]),
-            WitnessCastable::cast_from_source(values[6]),
-            WitnessCastable::cast_from_source(values[7]),
-            WitnessCastable::cast_from_source(values[8]),
-            WitnessCastable::cast_from_source(values[9]),
-            WitnessCastable::cast_from_source(values[10]),
-            WitnessCastable::cast_from_source(values[11]),
-            WitnessCastable::cast_from_source(values[12]),
-        ];
-        let key = recompose_u256_as_u32x8(key);
-
-        let read_value: [u32; 8] = [
-            WitnessCastable::cast_from_source(values[13]),
-            WitnessCastable::cast_from_source(values[14]),
-            WitnessCastable::cast_from_source(values[15]),
-            WitnessCastable::cast_from_source(values[16]),
-            WitnessCastable::cast_from_source(values[17]),
-            WitnessCastable::cast_from_source(values[18]),
-            WitnessCastable::cast_from_source(values[19]),
-            WitnessCastable::cast_from_source(values[20]),
-        ];
-        let read_value = recompose_u256_as_u32x8(read_value);
-
-        let written_value: [u32; 8] = [
-            WitnessCastable::cast_from_source(values[21]),
-            WitnessCastable::cast_from_source(values[22]),
-            WitnessCastable::cast_from_source(values[23]),
-            WitnessCastable::cast_from_source(values[24]),
-            WitnessCastable::cast_from_source(values[25]),
-            WitnessCastable::cast_from_source(values[26]),
-            WitnessCastable::cast_from_source(values[27]),
-            WitnessCastable::cast_from_source(values[28]),
-        ];
-        let written_value = recompose_u256_as_u32x8(written_value);
-
-        let aux_byte: u8 = WitnessCastable::cast_from_source(values[29]);
-        let rw_flag: bool = WitnessCastable::cast_from_source(values[30]);
-        let rollback: bool = WitnessCastable::cast_from_source(values[31]);
-        let is_service: bool = WitnessCastable::cast_from_source(values[32]);
-        let shard_id: u8 = WitnessCastable::cast_from_source(values[33]);
-        let tx_number_in_block: u32 = WitnessCastable::cast_from_source(values[34]);
-        let timestamp: u32 = WitnessCastable::cast_from_source(values[35]);
-
-        Self::Witness {
-            address,
-            key,
-            read_value,
-            written_value,
-            aux_byte,
-            rw_flag,
-            rollback,
-            is_service,
-            shard_id,
-            tx_number_in_block,
-            timestamp,
-        }
+        log_query_witness_from_values(values)
     }
 
     // we should be able to allocate without knowing values yet
@@ -429,52 +581,16 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
     where
         [(); Self::INTERNAL_STRUCT_LEN]:,
     {
-        [
-            self.address.inner[0].get_variable(),
-            self.address.inner[1].get_variable(),
-            self.address.inner[2].get_variable(),
-            self.address.inner[3].get_variable(),
-            self.address.inner[4].get_variable(),
-            self.key.inner[0].get_variable(),
-            self.key.inner[1].get_variable(),
-            self.key.inner[2].get_variable(),
-            self.key.inner[3].get_variable(),
-            self.key.inner[4].get_variable(),
-            self.key.inner[5].get_variable(),
-            self.key.inner[6].get_variable(),
-            self.key.inner[7].get_variable(),
-            self.read_value.inner[0].get_variable(),
-            self.read_value.inner[1].get_variable(),
-            self.read_value.inner[2].get_variable(),
-            self.read_value.inner[3].get_variable(),
-            self.read_value.inner[4].get_variable(),
-            self.read_value.inner[5].get_variable(),
-            self.read_value.inner[6].get_variable(),
-            self.read_value.inner[7].get_variable(),
-            self.written_value.inner[0].get_variable(),
-            self.written_value.inner[1].get_variable(),
-            self.written_value.inner[2].get_variable(),
-            self.written_value.inner[3].get_variable(),
-            self.written_value.inner[4].get_variable(),
-            self.written_value.inner[5].get_variable(),
-            self.written_value.inner[6].get_variable(),
-            self.written_value.inner[7].get_variable(),
-            self.aux_byte.get_variable(),
-            self.rw_flag.get_variable(),
-            self.rollback.get_variable(),
-            self.is_service.get_variable(),
-            self.shard_id.get_variable(),
-            self.tx_number_in_block.get_variable(),
-            self.timestamp.get_variable(),
-        ]
+        self.flatten_as_variables_impl()
     }
-    
+
     fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
         todo!();
     }
 }
 
+use crate::base_structures::vm_state::QUEUE_STATE_WIDTH;
 use boojum::gadgets::queue::CircuitQueue;
-use crate::base_structures::vm_state::{QUEUE_STATE_WIDTH};
 
-pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = CircuitQueue<F, LogQuery<F>, AW, SW, CW, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;
+pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
+    CircuitQueue<F, LogQuery<F>, AW, SW, CW, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;
