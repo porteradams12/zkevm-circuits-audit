@@ -5,9 +5,8 @@ use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::Variable;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
-use boojum::gadgets::traits::allocatable::CSAllocatable;
-use boojum::gadgets::traits::allocatable::CSAllocatableExt;
-use boojum::gadgets::traits::encodable::CircuitEncodable;
+use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
+use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitEncodableExt};
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::u32::UInt32;
 use boojum::{field::SmallField, gadgets::u256::UInt256};
@@ -140,7 +139,20 @@ impl<F: SmallField> CSAllocatableExt<F> for DecommitQuery<F> {
             self.timestamp.get_variable(),
         ]
     }
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, F>) {
+    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
         todo!();
     }
 }
+
+impl<F: SmallField> CircuitEncodableExt<F, DECOMMIT_QUERY_PACKED_WIDTH> for DecommitQuery<F> {}
+
+use boojum::gadgets::queue::full_state_queue::{
+    FullStateCircuitQueue,
+    FullStateCircuitQueueWitness,
+};
+
+pub type DecommitQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
+    FullStateCircuitQueue<F, DecommitQuery<F>, AW, SW, CW, DECOMMIT_QUERY_PACKED_WIDTH, R>;
+
+pub type DecommitQueueWitness<F, const SW: usize> =
+    FullStateCircuitQueueWitness<F, DecommitQuery<F>, SW, DECOMMIT_QUERY_PACKED_WIDTH>;

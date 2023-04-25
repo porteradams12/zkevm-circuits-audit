@@ -469,7 +469,7 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
         ]
     }
     
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, F>) {
+    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
         todo!();
     }
 }

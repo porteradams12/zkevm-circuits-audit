@@ -719,7 +719,7 @@ pub(crate) fn apply_uma<
             cs.set_values_with_dependencies_vararg(
                 &dependencies,
                 &[],
-                move |inputs: &[F], _buffer: &mut DstBuffer<'_, F>| {
+                move |inputs: &[F], _buffer: &mut DstBuffer<'_, '_, F>| {
                     let execute_0 = inputs[0].as_u64();
                     let execute_0 = u64_as_bool(execute_0);
 

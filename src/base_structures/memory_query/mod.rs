@@ -12,7 +12,7 @@ use boojum::cs::Place;
 use boojum::cs::Variable;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
-use boojum::gadgets::traits::encodable::CircuitEncodable;
+use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitEncodableExt};
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::castable::WitnessCastable;
@@ -33,6 +33,8 @@ pub struct MemoryQuery<F: SmallField> {
     pub is_ptr: Boolean<F>,
     pub value: UInt256<F>,
 }
+
+impl<F: SmallField> CircuitEncodableExt<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQuery<F> {}
 
 // in practice we use memory queue, so we need to have a nice way to pack memory query into
 // 8 field elements. In addition we can exploit the fact that when we will process the elements
@@ -63,7 +65,7 @@ impl<F: SmallField> CSAllocatableExt<F> for MemoryQuery<F> {
         ]
     }
 
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, F>) {
+    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
         todo!()
     }
 
@@ -234,7 +236,7 @@ impl<F: SmallField> MemoryValue<F> {
         let outputs = cs.alloc_multiple_variables_without_values::<9>();
 
         if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
-            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, F>| {
+            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, '_, F>| {
                 debug_assert!(F::CAPACITY_BITS >= 32);
                 let witness = (witness_closure)(inputs);
                 let chunks = decompose_u256_as_u32x8(witness.value);
@@ -272,7 +274,7 @@ impl<F: SmallField> MemoryValue<F> {
         let outputs = cs.alloc_multiple_variables_without_values::<8>();
 
         if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
-            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, F>| {
+            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, '_, F>| {
                 debug_assert!(F::CAPACITY_BITS >= 32);
                 let witness = (witness_closure)(inputs);
                 let chunks = decompose_u256_as_u32x8(witness.value);
@@ -295,3 +297,15 @@ impl<F: SmallField> MemoryValue<F> {
         }
     }
 }
+
+
+use boojum::gadgets::queue::full_state_queue::{
+    FullStateCircuitQueue,
+    FullStateCircuitQueueWitness,
+};
+
+pub type MemoryQueriesQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
+    FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
+
+pub type MemoryQueriesQueueWitness<F, const SW: usize> =
+    FullStateCircuitQueueWitness<F, MemoryQuery<F>, SW, MEMORY_QUERY_PACKED_WIDTH>;
