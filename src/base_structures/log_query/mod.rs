@@ -469,11 +469,12 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
         ]
     }
     
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, F>) {
+    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
         todo!();
     }
 }
 
 use boojum::gadgets::queue::CircuitQueue;
 use crate::base_structures::vm_state::{QUEUE_STATE_WIDTH};
+
 pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = CircuitQueue<F, LogQuery<F>, AW, SW, CW, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;

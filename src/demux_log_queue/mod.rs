@@ -30,10 +30,10 @@ use crate::{
     fsm_input_output::{circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH, *},
 };
 
-pub type StorageLogQueue<F, R> =
-    CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;
-pub type StorageLogQueueWitness<F> =
-    CircuitQueueWitness<F, LogQuery<F>, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH>;
+use crate::base_structures::log_query::LogQueryQueue;
+
+pub type StorageLogQueue<F, R> = LogQueryQueue::<F, 8, 12, 4, R>;
+pub type StorageLogQueueWitness<F> = CircuitQueueWitness<F, LogQuery<F>, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH>;
 
 pub fn demultiplex_storage_logs_enty_point<
     F: SmallField,
@@ -44,35 +44,8 @@ pub fn demultiplex_storage_logs_enty_point<
     witness: LogDemuxerCircuitInstanceWitness<F>,
     round_function: &R,
     limit: usize,
-) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
-where
-    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-{
-    //     use crate::bellman::plonk::better_better_cs::cs::LookupTableApplication;
-    //     use crate::bellman::plonk::better_better_cs::data_structures::PolyIdentifier;
-    //     use crate::vm::tables::BitwiseLogicTable;
-    //     use crate::vm::VM_BITWISE_LOGICAL_OPS_TABLE_NAME;
-
-    // let columns3 = vec![
-    //     PolyIdentifier::VariablesPolynomial(0),
-    //     PolyIdentifier::VariablesPolynomial(1),
-    //     PolyIdentifier::VariablesPolynomial(2),
-    // ];
-
-    // if cs.get_table(VM_BITWISE_LOGICAL_OPS_TABLE_NAME).is_err() {
-    //     let name = VM_BITWISE_LOGICAL_OPS_TABLE_NAME;
-    //     let bitwise_logic_table = LookupTableApplication::new(
-    //         name,
-    //         BitwiseLogicTable::new(&name, 8),
-    //         columns3.clone(),
-    //         None,
-    //         true,
-    //     );
-    //     cs.add_table(bitwise_logic_table)?;
-    // };
-
-    //     inscribe_default_range_table_for_bit_width_over_first_three_columns(cs, 16)?;
-
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH] 
+where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
     let structured_input_witness = witness.closed_form_input;
     let initial_queue_witness = witness.initial_queue_witness;
 
@@ -96,7 +69,7 @@ where
     ];
 
     let [
-        initial_log_queue_state_from_fsm,
+        _initial_log_queue_state_from_fsm,
         storage_access_queue_state_from_fsm,
         events_access_queue_state_from_fsm,
         l1messages_access_queue_state_from_fsm,
@@ -112,7 +85,6 @@ where
         )
     });
 
-    let initial_log_queue_state_from_fsm = initial_log_queue_state_from_fsm;
     let storage_access_queue_state_from_fsm = storage_access_queue_state_from_fsm;
     let events_access_queue_state_from_fsm = events_access_queue_state_from_fsm;
     let l1messages_access_queue_state_from_fsm = l1messages_access_queue_state_from_fsm;
@@ -149,7 +121,9 @@ where
 
     // passthrough must be trivial
     let zero_num = Num::zero(cs);
-    Num::enforce_equal(cs, &initial_queue_from_passthrough.head[0], &zero_num);
+    for el in initial_queue_from_passthrough.head.iter() {
+        Num::enforce_equal(cs, el, &zero_num);
+    }
 
     let state = QueueState::conditionally_select(
         cs,
@@ -160,6 +134,7 @@ where
     let mut initial_queue =
         StorageLogQueue::<F, R>::from_raw_parts(cs, state.head, state.tail.tail, state.tail.length);
     use std::sync::Arc;
+    let initial_queue_witness = CircuitQueueWitness::from_inner_witness(initial_queue_witness);
     initial_queue.witness = Arc::new(initial_queue_witness);
     // for the rest it's just select between empty or from FSM
 
@@ -379,15 +354,14 @@ pub fn demultiplex_storage_logs_inner<
         let popped = storage_log_queue.pop_front(cs, execute);
 
         let [aux_byte_for_storage, aux_byte_for_event, aux_byte_for_l1_message, aux_byte_for_precompile_call] =
-            [
-                STORAGE_AUX_BYTE,
-                EVENT_AUX_BYTE,
-                L1_MESSAGE_AUX_BYTE,
-                PRECOMPILE_AUX_BYTE,
-            ]
-            .map(|byte| {
-                Num::from_variable(cs.allocate_constant(F::from_u64_unchecked(byte as u64)))
-            });
+            [STORAGE_AUX_BYTE, EVENT_AUX_BYTE, L1_MESSAGE_AUX_BYTE, PRECOMPILE_AUX_BYTE]
+                .map(|byte|
+                    Num::from_variable(
+                        cs.allocate_constant(
+                            F::from_u64_unchecked(byte as u64)
+                        )
+                    )
+                );
 
         let is_storage_aux_byte =
             Num::equals(cs, &aux_byte_for_storage, &popped.0.aux_byte.into_num());
@@ -503,12 +477,12 @@ pub fn push_with_optimize<
         queue.length = UInt32::conditionally_select(cs, bit, &exec_queue.length, &queue.length);
     }
 }
+
 pub fn check_if_bitmask_and_if_empty<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(
     cs: &mut CS,
     mask: [Boolean<F>; N],
-) -> Boolean<F> {
-    let mut lc = Vec::with_capacity(N);
-    lc.extend(mask.iter().map(|el| (el.get_variable(), F::ONE)));
+) -> Boolean<F>{
+    let lc: [_; N] = mask.map(|el| (el.get_variable(), F::ONE));
 
     let lc = Num::linear_combination(cs, &lc);
 

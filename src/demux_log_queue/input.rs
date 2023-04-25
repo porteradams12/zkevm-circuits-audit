@@ -13,10 +13,12 @@ use boojum::gadgets::{
     },
 };
 use cs_derive::*;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use derivative::*;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct LogDemuxerFSMInputOutput<F: SmallField> {
     pub initial_log_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub storage_access_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
@@ -43,6 +45,7 @@ impl<F: SmallField> CSPlaceholder<F> for LogDemuxerFSMInputOutput<F> {
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct LogDemuxerInputData<F: SmallField> {
     pub initial_log_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
 }
@@ -57,6 +60,7 @@ impl<F: SmallField> CSPlaceholder<F> for LogDemuxerInputData<F> {
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct LogDemuxerOutputData<F: SmallField> {
     pub storage_access_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub events_access_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
@@ -93,7 +97,10 @@ pub type LogDemuxerInputOutputWitness<F> = crate::fsm_input_output::ClosedFormIn
     LogDemuxerOutputData<F>,
 >;
 
+#[derive(Derivative, serde::Serialize, serde::Deserialize)]
+#[derivative(Clone, Debug)]
+#[serde(bound = "")]
 pub struct LogDemuxerCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: LogDemuxerInputOutputWitness<F>,
-    pub initial_queue_witness: CircuitQueueWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
+    pub initial_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
 }
