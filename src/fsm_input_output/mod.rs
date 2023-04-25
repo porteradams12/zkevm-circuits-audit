@@ -1,4 +1,5 @@
 use super::*;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use cs_derive::*;
 use boojum::algebraic_props::round_function;
 use boojum::cs::gates::ConstantAllocatableCS;
@@ -81,6 +82,23 @@ where
         };
 
         new
+    }
+
+    #[track_caller]
+    pub fn hook_compare_witness<CS: ConstraintSystem<F>>(&self, cs: &CS, expected: &<ClosedFormInput<F, T, IN, OUT> as CSAllocatable<F>>::Witness) 
+        where T: PrettyComparison<F>, OUT: PrettyComparison<F>,
+    {
+        if let Some(circuit_result) = (self.witness_hook(&*cs))() {
+            let comparison_lines = <T as PrettyComparison<F>>::find_diffs(&circuit_result.hidden_fsm_output, &expected.hidden_fsm_output);
+            if comparison_lines.is_empty() == false {
+                panic!("Difference in FSM:\n{}", comparison_lines.join("\n"));
+            }
+            let comparison_lines = <OUT as PrettyComparison<F>>::find_diffs(&circuit_result.observable_output, &expected.observable_output);
+            if comparison_lines.is_empty() == false {
+                panic!("Difference in observable output:\n{}", comparison_lines.join("\n"));
+            }
+            assert_eq!(&circuit_result, expected);
+        }
     }
 }
 
