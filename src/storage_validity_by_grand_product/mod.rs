@@ -1,6 +1,7 @@
 use super::*;
 
 pub mod input;
+use input::DEFAULT_NUM_CHUNKS;
 
 use crate::fsm_input_output::ClosedFormInputCompactForm;
 
@@ -397,10 +398,10 @@ where
     let mut state = R::create_empty_state(cs);
     let length = Num::allocate(cs, F::from_u64_unchecked(fs_input.len() as u64)).get_variable();
     R::apply_length_specialization(cs, &mut state, length);
-    for chunk in fs_input.array_chunks() {
+    for chunk in fs_input.array_chunks::<12>() {
         let padding_els = 12 - chunk.len();
         let input_fixed_len: [Num<F>; 12] = if padding_els == 0 {
-            chunk.try_into().expect("length must match")
+            (*chunk).try_into().expect("length must match")
         } else {
             let tmp = Num::allocated_constant(cs, F::ONE);
             let it = chunk
@@ -425,37 +426,47 @@ where
 
     let mut taken = 0; // up to absorbtion length
     let mut fs_challenges = vec![];
-    for _ in 0..NUM_PERMUTATION_ARG_CHALLENGES {
-        if taken == 2 {
-            // run round
-            state = R::compute_round_function(cs, state);
-            taken = 0;
+    for _ in 0..DEFAULT_NUM_CHUNKS {
+        let mut chunk_challenges = vec![];
+        for _ in 0..NUM_PERMUTATION_ARG_CHALLENGES {
+            if taken == 2 {
+                // run round
+                state = R::compute_round_function(cs, state);
+                taken = 0;
+            }
+
+            let challenge = state[taken];
+            chunk_challenges.push(challenge);
+
+            taken += 1;
         }
 
-        let challenge = state[taken];
-        fs_challenges.push(challenge);
-
-        taken += 1;
+        fs_challenges.push(chunk_challenges);
     }
 
-    let mut fs_challenges_nums = [Num::zero(cs); NUM_PERMUTATION_ARG_CHALLENGES];
+    let mut fs_challenges_nums =
+        [[Num::zero(cs); NUM_PERMUTATION_ARG_CHALLENGES]; DEFAULT_NUM_CHUNKS];
     fs_challenges_nums
         .iter_mut()
         .zip(fs_challenges)
-        .for_each(|(e, v)| *e = Num::from_variable(v));
+        .for_each(|(e, v)| {
+            e.iter_mut()
+                .zip(v)
+                .for_each(|(e, v)| *e = Num::from_variable(v))
+        });
 
     let one = Num::allocated_constant(cs, F::ONE);
-    let initial_lhs = Num::conditionally_select(
+    let initial_lhs = <[Num<F>; DEFAULT_NUM_CHUNKS]>::conditionally_select(
         cs,
         structured_input.start_flag,
-        &one,
+        &[one, one],
         &structured_input.hidden_fsm_input.lhs_accumulator,
     );
 
-    let initial_rhs = Num::conditionally_select(
+    let initial_rhs = <[Num<F>; DEFAULT_NUM_CHUNKS]>::conditionally_select(
         cs,
         structured_input.start_flag,
-        &one,
+        &[one, one],
         &structured_input.hidden_fsm_input.rhs_accumulator,
     );
 
@@ -520,7 +531,9 @@ where
     Boolean::enforce_equal(cs, &unsorted_is_empty, &sorted_is_empty);
 
     let completed = unsorted_is_empty.and(cs, sorted_is_empty);
-    Num::conditionally_enforce_equal(cs, completed, &new_lhs, &new_rhs);
+    new_lhs.iter().zip(new_rhs).for_each(|(l, r)| {
+        Num::conditionally_enforce_equal(cs, completed, &l, &r);
+    });
 
     // form the input/output
 
@@ -601,8 +614,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
     R: CircuitRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
-    mut lhs: Num<F>,
-    mut rhs: Num<F>,
+    mut lhs: [Num<F>; DEFAULT_NUM_CHUNKS],
+    mut rhs: [Num<F>; DEFAULT_NUM_CHUNKS],
     original_queue: &mut StorageLogQueue<F, R>,
     intermediate_sorted_queue: &mut CircuitQueue<
         F,
@@ -617,7 +630,7 @@ pub fn sort_and_deduplicate_storage_access_inner<
     sorted_queue: &mut StorageLogQueue<F, R>,
     is_start: Boolean<F>,
     mut cycle_idx: UInt32<F>,
-    fs_challenges: [Num<F>; NUM_PERMUTATION_ARG_CHALLENGES],
+    fs_challenges: [[Num<F>; NUM_PERMUTATION_ARG_CHALLENGES]; DEFAULT_NUM_CHUNKS],
     mut previous_packed_key: [Num<F>; 8],
     mut previous_key: UInt256<F>,
     mut previous_address: UInt160<F>,
@@ -630,8 +643,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
     round_function: &R,
     limit: usize,
 ) -> (
-    Num<F>,
-    Num<F>,
+    [Num<F>; DEFAULT_NUM_CHUNKS],
+    [Num<F>; DEFAULT_NUM_CHUNKS],
     UInt32<F>,
     [Num<F>; 8],
     UInt256<F>,
@@ -654,7 +667,12 @@ where
     let no_work = original_queue.is_empty(cs);
     let mut previous_item_is_trivial = no_work.or(cs, is_start);
 
-    let additive_part = *fs_challenges.last().unwrap();
+    let additive_parts = {
+        let mut parts = vec![];
+        parts[0] = *fs_challenges[0].last().unwrap();
+        parts[1] = *fs_challenges[1].last().unwrap();
+        parts
+    };
 
     // we simultaneously pop, accumulate partial product,
     // and decide whether or not we should move to the next cell
@@ -700,31 +718,33 @@ where
             .map(|v| Num::from_variable(*v))
             .collect::<Vec<Num<F>>>();
 
-        let mut lhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
-        let mut rhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
-        for ((original_el, sorted_el), challenge) in extended_original_encoding
-            .into_iter()
-            .zip(sorted_encoding.into_iter())
-            .zip(fs_challenges.iter())
-        {
-            let lhs_contribution = original_el.mul(cs, &challenge);
-            let rhs_contribution = sorted_el.mul(cs, &challenge);
+        for i in 0..DEFAULT_NUM_CHUNKS {
+            let mut lhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
+            let mut rhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
+            for ((original_el, sorted_el), challenge) in extended_original_encoding
+                .into_iter()
+                .zip(sorted_encoding.into_iter())
+                .zip(fs_challenges[i].iter())
+            {
+                let lhs_contribution = original_el.mul(cs, &challenge);
+                let rhs_contribution = sorted_el.mul(cs, &challenge);
 
-            lhs_lc.push((lhs_contribution.get_variable(), F::ONE));
-            rhs_lc.push((rhs_contribution.get_variable(), F::ONE));
+                lhs_lc.push((lhs_contribution.get_variable(), F::ONE));
+                rhs_lc.push((rhs_contribution.get_variable(), F::ONE));
+            }
+
+            lhs_lc.push((additive_parts[i].get_variable(), F::ONE));
+            rhs_lc.push((additive_parts[i].get_variable(), F::ONE));
+
+            let lhs_lc = Num::linear_combination(cs, &lhs_lc);
+            let rhs_lc = Num::linear_combination(cs, &rhs_lc);
+
+            let lhs_candidate = lhs[i].mul(cs, &lhs_lc);
+            let rhs_candidate = rhs[i].mul(cs, &rhs_lc);
+
+            lhs[i] = Num::conditionally_select(cs, should_pop, &lhs_candidate, &lhs[i]);
+            rhs[i] = Num::conditionally_select(cs, should_pop, &rhs_candidate, &rhs[i]);
         }
-
-        lhs_lc.push((additive_part.get_variable(), F::ONE));
-        rhs_lc.push((additive_part.get_variable(), F::ONE));
-
-        let lhs_lc = Num::linear_combination(cs, &lhs_lc);
-        let rhs_lc = Num::linear_combination(cs, &rhs_lc);
-
-        let lhs_candidate = lhs.mul(cs, &lhs_lc);
-        let rhs_candidate = rhs.mul(cs, &rhs_lc);
-
-        lhs = Num::conditionally_select(cs, should_pop, &lhs_candidate, &lhs);
-        rhs = Num::conditionally_select(cs, should_pop, &rhs_candidate, &rhs);
 
         let TimestampedStorageLogRecord { record, timestamp } = sorted_item;
 

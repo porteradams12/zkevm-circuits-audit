@@ -27,11 +27,13 @@ use super::TimestampedStorageLogRecord;
 
 // FSM
 
+pub const DEFAULT_NUM_CHUNKS: usize = 2;
+
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Debug)]
 pub struct StorageDeduplicatorFSMInputOutput<F: SmallField> {
-    pub lhs_accumulator: Num<F>,
-    pub rhs_accumulator: Num<F>,
+    pub lhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
+    pub rhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
     pub current_unsorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub current_intermediate_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub current_final_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
