@@ -75,6 +75,7 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
             cs,
             &[
                 (
+                    // Original encoding at index 19 is only 8 bits
                     original_encoding[EXTENDED_TIMESTAMP_ENCODING_ELEMENT],
                     F::ONE,
                 ),
@@ -104,8 +105,10 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
     }
 }
 
-impl<F: SmallField> TimestampedStorageLogRecord<F> {
-    pub fn pack<CS: ConstraintSystem<F>>(
+impl<F: SmallField> CircuitEncodable<F, TIMESTAMPED_STORAGE_LOG_ENCODING_LEN>
+    for TimestampedStorageLogRecord<F>
+{
+    fn encode<CS: ConstraintSystem<F>>(
         &self,
         cs: &mut CS,
     ) -> [Variable; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN] {
@@ -115,91 +118,23 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
     }
 }
 
-impl<F: SmallField> CircuitEncodable<F, TIMESTAMPED_STORAGE_LOG_ENCODING_LEN>
-    for TimestampedStorageLogRecord<F>
+impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F>
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
-    fn encode<CS: ConstraintSystem<F>>(
-        &self,
-        cs: &mut CS,
-    ) -> [Variable; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN] {
-        let packed = self.encode(cs);
-
-        packed
-    }
-}
-
-impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
     const INTERNAL_STRUCT_LEN: usize = 37;
 
-    fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
-        let address: [u32; 5] = [
-            WitnessCastable::cast_from_source(values[0]),
-            WitnessCastable::cast_from_source(values[1]),
-            WitnessCastable::cast_from_source(values[2]),
-            WitnessCastable::cast_from_source(values[3]),
-            WitnessCastable::cast_from_source(values[4]),
-        ];
-        let address = recompose_address_from_u32x5(address);
-
-        let key: [u32; 8] = [
-            WitnessCastable::cast_from_source(values[5]),
-            WitnessCastable::cast_from_source(values[6]),
-            WitnessCastable::cast_from_source(values[7]),
-            WitnessCastable::cast_from_source(values[8]),
-            WitnessCastable::cast_from_source(values[9]),
-            WitnessCastable::cast_from_source(values[10]),
-            WitnessCastable::cast_from_source(values[11]),
-            WitnessCastable::cast_from_source(values[12]),
-        ];
-        let key = recompose_u256_as_u32x8(key);
-
-        let read_value: [u32; 8] = [
-            WitnessCastable::cast_from_source(values[13]),
-            WitnessCastable::cast_from_source(values[14]),
-            WitnessCastable::cast_from_source(values[15]),
-            WitnessCastable::cast_from_source(values[16]),
-            WitnessCastable::cast_from_source(values[17]),
-            WitnessCastable::cast_from_source(values[18]),
-            WitnessCastable::cast_from_source(values[19]),
-            WitnessCastable::cast_from_source(values[20]),
-        ];
-        let read_value = recompose_u256_as_u32x8(read_value);
-
-        let written_value: [u32; 8] = [
-            WitnessCastable::cast_from_source(values[21]),
-            WitnessCastable::cast_from_source(values[22]),
-            WitnessCastable::cast_from_source(values[23]),
-            WitnessCastable::cast_from_source(values[24]),
-            WitnessCastable::cast_from_source(values[25]),
-            WitnessCastable::cast_from_source(values[26]),
-            WitnessCastable::cast_from_source(values[27]),
-            WitnessCastable::cast_from_source(values[28]),
-        ];
-        let written_value = recompose_u256_as_u32x8(written_value);
-
-        let aux_byte: u8 = WitnessCastable::cast_from_source(values[29]);
-        let rw_flag: bool = WitnessCastable::cast_from_source(values[30]);
-        let rollback: bool = WitnessCastable::cast_from_source(values[31]);
-        let is_service: bool = WitnessCastable::cast_from_source(values[32]);
-        let shard_id: u8 = WitnessCastable::cast_from_source(values[33]);
-        let tx_number_in_block: u32 = WitnessCastable::cast_from_source(values[34]);
-        let timestamp: u32 = WitnessCastable::cast_from_source(values[35]);
+    // NOTE(julesdesmit): using Self::INTERNAL_STRUCT_LEN here causes some kind of cyclic dependency issue
+    fn witness_from_set_of_values(values: [F; 37]) -> Self::Witness {
+        let record_values = [F::ZERO; <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN];
+        record_values
+            .copy_from_slice(&values[..<LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]);
+        let record =
+            <LogQuery<F> as CSAllocatableExt<F>>::witness_from_set_of_values(record_values);
         let other_timestamp: u32 = WitnessCastable::cast_from_source(values[36]);
 
         Self::Witness {
-            record: <LogQuery<F> as CSAllocatable<F>>::Witness {
-                address,
-                key,
-                read_value,
-                written_value,
-                aux_byte,
-                rw_flag,
-                rollback,
-                is_service,
-                shard_id,
-                tx_number_in_block,
-                timestamp,
-            },
+            record,
             timestamp: other_timestamp,
         }
     }
@@ -209,10 +144,7 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
         todo!()
     }
 
-    fn flatten_as_variables(&self) -> [Variable; Self::INTERNAL_STRUCT_LEN]
-    where
-        [(); Self::INTERNAL_STRUCT_LEN]:,
-    {
+    fn flatten_as_variables(&self) -> [F; 37] {
         [
             self.record.address.inner[0].get_variable(),
             self.record.address.inner[1].get_variable(),
@@ -261,6 +193,8 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
 
 impl<F: SmallField> CircuitEncodableExt<F, TIMESTAMPED_STORAGE_LOG_ENCODING_LEN>
     for TimestampedStorageLogRecord<F>
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
 }
 
@@ -276,28 +210,7 @@ pub fn sort_and_deduplicate_storage_access_entry_point<
 ) -> [Num<F>; 1]
 where
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-    [(); <TimestampedStorageLogRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
-    // let columns3 = vec![
-    //     PolyIdentifier::VariablesPolynomial(0),
-    //     PolyIdentifier::VariablesPolynomial(1),
-    //     PolyIdentifier::VariablesPolynomial(2),
-    // ];
-
-    // if cs.get_table(VM_BITWISE_LOGICAL_OPS_TABLE_NAME).is_err() {
-    //     let name = VM_BITWISE_LOGICAL_OPS_TABLE_NAME;
-    //     let bitwise_logic_table = LookupTableApplication::new(
-    //         name,
-    //         BitwiseLogicTable::new(&name, 8),
-    //         columns3.clone(),
-    //         None,
-    //         true,
-    //     );
-    //     cs.add_table(bitwise_logic_table)?;
-    // };
-
-    // inscribe_default_range_table_for_bit_width_over_first_three_columns(cs, 16)?;
-
     let structured_input_witness = closed_form_input.closed_form_input;
     let unsorted_queue_witness = closed_form_input.unsorted_queue_witness;
     let intermediate_sorted_queue_witness = closed_form_input.intermediate_sorted_queue_witness;
@@ -307,50 +220,36 @@ where
         structured_input_witness.clone(),
     );
 
-    let unsorted_queue_from_passthrough = StorageLogQueue::<F, R>::from_raw_parts(
-        cs,
-        structured_input
+    let unsorted_queue_from_passthrough_state = QueueState {
+        head: structured_input
             .observable_input
             .unsorted_log_queue_state
             .head,
-        structured_input
+        tail: structured_input
             .observable_input
             .unsorted_log_queue_state
-            .tail
             .tail,
-        structured_input
-            .observable_input
-            .unsorted_log_queue_state
-            .tail
-            .length,
-    );
+    };
 
-    let unsorted_queue_from_fsm_input = StorageLogQueue::<F, R>::from_raw_parts(
-        cs,
-        structured_input
+    let unsorted_queue_from_fsm_input_state = QueueState {
+        head: structured_input
             .hidden_fsm_input
             .current_unsorted_queue_state
             .head,
-        structured_input
+        tail: structured_input
             .hidden_fsm_input
             .current_unsorted_queue_state
-            .tail
             .tail,
-        structured_input
-            .hidden_fsm_input
-            .current_unsorted_queue_state
-            .tail
-            .length,
-    );
+    };
 
     // passthrought must be trivial
-    unsorted_queue_from_passthrough.enforce_trivial_head(cs);
+    unsorted_queue_from_passthrough_state.enforce_trivial_head(cs);
 
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
-        &unsorted_queue_from_passthrough.into_state(),
-        &unsorted_queue_from_fsm_input.into_state(),
+        &unsorted_queue_from_passthrough_state,
+        &unsorted_queue_from_fsm_input_state,
     );
     let mut unsorted_queue = StorageLogQueue::<F, R>::from_state(cs, state);
 
@@ -476,8 +375,21 @@ where
     // get challenges for permutation argument
 
     let mut fs_input = vec![];
-    fs_input.extend(unsorted_queue_from_passthrough.tail);
-    fs_input.push(unsorted_queue_from_passthrough.length.into_num());
+    fs_input.extend(
+        structured_input
+            .observable_input
+            .unsorted_log_queue_state
+            .tail
+            .tail,
+    );
+    fs_input.push(
+        structured_input
+            .observable_input
+            .unsorted_log_queue_state
+            .tail
+            .length
+            .into_num(),
+    );
     fs_input.extend(intermediate_sorted_queue_from_passthrough.tail);
     fs_input.push(intermediate_sorted_queue_from_passthrough.length.into_num());
 
@@ -485,7 +397,7 @@ where
     let mut state = R::create_empty_state(cs);
     let length = Num::allocate(cs, F::from_u64_unchecked(fs_input.len() as u64)).get_variable();
     R::apply_length_specialization(cs, &mut state, length);
-    for chunk in fs_input.chunks(12) {
+    for chunk in fs_input.array_chunks() {
         let padding_els = 12 - chunk.len();
         let input_fixed_len: [Num<F>; 12] = if padding_els == 0 {
             chunk.try_into().expect("length must match")
@@ -733,7 +645,6 @@ pub fn sort_and_deduplicate_storage_access_inner<
 )
 where
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-    [(); <TimestampedStorageLogRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     assert!(limit <= u32::MAX as usize);
 

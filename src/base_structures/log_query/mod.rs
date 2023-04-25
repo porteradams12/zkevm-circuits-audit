@@ -1,21 +1,21 @@
 use super::*;
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::u160::{UInt160, recompose_address_from_u32x5};
-use boojum::gadgets::u256::{UInt256, recompose_u256_as_u32x8};
+use boojum::gadgets::u160::{recompose_address_from_u32x5, UInt160};
+use boojum::gadgets::u256::{recompose_u256_as_u32x8, UInt256};
 use boojum::gadgets::u32::UInt32;
 
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::Variable;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
-use boojum::gadgets::traits::encodable::CircuitEncodable;
-use boojum::gadgets::traits::selectable::Selectable;
-use boojum::gadgets::u8::UInt8;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::traits::castable::WitnessCastable;
-use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::encodable::CircuitEncodableExt;
+use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitVarLengthEncodable};
+use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
+use boojum::gadgets::u8::UInt8;
 use cs_derive::*;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable)]
@@ -68,9 +68,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[0].get_variable(), F::ONE),
-                (key_bytes[0][0].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[0][1].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[0][2].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[0][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[0][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[0][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -79,9 +88,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[1].get_variable(), F::ONE),
-                (key_bytes[0][3].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[1][0].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[1][1].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[0][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[1][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[1][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -90,9 +108,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[2].get_variable(), F::ONE),
-                (key_bytes[1][2].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[1][3].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[2][0].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[1][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[1][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[2][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -101,9 +128,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[3].get_variable(), F::ONE),
-                (key_bytes[2][1].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[2][2].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[2][3].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[2][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[2][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[2][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -112,9 +148,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[4].get_variable(), F::ONE),
-                (key_bytes[3][0].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[3][1].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[3][2].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[3][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[3][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[3][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -123,9 +168,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[5].get_variable(), F::ONE),
-                (key_bytes[3][3].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[4][0].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[4][1].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[3][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[4][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[4][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -134,9 +188,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[6].get_variable(), F::ONE),
-                (key_bytes[4][2].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[4][3].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[5][0].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[4][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[4][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[5][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -145,9 +208,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.read_value.inner[7].get_variable(), F::ONE),
-                (key_bytes[5][1].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[5][2].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[5][3].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[5][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[5][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[5][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -158,9 +230,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.written_value.inner[0].get_variable(), F::ONE),
-                (key_bytes[6][0].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[6][1].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[6][2].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[6][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[6][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[6][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -169,9 +250,18 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.written_value.inner[1].get_variable(), F::ONE),
-                (key_bytes[6][3].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[7][0].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (key_bytes[7][1].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    key_bytes[6][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[7][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    key_bytes[7][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -182,8 +272,14 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
             cs,
             &[
                 (self.written_value.inner[2].get_variable(), F::ONE),
-                (key_bytes[7][2].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (key_bytes[7][3].get_variable(), F::from_u64_unchecked(1u64 << 40)),
+                (
+                    key_bytes[7][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    key_bytes[7][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
                 (
                     address_bytes[0][0].get_variable(),
                     F::from_u64_unchecked(1u64 << 48),
@@ -322,8 +418,14 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
                     address_bytes[4][3].get_variable(),
                     F::from_u64_unchecked(1u64 << 32),
                 ),
-                (self.aux_byte.get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (self.shard_id.get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    self.aux_byte.get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    self.shard_id.get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -340,6 +442,13 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
         // and the final variable is just rollback flag itself
 
         let v19 = self.rollback.get_variable();
+        // Ensure the last variable is packed into 8 bits
+        debug_assert!(
+            Num::from_variable(v19)
+                .constraint_bit_length_as_bytes(cs, 8)
+                .len()
+                == 1
+        );
 
         [
             v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18,
@@ -468,13 +577,14 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
             self.timestamp.get_variable(),
         ]
     }
-    
+
     fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
         todo!();
     }
 }
 
+use crate::base_structures::vm_state::QUEUE_STATE_WIDTH;
 use boojum::gadgets::queue::CircuitQueue;
-use crate::base_structures::vm_state::{QUEUE_STATE_WIDTH};
 
-pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = CircuitQueue<F, LogQuery<F>, AW, SW, CW, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;
+pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
+    CircuitQueue<F, LogQuery<F>, AW, SW, CW, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;
