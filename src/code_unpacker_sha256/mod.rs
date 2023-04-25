@@ -62,103 +62,38 @@ where
     let mut structured_input =
         CodeDecommitterCycleInputOutput::alloc_ignoring_outputs(cs, structured_input_witness.clone());
 
-    let requests_queue_head = <[Num<F>; 12]>::conditionally_select(
+    let requests_queue_state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &structured_input
             .observable_input
-            .sorted_requests_queue_initial_state
-            .head,
+            .sorted_requests_queue_initial_state,
         &structured_input
             .hidden_fsm_input
             .decommittment_requests_queue_state
-            .head
     );
 
-    let requests_queue_tail = <[Num<F>; 12]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &structured_input
-            .observable_input
-            .sorted_requests_queue_initial_state
-            .tail.tail,
-        &structured_input
-            .hidden_fsm_input
-            .decommittment_requests_queue_state
-            .tail.tail
-    );
-
-    let requests_queue_length = UInt32::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &structured_input
-            .observable_input
-            .sorted_requests_queue_initial_state
-            .tail.length,
-        &structured_input
-            .hidden_fsm_input
-            .decommittment_requests_queue_state
-            .tail.length
-    );
-
-    let mut requests_queue = DecommitQueue::<F, 8, 12, 4, R>::from_raw_parts(
-        cs,
-        requests_queue_head,
-        requests_queue_tail,
-        requests_queue_length,
-    );
+    let mut requests_queue = 
+        DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, requests_queue_state);
 
     use crate::code_unpacker_sha256::full_state_queue::FullStateCircuitQueueWitness;
     requests_queue.witness = Arc::new(
         FullStateCircuitQueueWitness::from_inner_witness(sorted_requests_queue_witness)
     );
 
-
-    let memory_queue_head = <[Num<F>; 12]>::conditionally_select(
+    let memory_queue_state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &structured_input
             .observable_input
-            .memory_queue_initial_state
-            .head,
+            .memory_queue_initial_state,
         &structured_input
             .hidden_fsm_input
             .memory_queue_state
-            .head
     );
 
-    let memory_queue_tail = <[Num<F>; 12]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &structured_input
-            .observable_input
-            .memory_queue_initial_state
-            .tail.tail,
-        &structured_input
-            .hidden_fsm_input
-            .memory_queue_state
-            .tail.tail
-    );
-
-    let memory_queue_length = UInt32::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &structured_input
-            .observable_input
-            .memory_queue_initial_state
-            .tail.length,
-        &structured_input
-            .hidden_fsm_input
-            .memory_queue_state
-            .tail.length
-    );
-
-    let mut memory_queue = MemoryQueryQueue::<F, 8, 12, 4, R>::from_raw_parts(
-        cs,
-        memory_queue_head,
-        memory_queue_tail,
-        memory_queue_length,
-    );
+    let mut memory_queue = 
+        MemoryQueryQueue::<F, 8, 12, 4, R>::from_state(cs, memory_queue_state);
 
     use boojum::gadgets::traits::allocatable::CSPlaceholder;
     let mut starting_fsm_state = CodeDecommittmentFSM::placeholder(cs);
@@ -250,10 +185,7 @@ where
     half = half.inverse().unwrap();
     let half_num = Num::allocated_constant(cs, half);
 
-    let words_to_bits = Num::allocated_constant(
-        cs,
-        F::from_u64_with_reduction(32 * 8),
-    );
+    let words_to_bits = UInt32::allocated_constant(cs, 32 * 8);
 
     let shifts = F::SHIFTS;
 
@@ -300,15 +232,15 @@ where
         let length_in_rounds = length_in_rounds.into_num().mul(cs, &half_num);
         // length is always a multiple of 2 since we decided so
 
-        let (length_in_rounds, _) = UInt16::from_variable_checked(cs, length_in_rounds.get_variable());
-        let length_in_bits_may_be = unsafe {
-            UInt32::<F>::from_variable_unchecked(
-                length_in_words
-                    .into_num()
-                    .mul(cs, &words_to_bits)
-                    .get_variable()
-            )
-        };
+        let (length_in_rounds, _) = 
+            UInt16::from_variable_checked(cs, length_in_rounds.get_variable());
+
+        let (length_in_bits_may_be, _) = 
+            unsafe {
+                UInt32::from_variable_unchecked(
+                    length_in_words.get_variable()
+                ).non_widening_mul(cs, &words_to_bits)
+            };
 
         // turn over the endianess
         // we IGNORE the highest 4 bytes
