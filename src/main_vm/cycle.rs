@@ -1,7 +1,7 @@
 use arrayvec::ArrayVec;
 
 use super::opcodes::context::apply_context;
-use super::pre_state::create_prestate;
+use super::pre_state::{create_prestate, PendingSponge};
 use super::state_diffs::{StateDiffsAccumulator, MAX_ADD_SUB_RELATIONS_PER_CYCLE, MAX_MUL_DIV_RELATIONS_PER_CYCLE};
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -250,7 +250,7 @@ where
     };
 
     let (
-        (_dst0_write_initial_state_to_enforce, _dst0_write_final_state_to_enforce),
+        (dst0_write_initial_state_to_enforce, dst0_write_final_state_to_enforce),
         new_memory_queue_tail,
         new_memory_queue_len,
     ) = may_be_write_memory(
@@ -605,11 +605,110 @@ where
     // - do not use sponges and only rely on src0/dst0
     // - can not have src0/dst0 in memory, but use sponges (UMA, near_call, far call, ret)
 
-    // so we should properly assemble the candidates
+    let src0_read_state_pending_sponge = opcode_carry_parts.src0_read_sponge_data;
+    let dst0_write_state_pending_sponge = PendingSponge {
+        initial_state: dst0_write_initial_state_to_enforce,
+        final_state: dst0_write_final_state_to_enforce,
+        should_enforce: perform_dst0_memory_write_update,
+    };
 
-    // if let Some(new_state_registers) = (new_state.registers.witness_hook(&*cs))() {
-    //     dbg!(&new_state_registers);
-    // }
+    let boolean_true = Boolean::allocated_constant(cs, true);
+
+    let mut first_sponge_candidate = src0_read_state_pending_sponge;
+    for (can_use_sponge_for_src0, can_use_sponge_for_dst0, opcode_applies, sponge_data) in diffs_accumulator.sponge_candidates_to_run.iter_mut() {
+        assert!(*can_use_sponge_for_src0 == false);
+        assert!(*can_use_sponge_for_dst0 == false);
+
+        if let Some((initial_state, final_state)) = sponge_data.pop() {
+            // we can conditionally select
+            let formal_sponge = PendingSponge {
+                initial_state: initial_state,
+                final_state: final_state,
+                should_enforce: boolean_true,
+            };
+
+            first_sponge_candidate = Selectable::conditionally_select(
+                cs, 
+                *opcode_applies,
+                &formal_sponge,
+                &first_sponge_candidate,
+            );
+        }
+    }
+
+    let mut second_sponge_candidate = dst0_write_state_pending_sponge;
+    for (can_use_sponge_for_src0, can_use_sponge_for_dst0, opcode_applies, sponge_data) in diffs_accumulator.sponge_candidates_to_run.iter_mut() {
+        assert!(*can_use_sponge_for_src0 == false);
+        assert!(*can_use_sponge_for_dst0 == false);
+
+        if let Some((initial_state, final_state)) = sponge_data.pop() {
+            // we can conditionally select
+            let formal_sponge = PendingSponge {
+                initial_state: initial_state,
+                final_state: final_state,
+                should_enforce: boolean_true,
+            };
+
+            second_sponge_candidate = Selectable::conditionally_select(
+                cs, 
+                *opcode_applies,
+                &formal_sponge,
+                &second_sponge_candidate,
+            );
+        }
+    }
+
+    use super::state_diffs::MAX_SPONGES_PER_CYCLE;
+    let mut selected_sponges_to_enforce = ArrayVec::<_, MAX_SPONGES_PER_CYCLE>::new();
+    selected_sponges_to_enforce.push(first_sponge_candidate);
+    selected_sponges_to_enforce.push(second_sponge_candidate);
+
+    for _ in 2..MAX_SPONGES_PER_CYCLE {
+        let mut selected = None;
+        for (_, _, opcode_applies, sponge_data) in diffs_accumulator.sponge_candidates_to_run.iter_mut() {    
+            if let Some((initial_state, final_state)) = sponge_data.pop() {
+                if let Some(selected) = selected.as_mut() {
+                    // we can conditionally select
+                    let formal_sponge = PendingSponge {
+                        initial_state: initial_state,
+                        final_state: final_state,
+                        should_enforce: boolean_true,
+                    };
+
+                    *selected = Selectable::conditionally_select(
+                        cs, 
+                        *opcode_applies,
+                        &formal_sponge,
+                        &*selected,
+                    );
+                } else {
+                    let formal_sponge = PendingSponge {
+                        initial_state: initial_state,
+                        final_state: final_state,
+                        should_enforce: *opcode_applies,
+                    };
+                    selected = Some(formal_sponge);
+                }
+            }
+        }
+
+        let selected = selected.expect("non-trivial sponge");
+        selected_sponges_to_enforce.push(selected);
+    }
+
+    // ensure that we selected everything
+    for (_, _, _, sponge_data) in diffs_accumulator.sponge_candidates_to_run.iter_mut() {
+        assert!(sponge_data.is_empty());
+    }
+    assert_eq!(selected_sponges_to_enforce.len(), MAX_SPONGES_PER_CYCLE);
+
+    // actually enforce_sponges
+
+    enforce_sponges(
+        cs,
+        &selected_sponges_to_enforce,
+        round_function
+    );
 
     new_state
 }
@@ -729,6 +828,24 @@ where
         final_state,
         new_length,
     )
+}
+
+fn enforce_sponges<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+>(
+    cs: &mut CS,
+    candidates: &[PendingSponge<F>],
+    _round_function: &R
+) {
+    for el in candidates.iter() {
+        let PendingSponge { initial_state, final_state, should_enforce } = el;
+        let true_final = R::compute_round_function_over_nums(cs, *initial_state);
+        for (a, b) in true_final.iter().zip(final_state.iter()) {
+            Num::conditionally_enforce_equal(cs, *should_enforce, a, b);
+        }
+    }
 }
 
 pub const fn reference_vm_geometry() -> CSGeometry {

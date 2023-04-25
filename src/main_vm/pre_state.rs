@@ -55,12 +55,12 @@ pub struct AfterDecodingCarryParts<F: SmallField> {
     pub dst0_performs_memory_access: Boolean<F>,
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSSelectable)]
 #[derivative(Clone, Copy, Debug)]
 pub struct PendingSponge<F: SmallField> {
-    initial_state: [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
-    final_state: [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
-    should_enforce: Boolean<F>,
+    pub initial_state: [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
+    pub final_state: [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
+    pub should_enforce: Boolean<F>,
 }
 
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -99,7 +99,6 @@ pub fn create_prestate<
     let should_try_to_read_opcode = Boolean::multi_or(cs, &[execute_cycle, pending_exception]);
 
     let execute_pending_exception_at_this_cycle = pending_exception;
-        // Boolean::multi_and(cs, &[execute_cycle, pending_exception]);
 
     // take down the flag
     current_state.pending_exception = current_state

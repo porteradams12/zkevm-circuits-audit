@@ -476,4 +476,5 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
 
 use boojum::gadgets::queue::CircuitQueue;
 use crate::base_structures::vm_state::{QUEUE_STATE_WIDTH};
+
 pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = CircuitQueue<F, LogQuery<F>, AW, SW, CW, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;

@@ -151,7 +151,7 @@ where
             .tail.length
     );
 
-    let mut memory_queue = MemoryQueriesQueue::<F, 8, 12, 4, R>::from_raw_parts(
+    let mut memory_queue = MemoryQueryQueue::<F, 8, 12, 4, R>::from_raw_parts(
         cs,
         memory_queue_head,
         memory_queue_tail,
@@ -221,7 +221,7 @@ pub fn unpack_code_into_memory_inner<
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
-    memory_queue: &mut MemoryQueriesQueue<F, 8, 12, 4, R>,
+    memory_queue: &mut MemoryQueryQueue<F, 8, 12, 4, R>,
     unpack_requests_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
     mut input_witness: Arc<RwLock<Vec<Vec<U256>>>>,
     round_function: &R,

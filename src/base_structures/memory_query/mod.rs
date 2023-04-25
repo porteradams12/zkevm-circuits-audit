@@ -2,6 +2,7 @@ use super::*;
 
 use boojum::field::SmallField;
 
+use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueue;
 use boojum::gadgets::u256::UInt256;
 
 use boojum::gadgets::boolean::Boolean;
@@ -298,14 +299,14 @@ impl<F: SmallField> MemoryValue<F> {
     }
 }
 
-
 use boojum::gadgets::queue::full_state_queue::{
-    FullStateCircuitQueue,
+    // FullStateCircuitQueue,
     FullStateCircuitQueueWitness,
 };
 
-pub type MemoryQueriesQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
+pub type MemoryQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = 
     FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
+pub type MemoryQueue<F, R> = MemoryQueryQueue<F, 8, 12, 4, R>;
 
-pub type MemoryQueriesQueueWitness<F, const SW: usize> =
+pub type MemoryQueryQueueWitness<F, const SW: usize> =
     FullStateCircuitQueueWitness<F, MemoryQuery<F>, SW, MEMORY_QUERY_PACKED_WIDTH>;
