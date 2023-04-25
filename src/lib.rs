@@ -16,8 +16,11 @@ pub mod sha256_round_function;
 pub mod storage_application;
 pub mod storage_validity_by_grand_product;
 pub mod tables;
+pub mod utils;
 
 use boojum::pairing::ff;
+
+pub const DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS: usize = 2;
 
 pub const fn bit_width_to_bitmask(width: usize) -> u64 {
     (1u64 << width) - 1

@@ -37,6 +37,9 @@ impl<F: SmallField> CircuitEncodableExt<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<
 
 pub const LOG_QUERY_PACKED_WIDTH: usize = 20;
 
+// NOTE: (shamatar): workaround for cost generics for now
+pub(crate) const FLATTENED_VARIABLE_LENGTH: usize = 36;
+
 // because two logs that we add to the queue on write-like operation only differ by
 // rollback flag, we want to specially define offset for rollback, so we can
 // pack two cases for free. Also packing of the rollback should go into variable
@@ -51,6 +54,47 @@ impl<F: SmallField> LogQuery<F> {
     ) {
         let boolean_true = Boolean::allocated_constant(cs, true);
         existing_packing[ROLLBACK_PACKING_FLAG_VARIABLE_IDX] = boolean_true.get_variable();
+    }
+
+    pub(crate) fn flatten_as_variables_impl(&self) -> [Variable; FLATTENED_VARIABLE_LENGTH] {
+        [
+            self.address.inner[0].get_variable(),
+            self.address.inner[1].get_variable(),
+            self.address.inner[2].get_variable(),
+            self.address.inner[3].get_variable(),
+            self.address.inner[4].get_variable(),
+            self.key.inner[0].get_variable(),
+            self.key.inner[1].get_variable(),
+            self.key.inner[2].get_variable(),
+            self.key.inner[3].get_variable(),
+            self.key.inner[4].get_variable(),
+            self.key.inner[5].get_variable(),
+            self.key.inner[6].get_variable(),
+            self.key.inner[7].get_variable(),
+            self.read_value.inner[0].get_variable(),
+            self.read_value.inner[1].get_variable(),
+            self.read_value.inner[2].get_variable(),
+            self.read_value.inner[3].get_variable(),
+            self.read_value.inner[4].get_variable(),
+            self.read_value.inner[5].get_variable(),
+            self.read_value.inner[6].get_variable(),
+            self.read_value.inner[7].get_variable(),
+            self.written_value.inner[0].get_variable(),
+            self.written_value.inner[1].get_variable(),
+            self.written_value.inner[2].get_variable(),
+            self.written_value.inner[3].get_variable(),
+            self.written_value.inner[4].get_variable(),
+            self.written_value.inner[5].get_variable(),
+            self.written_value.inner[6].get_variable(),
+            self.written_value.inner[7].get_variable(),
+            self.aux_byte.get_variable(),
+            self.rw_flag.get_variable(),
+            self.rollback.get_variable(),
+            self.is_service.get_variable(),
+            self.shard_id.get_variable(),
+            self.tx_number_in_block.get_variable(),
+            self.timestamp.get_variable(),
+        ]
     }
 }
 
@@ -441,14 +485,9 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
 
         // and the final variable is just rollback flag itself
 
+        // NOTE: if you even change this encoding please ensure that corresponding part
+        // is updated in TimestampedStorageLogRecord
         let v19 = self.rollback.get_variable();
-        // Ensure the last variable is packed into 8 bits
-        debug_assert!(
-            Num::from_variable(v19)
-                .constraint_bit_length_as_bytes(cs, 8)
-                .len()
-                == 1
-        );
 
         [
             v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18,
@@ -457,76 +496,80 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
     }
 }
 
+pub(crate) fn log_query_witness_from_values<F: SmallField>(values: [F; FLATTENED_VARIABLE_LENGTH]) -> <LogQuery<F> as CSAllocatable<F>>::Witness {
+    let address: [u32; 5] = [
+        WitnessCastable::cast_from_source(values[0]),
+        WitnessCastable::cast_from_source(values[1]),
+        WitnessCastable::cast_from_source(values[2]),
+        WitnessCastable::cast_from_source(values[3]),
+        WitnessCastable::cast_from_source(values[4]),
+    ];
+    let address = recompose_address_from_u32x5(address);
+
+    let key: [u32; 8] = [
+        WitnessCastable::cast_from_source(values[5]),
+        WitnessCastable::cast_from_source(values[6]),
+        WitnessCastable::cast_from_source(values[7]),
+        WitnessCastable::cast_from_source(values[8]),
+        WitnessCastable::cast_from_source(values[9]),
+        WitnessCastable::cast_from_source(values[10]),
+        WitnessCastable::cast_from_source(values[11]),
+        WitnessCastable::cast_from_source(values[12]),
+    ];
+    let key = recompose_u256_as_u32x8(key);
+
+    let read_value: [u32; 8] = [
+        WitnessCastable::cast_from_source(values[13]),
+        WitnessCastable::cast_from_source(values[14]),
+        WitnessCastable::cast_from_source(values[15]),
+        WitnessCastable::cast_from_source(values[16]),
+        WitnessCastable::cast_from_source(values[17]),
+        WitnessCastable::cast_from_source(values[18]),
+        WitnessCastable::cast_from_source(values[19]),
+        WitnessCastable::cast_from_source(values[20]),
+    ];
+    let read_value = recompose_u256_as_u32x8(read_value);
+
+    let written_value: [u32; 8] = [
+        WitnessCastable::cast_from_source(values[21]),
+        WitnessCastable::cast_from_source(values[22]),
+        WitnessCastable::cast_from_source(values[23]),
+        WitnessCastable::cast_from_source(values[24]),
+        WitnessCastable::cast_from_source(values[25]),
+        WitnessCastable::cast_from_source(values[26]),
+        WitnessCastable::cast_from_source(values[27]),
+        WitnessCastable::cast_from_source(values[28]),
+    ];
+    let written_value = recompose_u256_as_u32x8(written_value);
+
+    let aux_byte: u8 = WitnessCastable::cast_from_source(values[29]);
+    let rw_flag: bool = WitnessCastable::cast_from_source(values[30]);
+    let rollback: bool = WitnessCastable::cast_from_source(values[31]);
+    let is_service: bool = WitnessCastable::cast_from_source(values[32]);
+    let shard_id: u8 = WitnessCastable::cast_from_source(values[33]);
+    let tx_number_in_block: u32 = WitnessCastable::cast_from_source(values[34]);
+    let timestamp: u32 = WitnessCastable::cast_from_source(values[35]);
+
+    <LogQuery<F> as CSAllocatable<F>>::Witness {
+        address,
+        key,
+        read_value,
+        written_value,
+        aux_byte,
+        rw_flag,
+        rollback,
+        is_service,
+        shard_id,
+        tx_number_in_block,
+        timestamp,
+    }
+}
+
 impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
-    const INTERNAL_STRUCT_LEN: usize = 36;
+    const INTERNAL_STRUCT_LEN: usize = FLATTENED_VARIABLE_LENGTH;
 
     fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
-        let address: [u32; 5] = [
-            WitnessCastable::cast_from_source(values[0]),
-            WitnessCastable::cast_from_source(values[1]),
-            WitnessCastable::cast_from_source(values[2]),
-            WitnessCastable::cast_from_source(values[3]),
-            WitnessCastable::cast_from_source(values[4]),
-        ];
-        let address = recompose_address_from_u32x5(address);
-
-        let key: [u32; 8] = [
-            WitnessCastable::cast_from_source(values[5]),
-            WitnessCastable::cast_from_source(values[6]),
-            WitnessCastable::cast_from_source(values[7]),
-            WitnessCastable::cast_from_source(values[8]),
-            WitnessCastable::cast_from_source(values[9]),
-            WitnessCastable::cast_from_source(values[10]),
-            WitnessCastable::cast_from_source(values[11]),
-            WitnessCastable::cast_from_source(values[12]),
-        ];
-        let key = recompose_u256_as_u32x8(key);
-
-        let read_value: [u32; 8] = [
-            WitnessCastable::cast_from_source(values[13]),
-            WitnessCastable::cast_from_source(values[14]),
-            WitnessCastable::cast_from_source(values[15]),
-            WitnessCastable::cast_from_source(values[16]),
-            WitnessCastable::cast_from_source(values[17]),
-            WitnessCastable::cast_from_source(values[18]),
-            WitnessCastable::cast_from_source(values[19]),
-            WitnessCastable::cast_from_source(values[20]),
-        ];
-        let read_value = recompose_u256_as_u32x8(read_value);
-
-        let written_value: [u32; 8] = [
-            WitnessCastable::cast_from_source(values[21]),
-            WitnessCastable::cast_from_source(values[22]),
-            WitnessCastable::cast_from_source(values[23]),
-            WitnessCastable::cast_from_source(values[24]),
-            WitnessCastable::cast_from_source(values[25]),
-            WitnessCastable::cast_from_source(values[26]),
-            WitnessCastable::cast_from_source(values[27]),
-            WitnessCastable::cast_from_source(values[28]),
-        ];
-        let written_value = recompose_u256_as_u32x8(written_value);
-
-        let aux_byte: u8 = WitnessCastable::cast_from_source(values[29]);
-        let rw_flag: bool = WitnessCastable::cast_from_source(values[30]);
-        let rollback: bool = WitnessCastable::cast_from_source(values[31]);
-        let is_service: bool = WitnessCastable::cast_from_source(values[32]);
-        let shard_id: u8 = WitnessCastable::cast_from_source(values[33]);
-        let tx_number_in_block: u32 = WitnessCastable::cast_from_source(values[34]);
-        let timestamp: u32 = WitnessCastable::cast_from_source(values[35]);
-
-        Self::Witness {
-            address,
-            key,
-            read_value,
-            written_value,
-            aux_byte,
-            rw_flag,
-            rollback,
-            is_service,
-            shard_id,
-            tx_number_in_block,
-            timestamp,
-        }
+        log_query_witness_from_values(values)
     }
 
     // we should be able to allocate without knowing values yet
@@ -538,44 +581,7 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
     where
         [(); Self::INTERNAL_STRUCT_LEN]:,
     {
-        [
-            self.address.inner[0].get_variable(),
-            self.address.inner[1].get_variable(),
-            self.address.inner[2].get_variable(),
-            self.address.inner[3].get_variable(),
-            self.address.inner[4].get_variable(),
-            self.key.inner[0].get_variable(),
-            self.key.inner[1].get_variable(),
-            self.key.inner[2].get_variable(),
-            self.key.inner[3].get_variable(),
-            self.key.inner[4].get_variable(),
-            self.key.inner[5].get_variable(),
-            self.key.inner[6].get_variable(),
-            self.key.inner[7].get_variable(),
-            self.read_value.inner[0].get_variable(),
-            self.read_value.inner[1].get_variable(),
-            self.read_value.inner[2].get_variable(),
-            self.read_value.inner[3].get_variable(),
-            self.read_value.inner[4].get_variable(),
-            self.read_value.inner[5].get_variable(),
-            self.read_value.inner[6].get_variable(),
-            self.read_value.inner[7].get_variable(),
-            self.written_value.inner[0].get_variable(),
-            self.written_value.inner[1].get_variable(),
-            self.written_value.inner[2].get_variable(),
-            self.written_value.inner[3].get_variable(),
-            self.written_value.inner[4].get_variable(),
-            self.written_value.inner[5].get_variable(),
-            self.written_value.inner[6].get_variable(),
-            self.written_value.inner[7].get_variable(),
-            self.aux_byte.get_variable(),
-            self.rw_flag.get_variable(),
-            self.rollback.get_variable(),
-            self.is_service.get_variable(),
-            self.shard_id.get_variable(),
-            self.tx_number_in_block.get_variable(),
-            self.timestamp.get_variable(),
-        ]
+        self.flatten_as_variables_impl()
     }
 
     fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {

@@ -1,8 +1,8 @@
 use super::*;
 
 pub mod input;
-use input::DEFAULT_NUM_CHUNKS;
 
+use crate::base_structures::log_query::log_query_witness_from_values;
 use crate::fsm_input_output::ClosedFormInputCompactForm;
 
 use crate::base_structures::{
@@ -13,6 +13,7 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
+use boojum::gadgets::non_native_field::implementations::utils::u16_long_subtraction;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::{
     boolean::Boolean,
@@ -71,7 +72,8 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
         original_encoding: &[Variable; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN],
         timestamp: &UInt32<F>,
     ) -> [Variable; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN] {
-        let timestamp_inner = timestamp.to_le_bytes(cs);
+        debug_assert!(F::CAPACITY_BITS >= 40);
+        // LogQuery encoding leaves last variable as < 8 bits value
         let encoding = Num::linear_combination(
             cs,
             &[
@@ -81,20 +83,8 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
                     F::ONE,
                 ),
                 (
-                    timestamp_inner[0].get_variable(),
+                    timestamp.get_variable(),
                     F::from_u64_unchecked(1u64 << 8),
-                ),
-                (
-                    timestamp_inner[1].get_variable(),
-                    F::from_u64_unchecked(1u64 << 16),
-                ),
-                (
-                    timestamp_inner[2].get_variable(),
-                    F::from_u64_unchecked(1u64 << 24),
-                ),
-                (
-                    timestamp_inner[3].get_variable(),
-                    F::from_u64_unchecked(1u64 << 32),
                 ),
             ],
         )
@@ -119,19 +109,15 @@ impl<F: SmallField> CircuitEncodable<F, TIMESTAMPED_STORAGE_LOG_ENCODING_LEN>
     }
 }
 
-impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F>
-where
-    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-{
+impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
     const INTERNAL_STRUCT_LEN: usize = 37;
 
-    // NOTE(julesdesmit): using Self::INTERNAL_STRUCT_LEN here causes some kind of cyclic dependency issue
-    fn witness_from_set_of_values(values: [F; 37]) -> Self::Witness {
-        let record_values = [F::ZERO; <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN];
+    fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
+        // NOTE(shamatar) Using CSAllocatableExt causes cyclic dependency here, so we use workaround
+        let mut record_values = [F::ZERO; crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH];
         record_values
-            .copy_from_slice(&values[..<LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]);
-        let record =
-            <LogQuery<F> as CSAllocatableExt<F>>::witness_from_set_of_values(record_values);
+            .copy_from_slice(&values[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH]);
+        let record = log_query_witness_from_values(record_values);
         let other_timestamp: u32 = WitnessCastable::cast_from_source(values[36]);
 
         Self::Witness {
@@ -145,46 +131,16 @@ where
         todo!()
     }
 
-    fn flatten_as_variables(&self) -> [F; 37] {
-        [
-            self.record.address.inner[0].get_variable(),
-            self.record.address.inner[1].get_variable(),
-            self.record.address.inner[2].get_variable(),
-            self.record.address.inner[3].get_variable(),
-            self.record.address.inner[4].get_variable(),
-            self.record.key.inner[0].get_variable(),
-            self.record.key.inner[1].get_variable(),
-            self.record.key.inner[2].get_variable(),
-            self.record.key.inner[3].get_variable(),
-            self.record.key.inner[4].get_variable(),
-            self.record.key.inner[5].get_variable(),
-            self.record.key.inner[6].get_variable(),
-            self.record.key.inner[7].get_variable(),
-            self.record.read_value.inner[0].get_variable(),
-            self.record.read_value.inner[1].get_variable(),
-            self.record.read_value.inner[2].get_variable(),
-            self.record.read_value.inner[3].get_variable(),
-            self.record.read_value.inner[4].get_variable(),
-            self.record.read_value.inner[5].get_variable(),
-            self.record.read_value.inner[6].get_variable(),
-            self.record.read_value.inner[7].get_variable(),
-            self.record.written_value.inner[0].get_variable(),
-            self.record.written_value.inner[1].get_variable(),
-            self.record.written_value.inner[2].get_variable(),
-            self.record.written_value.inner[3].get_variable(),
-            self.record.written_value.inner[4].get_variable(),
-            self.record.written_value.inner[5].get_variable(),
-            self.record.written_value.inner[6].get_variable(),
-            self.record.written_value.inner[7].get_variable(),
-            self.record.aux_byte.get_variable(),
-            self.record.rw_flag.get_variable(),
-            self.record.rollback.get_variable(),
-            self.record.is_service.get_variable(),
-            self.record.shard_id.get_variable(),
-            self.record.tx_number_in_block.get_variable(),
-            self.record.timestamp.get_variable(),
-            self.timestamp.get_variable(),
-        ]
+    fn flatten_as_variables(&self) -> [Variable; 37] where
+        [(); Self::INTERNAL_STRUCT_LEN]:,
+    {
+        let mut result = [Variable::placeholder(); 37];
+        let record_variables = self.record.flatten_as_variables_impl();
+        result[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH].copy_from_slice(&record_variables);
+        result[crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH] = self.timestamp.get_variable();
+        assert_no_placeholder_variables(&result);
+
+        result
     }
 
     fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
@@ -202,15 +158,16 @@ where
 pub fn sort_and_deduplicate_storage_access_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
-    R: CircuitRoundFunction<F, 8, 12, 4>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
     closed_form_input: StorageDeduplicatorInstanceWitness<F>,
     round_function: &R,
     limit: usize,
-) -> [Num<F>; 1]
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
 where
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <TimestampedStorageLogRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     let structured_input_witness = closed_form_input.closed_form_input;
     let unsorted_queue_witness = closed_form_input.unsorted_queue_witness;
@@ -374,118 +331,53 @@ where
     );
 
     // get challenges for permutation argument
-
-    let mut fs_input = vec![];
-    fs_input.extend(
+    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
+        cs, 
         structured_input
             .observable_input
             .unsorted_log_queue_state
-            .tail
+            .tail, 
+        structured_input
+            .observable_input
+            .unsorted_log_queue_state
             .tail,
+        round_function
     );
-    fs_input.push(
-        structured_input
-            .observable_input
-            .unsorted_log_queue_state
-            .tail
-            .length
-            .into_num(),
-    );
-    fs_input.extend(intermediate_sorted_queue_from_passthrough.tail);
-    fs_input.push(intermediate_sorted_queue_from_passthrough.length.into_num());
-
-    // this is a permutation proof through the grand product
-    let mut state = R::create_empty_state(cs);
-    let length = Num::allocate(cs, F::from_u64_unchecked(fs_input.len() as u64)).get_variable();
-    R::apply_length_specialization(cs, &mut state, length);
-    for chunk in fs_input.array_chunks::<12>() {
-        let padding_els = 12 - chunk.len();
-        let input_fixed_len: [Num<F>; 12] = if padding_els == 0 {
-            (*chunk).try_into().expect("length must match")
-        } else {
-            let tmp = Num::allocated_constant(cs, F::ONE);
-            let it = chunk
-                .iter()
-                .chain(std::iter::repeat(&tmp).take(padding_els));
-
-            it.copied()
-                .collect::<Vec<_>>()
-                .as_slice()
-                .try_into()
-                .expect("length must match")
-        };
-
-        // Create an array of variables so that we can continue hashing into the appropriate state.
-        let mut input_fixed_len_variable = [Variable::placeholder(); 12];
-        input_fixed_len_variable
-            .iter_mut()
-            .enumerate()
-            .for_each(|(i, e)| *e = input_fixed_len[i].get_variable());
-        state = R::compute_round_function(cs, input_fixed_len_variable);
-    }
-
-    let mut taken = 0; // up to absorbtion length
-    let mut fs_challenges = vec![];
-    for _ in 0..DEFAULT_NUM_CHUNKS {
-        let mut chunk_challenges = vec![];
-        for _ in 0..NUM_PERMUTATION_ARG_CHALLENGES {
-            if taken == 2 {
-                // run round
-                state = R::compute_round_function(cs, state);
-                taken = 0;
-            }
-
-            let challenge = state[taken];
-            chunk_challenges.push(challenge);
-
-            taken += 1;
-        }
-
-        fs_challenges.push(chunk_challenges);
-    }
-
-    let mut fs_challenges_nums =
-        [[Num::zero(cs); NUM_PERMUTATION_ARG_CHALLENGES]; DEFAULT_NUM_CHUNKS];
-    fs_challenges_nums
-        .iter_mut()
-        .zip(fs_challenges)
-        .for_each(|(e, v)| {
-            e.iter_mut()
-                .zip(v)
-                .for_each(|(e, v)| *e = Num::from_variable(v))
-        });
 
     let one = Num::allocated_constant(cs, F::ONE);
-    let initial_lhs = <[Num<F>; DEFAULT_NUM_CHUNKS]>::conditionally_select(
+    let initial_lhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
         cs,
         structured_input.start_flag,
-        &[one, one],
+        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
         &structured_input.hidden_fsm_input.lhs_accumulator,
     );
 
-    let initial_rhs = <[Num<F>; DEFAULT_NUM_CHUNKS]>::conditionally_select(
+    let initial_rhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
         cs,
         structured_input.start_flag,
-        &[one, one],
+        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
         &structured_input.hidden_fsm_input.rhs_accumulator,
     );
 
+    let zero_u32: UInt32<F> = UInt32::zero(cs);
+
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
-    let zeros = [Num::<F>::zero(cs); 8];
-    let previous_packed_key = <[Num<F>; 8]>::conditionally_select(
+    let previous_packed_key = <[UInt32<F>; PACKED_KEY_LENGTH]>::conditionally_select(
         cs,
         structured_input.start_flag,
-        &zeros,
+        &[zero_u32; PACKED_KEY_LENGTH],
         &structured_input.hidden_fsm_input.previous_packed_key,
     );
 
-    let zero = UInt32::zero(cs);
+
     let cycle_idx = UInt32::conditionally_select(
         cs,
         structured_input.start_flag,
-        &zero,
+        &zero_u32,
         &structured_input.hidden_fsm_input.cycle_idx,
     );
+
+    let shard_id = structured_input.observable_input.shard_id_to_process;
 
     let (
         new_lhs,
@@ -499,7 +391,6 @@ where
         this_cell_base_value,
         this_cell_current_value,
         this_cell_current_depth,
-        previous_shard_id,
     ) = sort_and_deduplicate_storage_access_inner(
         cs,
         initial_lhs,
@@ -509,7 +400,7 @@ where
         &mut final_sorted_queue,
         structured_input.start_flag,
         cycle_idx,
-        fs_challenges_nums,
+        challenges,
         previous_packed_key,
         structured_input.hidden_fsm_input.previous_key,
         structured_input.hidden_fsm_input.previous_address,
@@ -520,7 +411,7 @@ where
         structured_input.hidden_fsm_input.this_cell_base_value,
         structured_input.hidden_fsm_input.this_cell_current_value,
         structured_input.hidden_fsm_input.this_cell_current_depth,
-        structured_input.hidden_fsm_input.previous_shard_id,
+        shard_id,
         round_function,
         limit,
     );
@@ -549,7 +440,6 @@ where
     structured_input.hidden_fsm_output.this_cell_base_value = this_cell_base_value;
     structured_input.hidden_fsm_output.this_cell_current_value = this_cell_current_value;
     structured_input.hidden_fsm_output.this_cell_current_depth = this_cell_current_depth;
-    structured_input.hidden_fsm_output.previous_shard_id = previous_shard_id;
 
     structured_input.hidden_fsm_output.lhs_accumulator = new_lhs;
     structured_input.hidden_fsm_output.rhs_accumulator = new_rhs;
@@ -588,9 +478,7 @@ where
         .hidden_fsm_output
         .current_final_sorted_queue_state = final_sorted_queue.into_state();
 
-    if let Some(circuit_result) = structured_input.witness_hook(&*cs)() {
-        assert_eq!(circuit_result, structured_input_witness);
-    }
+    structured_input.hook_compare_witness(cs, &structured_input_witness);
 
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
@@ -606,7 +494,7 @@ where
     input_committment
 }
 
-const NUM_PERMUTATION_ARG_CHALLENGES: usize = TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1;
+pub const NUM_PERMUTATION_ARG_CHALLENGES: usize = TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1;
 
 pub fn sort_and_deduplicate_storage_access_inner<
     F: SmallField,
@@ -614,8 +502,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
     R: CircuitRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
-    mut lhs: [Num<F>; DEFAULT_NUM_CHUNKS],
-    mut rhs: [Num<F>; DEFAULT_NUM_CHUNKS],
+    mut lhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    mut rhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     original_queue: &mut StorageLogQueue<F, R>,
     intermediate_sorted_queue: &mut CircuitQueue<
         F,
@@ -630,8 +518,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
     sorted_queue: &mut StorageLogQueue<F, R>,
     is_start: Boolean<F>,
     mut cycle_idx: UInt32<F>,
-    fs_challenges: [[Num<F>; NUM_PERMUTATION_ARG_CHALLENGES]; DEFAULT_NUM_CHUNKS],
-    mut previous_packed_key: [Num<F>; 8],
+    fs_challenges: [[Num<F>; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    mut previous_packed_key: [UInt32<F>; PACKED_KEY_LENGTH],
     mut previous_key: UInt256<F>,
     mut previous_address: UInt160<F>,
     mut previous_timestamp: UInt32<F>,
@@ -639,14 +527,14 @@ pub fn sort_and_deduplicate_storage_access_inner<
     mut this_cell_base_value: UInt256<F>,
     mut this_cell_current_value: UInt256<F>,
     mut this_cell_current_depth: UInt32<F>,
-    mut previous_shard_id: UInt8<F>,
-    round_function: &R,
+    shard_id_to_process: UInt8<F>,
+    _round_function: &R,
     limit: usize,
 ) -> (
-    [Num<F>; DEFAULT_NUM_CHUNKS],
-    [Num<F>; DEFAULT_NUM_CHUNKS],
+    [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     UInt32<F>,
-    [Num<F>; 8],
+    [UInt32<F>; PACKED_KEY_LENGTH],
     UInt256<F>,
     UInt160<F>,
     UInt32<F>,
@@ -654,10 +542,10 @@ pub fn sort_and_deduplicate_storage_access_inner<
     UInt256<F>,
     UInt256<F>,
     UInt32<F>,
-    UInt8<F>,
 )
 where
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <TimestampedStorageLogRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     assert!(limit <= u32::MAX as usize);
 
@@ -667,19 +555,17 @@ where
     let no_work = original_queue.is_empty(cs);
     let mut previous_item_is_trivial = no_work.or(cs, is_start);
 
-    let additive_parts = {
-        let mut parts = vec![];
-        parts[0] = *fs_challenges[0].last().unwrap();
-        parts[1] = *fs_challenges[1].last().unwrap();
-        parts
-    };
+    let additive_parts = fs_challenges.map(|el| el.last().copied().expect("additive part"));
 
     // we simultaneously pop, accumulate partial product,
     // and decide whether or not we should move to the next cell
 
     // to ensure uniqueness we place timestamps in a addition to the
 
-    const PACKED_WIDTHS: [usize; 8] = [56, 56, 56, 56, 56, 56, 56, 32];
+    // const PACKED_WIDTHS: [usize; 8] = [56, 56, 56, 56, 56, 56, 56, 32];
+
+    let mut lhs_lc = Vec::with_capacity(TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1);
+    let mut rhs_lc = Vec::with_capacity(TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1);
 
     for _cycle in 0..limit {
         let original_timestamp = cycle_idx;
@@ -696,6 +582,7 @@ where
         let should_pop = original_is_empty.negated(cs);
         let item_is_trivial = original_is_empty;
 
+        // NOTE: we do not need to check shard_id of unsorted item because we can just check it on sorted item
         let (_, original_encoding) = original_queue.pop_front(cs, should_pop);
         let (sorted_item, sorted_encoding) = intermediate_sorted_queue.pop_front(cs, should_pop);
         let extended_original_encoding =
@@ -704,6 +591,9 @@ where
                 &original_encoding,
                 &original_timestamp,
             );
+
+        let shard_id_is_valid = UInt8::equals(cs, &shard_id_to_process, &sorted_item.record.shard_id);
+        shard_id_is_valid.conditionally_enforce_true(cs, should_pop);
 
         assert_eq!(extended_original_encoding.len(), sorted_encoding.len());
         assert_eq!(extended_original_encoding.len(), fs_challenges.len() - 1);
@@ -718,13 +608,19 @@ where
             .map(|v| Num::from_variable(*v))
             .collect::<Vec<Num<F>>>();
 
-        for i in 0..DEFAULT_NUM_CHUNKS {
-            let mut lhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
-            let mut rhs_lc = Vec::with_capacity(extended_original_encoding.len() + 1);
+        for (((lhs_dst, rhs_dst), challenges), additive_part) in 
+            lhs.iter_mut()
+            .zip(rhs.iter_mut())
+            .zip(fs_challenges.iter())
+            .zip(additive_parts.iter())
+        {
+            lhs_lc.clear();
+            rhs_lc.clear();
+
             for ((original_el, sorted_el), challenge) in extended_original_encoding
-                .into_iter()
-                .zip(sorted_encoding.into_iter())
-                .zip(fs_challenges[i].iter())
+                .iter()
+                .zip(sorted_encoding.iter())
+                .zip(challenges.iter())
             {
                 let lhs_contribution = original_el.mul(cs, &challenge);
                 let rhs_contribution = sorted_el.mul(cs, &challenge);
@@ -733,30 +629,40 @@ where
                 rhs_lc.push((rhs_contribution.get_variable(), F::ONE));
             }
 
-            lhs_lc.push((additive_parts[i].get_variable(), F::ONE));
-            rhs_lc.push((additive_parts[i].get_variable(), F::ONE));
+            lhs_lc.push((additive_part.get_variable(), F::ONE));
+            rhs_lc.push((additive_part.get_variable(), F::ONE));
 
             let lhs_lc = Num::linear_combination(cs, &lhs_lc);
             let rhs_lc = Num::linear_combination(cs, &rhs_lc);
 
-            let lhs_candidate = lhs[i].mul(cs, &lhs_lc);
-            let rhs_candidate = rhs[i].mul(cs, &rhs_lc);
+            let lhs_candidate = lhs_dst.mul(cs, &lhs_lc);
+            let rhs_candidate = rhs_dst.mul(cs, &rhs_lc);
 
-            lhs[i] = Num::conditionally_select(cs, should_pop, &lhs_candidate, &lhs[i]);
-            rhs[i] = Num::conditionally_select(cs, should_pop, &rhs_candidate, &rhs[i]);
+            *lhs_dst = Num::conditionally_select(cs, should_pop, &lhs_candidate, &*lhs_dst);
+            *rhs_dst = Num::conditionally_select(cs, should_pop, &rhs_candidate, &*rhs_dst);
         }
 
         let TimestampedStorageLogRecord { record, timestamp } = sorted_item;
 
+        // // now resolve a logic about sorting itself
+        // let packed_key = pack_key(
+        //     cs,
+        //     (record.shard_id.clone(), record.address.clone(), record.key),
+        // );
+
+        // // ensure sorting
+        // let (keys_are_equal, previous_key_is_greater) =
+        //     prepacked_long_comparison(cs, &previous_packed_key, &packed_key, &PACKED_WIDTHS);
+
         // now resolve a logic about sorting itself
-        let packed_key = pack_key(
+        let packed_key = concatenate_key(
             cs,
-            (record.shard_id.clone(), record.address.clone(), record.key),
+            (record.address.clone(), record.key),
         );
 
         // ensure sorting
         let (keys_are_equal, previous_key_is_greater) =
-            prepacked_long_comparison(cs, &previous_packed_key, &packed_key, &PACKED_WIDTHS);
+            unpacked_long_comparison(cs, &previous_packed_key, &packed_key);
 
         let not_item_is_trivial = item_is_trivial.negated(cs);
         previous_key_is_greater
@@ -812,7 +718,7 @@ where
                 aux_byte: UInt8::zero(cs),
                 rollback: Boolean::allocated_constant(cs, false),
                 is_service: Boolean::allocated_constant(cs, false),
-                shard_id: previous_shard_id,
+                shard_id: shard_id_to_process,
                 tx_number_in_block: UInt32::zero(cs),
                 timestamp: UInt32::zero(cs),
             };
@@ -945,7 +851,6 @@ where
         }
 
         // always update counters
-        previous_shard_id = record.shard_id;
         previous_address = record.address;
         previous_key = record.key;
         previous_item_is_trivial = item_is_trivial;
@@ -976,7 +881,7 @@ where
             aux_byte: UInt8::zero(cs),
             rollback: Boolean::allocated_constant(cs, false),
             is_service: Boolean::allocated_constant(cs, false),
-            shard_id: previous_shard_id,
+            shard_id: shard_id_to_process,
             tx_number_in_block: UInt32::zero(cs),
             timestamp: UInt32::zero(cs),
         };
@@ -1014,322 +919,370 @@ where
         this_cell_base_value,
         this_cell_current_value,
         this_cell_current_depth,
-        previous_shard_id,
     )
 }
 
-pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
-    cs: &mut CS,
-    key_tuple: (UInt8<F>, UInt160<F>, UInt256<F>),
-) -> [Num<F>; 8] {
-    debug_assert!(F::CAPACITY_BITS >= 56);
+// pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
+//     cs: &mut CS,
+//     key_tuple: (UInt8<F>, UInt160<F>, UInt256<F>),
+// ) -> [Num<F>; 8] {
+//     debug_assert!(F::CAPACITY_BITS >= 56);
 
-    // LE packing
-    // Attempting to stick to previous packing methods shown in this repo
+//     // LE packing
+//     // Attempting to stick to previous packing methods shown in this repo
 
-    let (shard_id, address, key) = key_tuple;
-    let key_bytes = key.inner.map(|el| el.decompose_into_bytes(cs));
-    let address_bytes = address.inner.map(|el| el.decompose_into_bytes(cs));
-    let v0 = Num::linear_combination(
-        cs,
-        &[
-            (key_bytes[0][0].get_variable(), F::ONE),
-            (
-                key_bytes[0][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 8),
-            ),
-            (
-                key_bytes[0][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 16),
-            ),
-            (
-                key_bytes[0][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 24),
-            ),
-            (
-                key_bytes[1][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 32),
-            ),
-            (
-                key_bytes[1][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 40),
-            ),
-            (
-                key_bytes[1][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 48),
-            ),
-        ],
-    );
+//     let (shard_id, address, key) = key_tuple;
+//     let key_bytes = key.inner.map(|el| el.decompose_into_bytes(cs));
+//     let address_bytes = address.inner.map(|el| el.decompose_into_bytes(cs));
+//     let v0 = Num::linear_combination(
+//         cs,
+//         &[
+//             (key_bytes[0][0].get_variable(), F::ONE),
+//             (
+//                 key_bytes[0][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 8),
+//             ),
+//             (
+//                 key_bytes[0][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 16),
+//             ),
+//             (
+//                 key_bytes[0][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 24),
+//             ),
+//             (
+//                 key_bytes[1][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 32),
+//             ),
+//             (
+//                 key_bytes[1][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 40),
+//             ),
+//             (
+//                 key_bytes[1][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 48),
+//             ),
+//         ],
+//     );
 
-    let v1 = Num::linear_combination(
-        cs,
-        &[
-            (key_bytes[1][3].get_variable(), F::ONE),
-            (
-                key_bytes[2][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 8),
-            ),
-            (
-                key_bytes[2][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 16),
-            ),
-            (
-                key_bytes[2][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 24),
-            ),
-            (
-                key_bytes[2][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 32),
-            ),
-            (
-                key_bytes[3][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 40),
-            ),
-            (
-                key_bytes[3][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 48),
-            ),
-        ],
-    );
+//     let v1 = Num::linear_combination(
+//         cs,
+//         &[
+//             (key_bytes[1][3].get_variable(), F::ONE),
+//             (
+//                 key_bytes[2][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 8),
+//             ),
+//             (
+//                 key_bytes[2][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 16),
+//             ),
+//             (
+//                 key_bytes[2][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 24),
+//             ),
+//             (
+//                 key_bytes[2][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 32),
+//             ),
+//             (
+//                 key_bytes[3][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 40),
+//             ),
+//             (
+//                 key_bytes[3][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 48),
+//             ),
+//         ],
+//     );
 
-    let v2 = Num::linear_combination(
-        cs,
-        &[
-            (key_bytes[3][2].get_variable(), F::ONE),
-            (
-                key_bytes[3][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 8),
-            ),
-            (
-                key_bytes[4][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 16),
-            ),
-            (
-                key_bytes[4][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 24),
-            ),
-            (
-                key_bytes[4][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 32),
-            ),
-            (
-                key_bytes[4][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 40),
-            ),
-            (
-                key_bytes[5][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 48),
-            ),
-        ],
-    );
+//     let v2 = Num::linear_combination(
+//         cs,
+//         &[
+//             (key_bytes[3][2].get_variable(), F::ONE),
+//             (
+//                 key_bytes[3][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 8),
+//             ),
+//             (
+//                 key_bytes[4][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 16),
+//             ),
+//             (
+//                 key_bytes[4][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 24),
+//             ),
+//             (
+//                 key_bytes[4][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 32),
+//             ),
+//             (
+//                 key_bytes[4][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 40),
+//             ),
+//             (
+//                 key_bytes[5][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 48),
+//             ),
+//         ],
+//     );
 
-    let v3 = Num::linear_combination(
-        cs,
-        &[
-            (key_bytes[5][1].get_variable(), F::ONE),
-            (
-                key_bytes[5][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 8),
-            ),
-            (
-                key_bytes[5][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 16),
-            ),
-            (
-                key_bytes[6][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 24),
-            ),
-            (
-                key_bytes[6][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 32),
-            ),
-            (
-                key_bytes[6][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 40),
-            ),
-            (
-                key_bytes[6][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 48),
-            ),
-        ],
-    );
+//     let v3 = Num::linear_combination(
+//         cs,
+//         &[
+//             (key_bytes[5][1].get_variable(), F::ONE),
+//             (
+//                 key_bytes[5][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 8),
+//             ),
+//             (
+//                 key_bytes[5][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 16),
+//             ),
+//             (
+//                 key_bytes[6][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 24),
+//             ),
+//             (
+//                 key_bytes[6][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 32),
+//             ),
+//             (
+//                 key_bytes[6][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 40),
+//             ),
+//             (
+//                 key_bytes[6][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 48),
+//             ),
+//         ],
+//     );
 
-    let v4 = Num::linear_combination(
-        cs,
-        &[
-            (key_bytes[7][0].get_variable(), F::ONE),
-            (
-                key_bytes[7][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 8),
-            ),
-            (
-                key_bytes[7][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 16),
-            ),
-            (
-                key_bytes[7][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 24),
-            ),
-            (
-                address_bytes[0][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 32),
-            ),
-            (
-                address_bytes[0][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 40),
-            ),
-            (
-                address_bytes[0][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 48),
-            ),
-        ],
-    );
+//     let v4 = Num::linear_combination(
+//         cs,
+//         &[
+//             (key_bytes[7][0].get_variable(), F::ONE),
+//             (
+//                 key_bytes[7][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 8),
+//             ),
+//             (
+//                 key_bytes[7][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 16),
+//             ),
+//             (
+//                 key_bytes[7][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 24),
+//             ),
+//             (
+//                 address_bytes[0][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 32),
+//             ),
+//             (
+//                 address_bytes[0][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 40),
+//             ),
+//             (
+//                 address_bytes[0][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 48),
+//             ),
+//         ],
+//     );
 
-    let v5 = Num::linear_combination(
-        cs,
-        &[
-            (address_bytes[0][3].get_variable(), F::ONE),
-            (
-                address_bytes[1][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 8),
-            ),
-            (
-                address_bytes[1][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 16),
-            ),
-            (
-                address_bytes[2][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 24),
-            ),
-            (
-                address_bytes[1][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 32),
-            ),
-            (
-                address_bytes[2][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 40),
-            ),
-            (
-                address_bytes[2][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 48),
-            ),
-        ],
-    );
+//     let v5 = Num::linear_combination(
+//         cs,
+//         &[
+//             (address_bytes[0][3].get_variable(), F::ONE),
+//             (
+//                 address_bytes[1][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 8),
+//             ),
+//             (
+//                 address_bytes[1][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 16),
+//             ),
+//             (
+//                 address_bytes[2][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 24),
+//             ),
+//             (
+//                 address_bytes[1][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 32),
+//             ),
+//             (
+//                 address_bytes[2][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 40),
+//             ),
+//             (
+//                 address_bytes[2][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 48),
+//             ),
+//         ],
+//     );
 
-    let v6 = Num::linear_combination(
-        cs,
-        &[
-            (address_bytes[2][2].get_variable(), F::ONE),
-            (
-                address_bytes[2][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 8),
-            ),
-            (
-                address_bytes[3][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 16),
-            ),
-            (
-                address_bytes[3][1].get_variable(),
-                F::from_u64_unchecked(1u64 << 24),
-            ),
-            (
-                address_bytes[3][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 32),
-            ),
-            (
-                address_bytes[3][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 40),
-            ),
-            (
-                address_bytes[4][0].get_variable(),
-                F::from_u64_unchecked(1u64 << 48),
-            ),
-        ],
-    );
+//     let v6 = Num::linear_combination(
+//         cs,
+//         &[
+//             (address_bytes[2][2].get_variable(), F::ONE),
+//             (
+//                 address_bytes[2][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 8),
+//             ),
+//             (
+//                 address_bytes[3][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 16),
+//             ),
+//             (
+//                 address_bytes[3][1].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 24),
+//             ),
+//             (
+//                 address_bytes[3][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 32),
+//             ),
+//             (
+//                 address_bytes[3][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 40),
+//             ),
+//             (
+//                 address_bytes[4][0].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 48),
+//             ),
+//         ],
+//     );
 
-    let v7 = Num::linear_combination(
-        cs,
-        &[
-            (address_bytes[4][1].get_variable(), F::ONE),
-            (
-                address_bytes[4][2].get_variable(),
-                F::from_u64_unchecked(1u64 << 8),
-            ),
-            (
-                address_bytes[4][3].get_variable(),
-                F::from_u64_unchecked(1u64 << 16),
-            ),
-            (shard_id.get_variable(), F::from_u64_unchecked(1u64 << 24)),
-        ],
-    );
+//     let v7 = Num::linear_combination(
+//         cs,
+//         &[
+//             (address_bytes[4][1].get_variable(), F::ONE),
+//             (
+//                 address_bytes[4][2].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 8),
+//             ),
+//             (
+//                 address_bytes[4][3].get_variable(),
+//                 F::from_u64_unchecked(1u64 << 16),
+//             ),
+//             (shard_id.get_variable(), F::from_u64_unchecked(1u64 << 24)),
+//         ],
+//     );
 
-    [v0, v1, v2, v3, v4, v5, v6, v7]
+//     [v0, v1, v2, v3, v4, v5, v6, v7]
+// }
+
+pub fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
+    _cs: &mut CS,
+    key_tuple: (UInt160<F>, UInt256<F>),
+) -> [UInt32<F>; PACKED_KEY_LENGTH] {
+    // LE packing so comparison is subtraction
+    let (address, key) = key_tuple;
+    [
+        key.inner[0],
+        key.inner[1],
+        key.inner[2],
+        key.inner[3],
+        key.inner[4],
+        key.inner[5],
+        key.inner[6],
+        key.inner[7],
+
+        address.inner[0],
+        address.inner[1],
+        address.inner[2],
+        address.inner[3],
+        address.inner[4],
+    ]
 }
 
 /// Check that a == b and a > b by performing a long subtraction b - a with borrow.
 /// Both a and b are considered as least significant word first
 #[track_caller]
-pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
+pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(
     cs: &mut CS,
-    a: &[Num<F>],
-    b: &[Num<F>],
-    width_data: &[usize],
+    a: &[UInt32<F>; N],
+    b: &[UInt32<F>; N],
 ) -> (Boolean<F>, Boolean<F>) {
-    assert_eq!(a.len(), b.len());
-    assert_eq!(a.len(), width_data.len());
 
-    let mut minus_one = F::ONE;
-    minus_one.negate();
-
-    let mut previous_borrow = Boolean::allocated_constant(cs, false);
-    let mut limbs_are_equal = vec![];
-
-    for ((a, b), width) in a.iter().zip(b.iter()).zip(width_data.iter()) {
-        let (result_witness, borrow_witness) = {
-            use num_integer::Integer;
-            use num_traits::Zero;
-
-            let a = a.witness_hook(&*cs)().unwrap().as_raw_u64();
-            let b = b.witness_hook(&*cs)().unwrap().as_raw_u64();
-            let borrow_guard = 1u64 << width;
-
-            let tmp =
-                borrow_guard.clone() + b - a - previous_borrow.witness_hook(&*cs)().unwrap() as u64;
-            let (q, r) = tmp.div_rem(&borrow_guard);
-
-            let borrow = q.is_zero();
-            let wit = F::from_u64_unchecked(r);
-
-            (wit, borrow)
-        };
-
-        let borrow = Boolean::allocate(cs, borrow_witness);
-        let intermediate_result = Num::allocate(cs, result_witness);
-        intermediate_result.constraint_bit_length_as_bytes(cs, *width);
-
-        let intermediate_is_zero = intermediate_result.is_zero(cs);
-        limbs_are_equal.push(intermediate_is_zero);
-
-        // b - a - previous_borrow + 2^X * borrow = intermediate
-
-        let result = Num::<F>::linear_combination(
-            cs,
-            &[
-                (b.get_variable(), F::ONE),
-                (a.get_variable(), minus_one),
-                (previous_borrow.get_variable(), minus_one),
-                (intermediate_result.get_variable(), minus_one),
-                (borrow.get_variable(), F::from_u64_unchecked(1u64 << width)),
-            ],
-        )
-        .get_variable();
-        ZeroCheckGate::check_if_zero(cs, result);
-
-        previous_borrow = borrow;
+    let mut borrow = Boolean::allocated_constant(cs, false);
+    let zero_u32 = UInt32::zero(cs);
+    let mut result = [zero_u32; N];
+    for ((b, a), dst) in b.iter().zip(a.iter()).zip(result.iter_mut()) {
+        let (c, new_borrow) = UIntXAddGate::<32>::perform_subtraction(cs, b.get_variable(), a.get_variable(), borrow.get_variable());
+        let (c, _) = UInt32::from_variable_checked(cs, c);
+        *dst = c;
+        borrow = unsafe {Boolean::from_variable_unchecked(new_borrow) };
     }
 
-    let final_borrow = previous_borrow;
-    let eq = Boolean::multi_and(cs, &limbs_are_equal);
+    let zero_limbs = result.map(|el| el.is_zero(cs));
+    let eq = Boolean::multi_and(cs, &zero_limbs);
 
-    (eq, final_borrow)
+    (eq, borrow)
 }
+
+// /// Check that a == b and a > b by performing a long subtraction b - a with borrow.
+// /// Both a and b are considered as least significant word first
+// #[track_caller]
+// pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
+//     cs: &mut CS,
+//     a: &[Num<F>],
+//     b: &[Num<F>],
+//     width_data: &[usize],
+// ) -> (Boolean<F>, Boolean<F>) {
+//     assert_eq!(a.len(), b.len());
+//     assert_eq!(a.len(), width_data.len());
+
+//     let mut minus_one = F::ONE;
+//     minus_one.negate();
+
+//     let mut previous_borrow = Boolean::allocated_constant(cs, false);
+//     let mut limbs_are_equal = vec![];
+
+//     for ((a, b), width) in a.iter().zip(b.iter()).zip(width_data.iter()) {
+//         let (result_witness, borrow_witness) = {
+//             use num_integer::Integer;
+//             use num_traits::Zero;
+
+//             let a = a.witness_hook(&*cs)().unwrap().as_raw_u64();
+//             let b = b.witness_hook(&*cs)().unwrap().as_raw_u64();
+//             let borrow_guard = 1u64 << width;
+
+//             let tmp =
+//                 borrow_guard.clone() + b - a - previous_borrow.witness_hook(&*cs)().unwrap() as u64;
+//             let (q, r) = tmp.div_rem(&borrow_guard);
+
+//             let borrow = q.is_zero();
+//             let wit = F::from_u64_unchecked(r);
+
+//             (wit, borrow)
+//         };
+
+//         let borrow = Boolean::allocate(cs, borrow_witness);
+//         let intermediate_result = Num::allocate(cs, result_witness);
+//         intermediate_result.constraint_bit_length_as_bytes(cs, *width);
+
+//         let intermediate_is_zero = intermediate_result.is_zero(cs);
+//         limbs_are_equal.push(intermediate_is_zero);
+
+//         // b - a - previous_borrow + 2^X * borrow = intermediate
+
+//         let result = Num::<F>::linear_combination(
+//             cs,
+//             &[
+//                 (b.get_variable(), F::ONE),
+//                 (a.get_variable(), minus_one),
+//                 (previous_borrow.get_variable(), minus_one),
+//                 (intermediate_result.get_variable(), minus_one),
+//                 (borrow.get_variable(), F::from_u64_unchecked(1u64 << width)),
+//             ],
+//         )
+//         .get_variable();
+//         ZeroCheckGate::check_if_zero(cs, result);
+
+//         previous_borrow = borrow;
+//     }
+
+//     let final_borrow = previous_borrow;
+//     let eq = Boolean::multi_and(cs, &limbs_are_equal);
+
+//     (eq, final_borrow)
+// }

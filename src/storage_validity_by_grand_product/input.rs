@@ -22,27 +22,29 @@ use boojum::{
 };
 use cs_derive::*;
 use derivative::*;
+use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
+
+pub const PACKED_KEY_LENGTH: usize = 5 + 8;
 
 use super::TimestampedStorageLogRecord;
 
 // FSM
 
-pub const DEFAULT_NUM_CHUNKS: usize = 2;
-
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct StorageDeduplicatorFSMInputOutput<F: SmallField> {
-    pub lhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
-    pub rhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
+    pub lhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    pub rhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     pub current_unsorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub current_intermediate_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub current_final_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub cycle_idx: UInt32<F>,
-    pub previous_packed_key: [Num<F>; 8],
+    pub previous_packed_key: [UInt32<F>; PACKED_KEY_LENGTH],
     pub previous_key: UInt256<F>,
     pub previous_address: UInt160<F>,
     pub previous_timestamp: UInt32<F>,
-    pub previous_shard_id: UInt8<F>,
     pub this_cell_has_explicit_read_and_rollback_depth_zero: Boolean<F>,
     pub this_cell_base_value: UInt256<F>,
     pub this_cell_current_value: UInt256<F>,
@@ -51,24 +53,28 @@ pub struct StorageDeduplicatorFSMInputOutput<F: SmallField> {
 
 impl<F: SmallField> CSPlaceholder<F> for StorageDeduplicatorFSMInputOutput<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        let zero_num = Num::<F>::zero(cs);
+        let zero_u32 = UInt32::zero(cs);
+        let zero_address = UInt160::zero(cs);
+        let zero_u256 = UInt256::zero(cs);
+        let boolean_false = Boolean::allocated_constant(cs, false);
+
         Self {
-            lhs_accumulator: Num::<F>::zero(cs),
-            rhs_accumulator: Num::<F>::zero(cs),
+            lhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            rhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
             current_unsorted_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             current_intermediate_sorted_queue_state:
                 QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             current_final_sorted_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
-            cycle_idx: UInt32::<F>::zero(cs),
-            previous_packed_key: [Num::<F>::zero(cs); 8],
-            previous_key: UInt256::<F>::zero(cs),
-            previous_address: UInt160::<F>::zero(cs),
-            previous_timestamp: UInt32::<F>::zero(cs),
-            previous_shard_id: UInt8::<F>::zero(cs),
-            this_cell_has_explicit_read_and_rollback_depth_zero:
-                Boolean::<F>::allocate_without_value(cs),
-            this_cell_base_value: UInt256::<F>::zero(cs),
-            this_cell_current_value: UInt256::<F>::zero(cs),
-            this_cell_current_depth: UInt32::<F>::zero(cs),
+            cycle_idx: zero_u32,
+            previous_packed_key: [zero_u32; PACKED_KEY_LENGTH],
+            previous_key: zero_u256,
+            previous_address: zero_address,
+            previous_timestamp: zero_u32,
+            this_cell_has_explicit_read_and_rollback_depth_zero: boolean_false,
+            this_cell_base_value: zero_u256,
+            this_cell_current_value: zero_u256,
+            this_cell_current_depth: zero_u32,
         }
     }
 }
@@ -76,6 +82,7 @@ impl<F: SmallField> CSPlaceholder<F> for StorageDeduplicatorFSMInputOutput<F> {
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Debug)]
 pub struct StorageDeduplicatorInputData<F: SmallField> {
+    pub shard_id_to_process: UInt8<F>,
     pub unsorted_log_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub intermediate_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
 }
@@ -83,6 +90,7 @@ pub struct StorageDeduplicatorInputData<F: SmallField> {
 impl<F: SmallField> CSPlaceholder<F> for StorageDeduplicatorInputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
+            shard_id_to_process: UInt8::placeholder(cs),
             unsorted_log_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             intermediate_sorted_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
         }
@@ -90,7 +98,8 @@ impl<F: SmallField> CSPlaceholder<F> for StorageDeduplicatorInputData<F> {
 }
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct StorageDeduplicatorOutputData<F: SmallField> {
     pub final_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
 }
