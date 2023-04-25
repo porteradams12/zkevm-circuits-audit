@@ -108,8 +108,10 @@ where
         requests_queue_length,
     );
 
-    use std::sync::Arc;
-    requests_queue.witness = Arc::new(sorted_requests_queue_witness);
+    use crate::code_unpacker_sha256::full_state_queue::FullStateCircuitQueueWitness;
+    requests_queue.witness = Arc::new(
+        FullStateCircuitQueueWitness::from_inner_witness(sorted_requests_queue_witness)
+    );
 
 
     let memory_queue_head = <[Num<F>; 12]>::conditionally_select(

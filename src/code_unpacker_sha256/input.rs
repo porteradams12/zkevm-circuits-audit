@@ -120,11 +120,16 @@ pub type CodeDecommitterCycleInputOutputWitness<F> = crate::fsm_input_output::Cl
     CodeDecommitterOutputData<F>,
 >;
 
-use crate::code_unpacker_sha256::DecommitQueueWitness;
+use crate::code_unpacker_sha256::{DecommitQuery, DECOMMIT_QUERY_PACKED_WIDTH};
+use crate::code_unpacker_sha256::full_state_queue::FullStateCircuitQueueRawWitness;
+
+#[derive(Derivative, serde::Serialize, serde::Deserialize)]
+#[derivative(Clone, Debug)]
+#[serde(bound = "")]
 pub struct CodeDecommitterCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: CodeDecommitterCycleInputOutputWitness<F>,
 
     pub sorted_requests_queue_witness:
-        DecommitQueueWitness<F, 12>,
+        FullStateCircuitQueueRawWitness<F, DecommitQuery<F>, 12, DECOMMIT_QUERY_PACKED_WIDTH>,
     pub code_words: Vec<Vec<U256>>,
 }
