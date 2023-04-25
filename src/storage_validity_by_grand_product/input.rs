@@ -117,7 +117,7 @@ pub type StorageDeduplicatorInputOutputWitness<F> = crate::fsm_input_output::Clo
 #[serde(bound = "")]
 pub struct StorageDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: StorageDeduplicatorInputOutputWitness<F>,
-    pub unsorted_queue_witness: CircuitQueueWitness<F, LogQuery<F>, 5, LOG_QUERY_PACKED_WIDTH>,
+    pub unsorted_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 5, LOG_QUERY_PACKED_WIDTH>,
     pub intermediate_sorted_queue_witness:
-        CircuitQueueWitness<F, LogQuery<F>, 5, LOG_QUERY_PACKED_WIDTH>,
+        CircuitQueueRawWitness<F, LogQuery<F>, 5, LOG_QUERY_PACKED_WIDTH>,
 }
