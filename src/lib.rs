@@ -10,6 +10,7 @@ pub mod config;
 
 pub mod base_structures;
 pub mod demux_log_queue;
+pub mod code_unpacker_sha256;
 pub mod log_sorter; 
 pub mod storage_application;
 pub mod ram_permutation;

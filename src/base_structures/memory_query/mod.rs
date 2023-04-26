@@ -300,5 +300,14 @@ impl<F: SmallField> MemoryValue<F> {
     }
 }
 
-pub type MemoryQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
+use boojum::gadgets::queue::full_state_queue::{
+    // FullStateCircuitQueue,
+    FullStateCircuitQueueWitness,
+};
+
+pub type MemoryQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = 
+    FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
 pub type MemoryQueue<F, R> = MemoryQueryQueue<F, 8, 12, 4, R>;
+
+pub type MemoryQueryQueueWitness<F, const SW: usize> =
+    FullStateCircuitQueueWitness<F, MemoryQuery<F>, SW, MEMORY_QUERY_PACKED_WIDTH>;
