@@ -1,24 +1,24 @@
-use boojum::{
-    cs::gates::reduction_by_powers_gate,
-    gadgets::{u256::UInt256, traits::selectable::MultiSelectable},
-};
 use crate::base_structures::{
     log_query::{self, LogQuery, LOG_QUERY_PACKED_WIDTH, ROLLBACK_PACKING_FLAG_VARIABLE_IDX},
     register::VMRegister,
 };
+use boojum::{
+    cs::gates::reduction_by_powers_gate,
+    gadgets::{traits::selectable::MultiSelectable, u256::UInt256},
+};
 
 use super::*;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
-use boojum::gadgets::traits::allocatable::CSAllocatableExt;
+use crate::base_structures::memory_query::MemoryQueryWitness;
+use crate::base_structures::memory_query::MemoryValue;
+use crate::main_vm::pre_state::MemoryLocation;
+use crate::main_vm::register_input_view::RegisterInputView;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
-use crate::main_vm::register_input_view::RegisterInputView;
-use crate::main_vm::pre_state::MemoryLocation;
-use crate::base_structures::memory_query::MemoryValue;
-use crate::base_structures::memory_query::MemoryQueryWitness;
 use arrayvec::ArrayVec;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::DstBuffer;
+use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 
 pub(crate) fn apply_uma<
     F: SmallField,
@@ -36,11 +36,16 @@ pub(crate) fn apply_uma<
 ) where
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
-    const UMA_HEAP_READ_OPCODE: zkevm_opcode_defs::Opcode = zkevm_opcode_defs::Opcode::UMA(UMAOpcode::HeapRead);
-    const UMA_HEAP_WRITE_OPCODE: zkevm_opcode_defs::Opcode = zkevm_opcode_defs::Opcode::UMA(UMAOpcode::HeapWrite);
-    const UMA_AUX_HEAP_READ_OPCODE: zkevm_opcode_defs::Opcode = zkevm_opcode_defs::Opcode::UMA(UMAOpcode::AuxHeapRead);
-    const UMA_AUX_HEAP_WRITE_OPCODE: zkevm_opcode_defs::Opcode = zkevm_opcode_defs::Opcode::UMA(UMAOpcode::AuxHeapWrite);
-    const UMA_FAT_PTR_READ_OPCODE:zkevm_opcode_defs::Opcode = zkevm_opcode_defs::Opcode::UMA(UMAOpcode::FatPointerRead);
+    const UMA_HEAP_READ_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::UMA(UMAOpcode::HeapRead);
+    const UMA_HEAP_WRITE_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::UMA(UMAOpcode::HeapWrite);
+    const UMA_AUX_HEAP_READ_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::UMA(UMAOpcode::AuxHeapRead);
+    const UMA_AUX_HEAP_WRITE_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::UMA(UMAOpcode::AuxHeapWrite);
+    const UMA_FAT_PTR_READ_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::UMA(UMAOpcode::FatPointerRead);
 
     let should_apply = common_opcode_state
         .decoded_opcode
@@ -104,14 +109,8 @@ pub(crate) fn apply_uma<
     let src0_is_integer = common_opcode_state.src0_view.is_ptr.negated(cs);
 
     // perform basic validation
-    let not_a_ptr_when_expected = Boolean::multi_and(
-        cs,
-        &[
-            should_apply,
-            is_uma_fat_ptr_read,
-            src0_is_integer,
-        ],
-    );
+    let not_a_ptr_when_expected =
+        Boolean::multi_and(cs, &[should_apply, is_uma_fat_ptr_read, src0_is_integer]);
 
     let quasi_fat_ptr = QuasiFatPtrInUMA::parse_and_validate(
         cs,
@@ -119,31 +118,36 @@ pub(crate) fn apply_uma<
         not_a_ptr_when_expected,
         is_uma_fat_ptr_read,
     );
-        
-    // this one could wrap around, so we account for it. In case if we wrapped we will skip operation anyway   
+
+    // this one could wrap around, so we account for it. In case if we wrapped we will skip operation anyway
     let max_accessed = quasi_fat_ptr.incremented_offset;
 
     let heap_max_accessed = max_accessed.mask(cs, access_heap);
-    let heap_bound = draft_vm_state.callstack.current_context.saved_context.heap_upper_bound;
-    let (mut heap_growth, uf, _) =
-        heap_max_accessed.overflowing_sub(cs, heap_bound);
+    let heap_bound = draft_vm_state
+        .callstack
+        .current_context
+        .saved_context
+        .heap_upper_bound;
+    let (mut heap_growth, uf, _) = heap_max_accessed.overflowing_sub(cs, heap_bound);
     heap_growth = heap_growth.mask_negated(cs, uf); // of we access in bounds then it's 0
     let new_heap_upper_bound =
         UInt32::conditionally_select(cs, uf, &heap_bound, &heap_max_accessed);
     let grow_heap = Boolean::multi_and(cs, &[access_heap, should_apply]);
 
     let aux_heap_max_accessed = max_accessed.mask(cs, access_aux_heap);
-    let aux_heap_bound = draft_vm_state.callstack.current_context.saved_context.aux_heap_upper_bound;
-    let (mut aux_heap_growth, uf, _) =
-        aux_heap_max_accessed.overflowing_sub(cs, aux_heap_bound);
+    let aux_heap_bound = draft_vm_state
+        .callstack
+        .current_context
+        .saved_context
+        .aux_heap_upper_bound;
+    let (mut aux_heap_growth, uf, _) = aux_heap_max_accessed.overflowing_sub(cs, aux_heap_bound);
     aux_heap_growth = aux_heap_growth.mask_negated(cs, uf); // of we access in bounds then it's 0
     let new_aux_heap_upper_bound =
         UInt32::conditionally_select(cs, uf, &aux_heap_bound, &aux_heap_max_accessed);
     let grow_aux_heap = Boolean::multi_and(cs, &[access_aux_heap, should_apply]);
 
     let mut growth_cost = heap_growth.mask(cs, access_heap);
-    growth_cost =
-        UInt32::conditionally_select(cs, access_aux_heap, &aux_heap_growth, &growth_cost);
+    growth_cost = UInt32::conditionally_select(cs, access_aux_heap, &aux_heap_growth, &growth_cost);
 
     let limbs_to_check = [
         common_opcode_state.src0_view.u32x8_view[1],
@@ -159,23 +163,41 @@ pub(crate) fn apply_uma<
     let top_bits_are_clear = Boolean::multi_and(cs, &limbs_are_zero);
     let top_bits_are_non_zero = top_bits_are_clear.negated(cs);
 
-    let t = Boolean::multi_or(cs, &[top_bits_are_non_zero, quasi_fat_ptr.heap_dered_out_of_bounds]);
+    let t = Boolean::multi_or(
+        cs,
+        &[
+            top_bits_are_non_zero,
+            quasi_fat_ptr.heap_dered_out_of_bounds,
+        ],
+    );
     let heap_access_like = Boolean::multi_or(cs, &[access_heap, access_aux_heap]);
     let exception_heap_deref_out_of_bounds = Boolean::multi_and(cs, &[heap_access_like, t]);
 
     let uint32_max = UInt32::allocated_constant(cs, u32::MAX);
-    growth_cost =
-        UInt32::conditionally_select(cs, exception_heap_deref_out_of_bounds, &uint32_max, &growth_cost);
+    growth_cost = UInt32::conditionally_select(
+        cs,
+        exception_heap_deref_out_of_bounds,
+        &uint32_max,
+        &growth_cost,
+    );
 
     let (ergs_left_after_growth, uf, _) = opcode_carry_parts
         .preliminary_ergs_left
         .overflowing_sub(cs, growth_cost);
 
-    let set_panic = Boolean::multi_or(cs, &[quasi_fat_ptr.should_set_panic, uf, exception_heap_deref_out_of_bounds]); // not enough ergs for growth
-    // burn all the ergs if not enough
+    let set_panic = Boolean::multi_or(
+        cs,
+        &[
+            quasi_fat_ptr.should_set_panic,
+            uf,
+            exception_heap_deref_out_of_bounds,
+        ],
+    ); // not enough ergs for growth
+       // burn all the ergs if not enough
     let ergs_left_after_growth = ergs_left_after_growth.mask_negated(cs, uf);
 
-    let should_skip_memory_ops = Boolean::multi_or(cs, &[quasi_fat_ptr.skip_memory_access, set_panic]);
+    let should_skip_memory_ops =
+        Boolean::multi_or(cs, &[quasi_fat_ptr.skip_memory_access, set_panic]);
 
     let is_read_access = Boolean::multi_or(
         cs,
@@ -207,13 +229,16 @@ pub(crate) fn apply_uma<
 
     let mut mem_page = quasi_fat_ptr.page_candidate;
 
-    mem_page = UInt32::multiselect(cs, &mem_page,
+    mem_page = UInt32::multiselect(
+        cs,
+        &mem_page,
         [
             (access_heap, opcode_carry_parts.heap_page),
             (access_aux_heap, opcode_carry_parts.aux_heap_page),
-        ].into_iter(), 
-        2
-    );        
+        ]
+        .into_iter(),
+        2,
+    );
 
     let a_cell_idx = cell_idx;
     let one_uint32 = UInt32::allocated_constant(cs, 1);
@@ -236,11 +261,7 @@ pub(crate) fn apply_uma<
 
     let is_unaligned_read = Boolean::multi_and(
         cs,
-        &[
-            should_apply,
-            access_is_unaligned,
-            do_not_skip_memory_access,
-        ],
+        &[should_apply, access_is_unaligned, do_not_skip_memory_access],
     );
 
     // we yet access the `a` always
@@ -310,7 +331,7 @@ pub(crate) fn apply_uma<
     let (
         new_memory_queue_tail_after_read,
         new_memory_queue_length_after_read,
-        sponge_candidates_after_read
+        sponge_candidates_after_read,
     ) = {
         let mut relations = ArrayVec::new();
 
@@ -353,12 +374,12 @@ pub(crate) fn apply_uma<
             initial_state.map(|el| Num::from_variable(el)),
             final_state_candidate,
         ));
-    
+
         let mut new_memory_queue_state = Num::parallel_select(
             cs,
             should_read_a_cell,
             &final_state_candidate,
-            &current_memory_queue_state
+            &current_memory_queue_state,
         );
 
         // for all reasonable execution traces it's fine
@@ -408,29 +429,21 @@ pub(crate) fn apply_uma<
             initial_state.map(|el| Num::from_variable(el)),
             final_state_candidate,
         ));
-    
+
         new_memory_queue_state = Num::parallel_select(
             cs,
             should_read_b_cell,
             &final_state_candidate,
-            &new_memory_queue_state
+            &new_memory_queue_state,
         );
 
         // for all reasonable execution traces it's fine
         let new_len_candidate = unsafe { new_length.increment_unchecked(cs) };
 
-        let new_length = UInt32::conditionally_select(
-            cs,
-            should_read_a_cell,
-            &new_len_candidate,
-            &new_length,
-        );
-    
-        (
-            new_memory_queue_state,
-            new_length,
-            relations
-        )
+        let new_length =
+            UInt32::conditionally_select(cs, should_read_a_cell, &new_len_candidate, &new_length);
+
+        (new_memory_queue_state, new_length, relations)
     };
 
     // the issue with UMA is that if we cleanup bytes using shifts
@@ -443,20 +456,27 @@ pub(crate) fn apply_uma<
     // b0100000.. LSB first if unalignment is 2
     // so it's 31 bits max
 
-    let unalignment_bitspread = uma_shift_into_bitspread(cs, Num::from_variable(unalignment.get_variable()));
+    let unalignment_bitspread =
+        uma_shift_into_bitspread(cs, Num::from_variable(unalignment.get_variable()));
     let unalignment_bit_mask = unalignment_bitspread.spread_into_bits::<_, 31>(cs);
 
     // implement shift register
     let zero_u8 = UInt8::zero(cs);
     let mut bytes_array = [zero_u8; 64];
 
-    for (dst, src) in bytes_array[..32].array_chunks_mut::<4>().zip(memory_value_a.value.inner.iter().rev()) {
+    for (dst, src) in bytes_array[..32]
+        .array_chunks_mut::<4>()
+        .zip(memory_value_a.value.inner.iter().rev())
+    {
         let mut be_bytes = src.decompose_into_bytes(cs);
         be_bytes.reverse();
         *dst = be_bytes;
     }
 
-    for (dst, src) in bytes_array[32..].array_chunks_mut::<4>().zip(memory_value_b.value.inner.iter().rev()) {
+    for (dst, src) in bytes_array[32..]
+        .array_chunks_mut::<4>()
+        .zip(memory_value_b.value.inner.iter().rev())
+    {
         let mut be_bytes = src.decompose_into_bytes(cs);
         be_bytes.reverse();
         *dst = be_bytes;
@@ -470,10 +490,13 @@ pub(crate) fn apply_uma<
         let src = &bytes_array[idx..(idx + 32)];
 
         *dst = UInt8::multiselect(
-            cs, 
+            cs,
             &src[0],
-            unalignment_bit_mask.iter().copied().zip(src[1..].iter().copied()),
-            31
+            unalignment_bit_mask
+                .iter()
+                .copied()
+                .zip(src[1..].iter().copied()),
+            31,
         );
     }
 
@@ -481,11 +504,20 @@ pub(crate) fn apply_uma<
     // now we need to shift it once again to cleanup from out of bounds part. So we just shift right and left on BE machine
     use crate::tables::uma_ptr_read_cleanup::UMAPtrReadCleanupTable;
 
-    let table_id = cs.get_table_id_for_marker::<UMAPtrReadCleanupTable>().expect("table must exist");
-    let [uma_cleanup_bitspread, _] = cs.perform_lookup::<1, 2>(table_id, &[quasi_fat_ptr.bytes_to_cleanup_out_of_bounds.get_variable()]);
-    let uma_ptr_read_cleanup_mask = Num::from_variable(uma_cleanup_bitspread).spread_into_bits::<_, 32>(cs);
+    let table_id = cs
+        .get_table_id_for_marker::<UMAPtrReadCleanupTable>()
+        .expect("table must exist");
+    let [uma_cleanup_bitspread, _] = cs.perform_lookup::<1, 2>(
+        table_id,
+        &[quasi_fat_ptr.bytes_to_cleanup_out_of_bounds.get_variable()],
+    );
+    let uma_ptr_read_cleanup_mask =
+        Num::from_variable(uma_cleanup_bitspread).spread_into_bits::<_, 32>(cs);
 
-    for (dst, masking_bit) in selected_word.iter_mut().zip(uma_ptr_read_cleanup_mask.iter().rev()) {
+    for (dst, masking_bit) in selected_word
+        .iter_mut()
+        .zip(uma_ptr_read_cleanup_mask.iter().rev())
+    {
         *dst = dst.mask(cs, *masking_bit);
     }
 
@@ -528,10 +560,13 @@ pub(crate) fn apply_uma<
             );
 
             *dst = UInt8::multiselect(
-                cs, 
-                &baseline, 
-                unalignment_bit_mask[..idx].iter().copied().zip(written_value_bytes[..idx].iter().copied()),
-                idx
+                cs,
+                &baseline,
+                unalignment_bit_mask[..idx]
+                    .iter()
+                    .copied()
+                    .zip(written_value_bytes[..idx].iter().copied()),
+                idx,
             );
         } else {
             // we are stepping into word 2, and now number of candidates decreases
@@ -549,13 +584,17 @@ pub(crate) fn apply_uma<
             // here changes happen ONLY if we do unaligned access
             let baseline = *dst;
             let upper_bound = 63 - idx;
-            let src_bytes = &written_value_bytes[(idx-31)..];
+            let src_bytes = &written_value_bytes[(idx - 31)..];
 
             *dst = UInt8::multiselect(
-                cs, 
-                &baseline, 
-                unalignment_bit_mask[..upper_bound].iter().rev().copied().zip(src_bytes.iter().copied()),
-                upper_bound
+                cs,
+                &baseline,
+                unalignment_bit_mask[..upper_bound]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .zip(src_bytes.iter().copied()),
+                upper_bound,
             );
         }
     }
@@ -566,13 +605,18 @@ pub(crate) fn apply_uma<
     let (
         new_memory_queue_tail_after_writes,
         new_memory_queue_length_after_writes,
-        sponge_candidates_after_writes
+        sponge_candidates_after_writes,
     ) = {
         let mut relations = sponge_candidates_after_read;
 
         let mut a_new_value = UInt256::zero(cs);
         // read value is LE integer, while words are treated as BE
-        for (dst, src) in a_new_value.inner.iter_mut().rev().zip(written_bytes_buffer[..32].array_chunks::<4>()) {
+        for (dst, src) in a_new_value
+            .inner
+            .iter_mut()
+            .rev()
+            .zip(written_bytes_buffer[..32].array_chunks::<4>())
+        {
             let mut le_bytes = *src;
             le_bytes.reverse();
             let u32_word = UInt32::from_le_bytes(cs, le_bytes);
@@ -581,7 +625,12 @@ pub(crate) fn apply_uma<
 
         let mut b_new_value = UInt256::zero(cs);
         // read value is LE integer, while words are treated as BE
-        for (dst, src) in b_new_value.inner.iter_mut().rev().zip(written_bytes_buffer[32..].array_chunks::<4>()) {
+        for (dst, src) in b_new_value
+            .inner
+            .iter_mut()
+            .rev()
+            .zip(written_bytes_buffer[32..].array_chunks::<4>())
+        {
             let mut le_bytes = *src;
             le_bytes.reverse();
             let u32_word = UInt32::from_le_bytes(cs, le_bytes);
@@ -627,16 +676,17 @@ pub(crate) fn apply_uma<
             initial_state.map(|el| Num::from_variable(el)),
             final_state_candidate,
         ));
-    
+
         let mut new_memory_queue_state = Num::parallel_select(
             cs,
             execute_write,
             &final_state_candidate,
-            &new_memory_queue_tail_after_read
+            &new_memory_queue_tail_after_read,
         );
 
         // for all reasonable execution traces it's fine
-        let new_len_candidate = unsafe { new_memory_queue_length_after_read.increment_unchecked(cs) };
+        let new_len_candidate =
+            unsafe { new_memory_queue_length_after_read.increment_unchecked(cs) };
 
         let new_length_after_aligned_write = UInt32::conditionally_select(
             cs,
@@ -682,12 +732,12 @@ pub(crate) fn apply_uma<
             initial_state.map(|el| Num::from_variable(el)),
             final_state_candidate,
         ));
-    
+
         new_memory_queue_state = Num::parallel_select(
             cs,
             execute_unaligned_write,
             &final_state_candidate,
-            &new_memory_queue_state
+            &new_memory_queue_state,
         );
 
         // for all reasonable execution traces it's fine
@@ -709,12 +759,8 @@ pub(crate) fn apply_uma<
             );
             dependencies.push(execute_write.get_variable().into());
             dependencies.push(execute_unaligned_write.get_variable().into());
-            dependencies.extend(Place::from_variables(
-                a_query.flatten_as_variables(),
-            ));
-            dependencies.extend(Place::from_variables(
-                b_query.flatten_as_variables(),
-            ));
+            dependencies.extend(Place::from_variables(a_query.flatten_as_variables()));
+            dependencies.extend(Place::from_variables(b_query.flatten_as_variables()));
 
             cs.set_values_with_dependencies_vararg(
                 &dependencies,
@@ -728,7 +774,10 @@ pub(crate) fn apply_uma<
 
                     let mut query =
                         [F::ZERO; <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN];
-                    query.copy_from_slice(&inputs[2..(2 + <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN)]);
+                    query.copy_from_slice(
+                        &inputs
+                            [2..(2 + <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN)],
+                    );
                     let a_query: MemoryQueryWitness<F> =
                         CSAllocatableExt::witness_from_set_of_values(query);
 
@@ -737,7 +786,10 @@ pub(crate) fn apply_uma<
 
                     let mut query =
                         [F::ZERO; <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN];
-                    query.copy_from_slice(&inputs[(2 + <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN)..]);
+                    query.copy_from_slice(
+                        &inputs
+                            [(2 + <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN)..],
+                    );
                     let b_query: MemoryQueryWitness<F> =
                         CSAllocatableExt::witness_from_set_of_values(query);
                     guard.push_memory_witness(&b_query, execute_1);
@@ -746,17 +798,22 @@ pub(crate) fn apply_uma<
                 },
             );
         }
-    
+
         (
             new_memory_queue_state,
             new_length_after_unaligned_write,
-            relations
+            relations,
         )
     };
 
     let mut read_value_u256 = UInt256::zero(cs);
     // read value is LE integer, while words are treated as BE
-    for (dst, src) in read_value_u256.inner.iter_mut().rev().zip(selected_word.array_chunks::<4>()) {
+    for (dst, src) in read_value_u256
+        .inner
+        .iter_mut()
+        .rev()
+        .zip(selected_word.array_chunks::<4>())
+    {
         let mut le_bytes = *src;
         le_bytes.reverse();
         let u32_word = UInt32::from_le_bytes(cs, le_bytes);
@@ -772,7 +829,8 @@ pub(crate) fn apply_uma<
     let mut incremented_src0_register = common_opcode_state.src0;
     incremented_src0_register.value.inner[0] = quasi_fat_ptr.incremented_offset;
 
-    let is_write_access_and_increment = Boolean::multi_and(cs, &[is_write_access, increment_offset]);
+    let is_write_access_and_increment =
+        Boolean::multi_and(cs, &[is_write_access, increment_offset]);
     let update_dst0 = Boolean::multi_or(cs, &[is_read_access, is_write_access_and_increment]);
 
     let no_panic = set_panic.negated(cs);
@@ -786,35 +844,48 @@ pub(crate) fn apply_uma<
         &read_value_as_register,
     );
 
-    let should_update_dst1 = Boolean::multi_and(
-        cs,
-        &[
-            apply_any,
-            is_read_access,
-            increment_offset,
-        ],
-    );
+    let should_update_dst1 = Boolean::multi_and(cs, &[apply_any, is_read_access, increment_offset]);
 
-    let can_write_into_memory = UMA_HEAP_READ_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION);
+    let can_write_into_memory =
+        UMA_HEAP_READ_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION);
 
-    diffs_accumulator.dst_0_values.push((can_write_into_memory, should_update_dst0, dst0_value));
-    diffs_accumulator.dst_1_values.push((should_update_dst1, incremented_src0_register));
+    diffs_accumulator
+        .dst_0_values
+        .push((can_write_into_memory, should_update_dst0, dst0_value));
+    diffs_accumulator
+        .dst_1_values
+        .push((should_update_dst1, incremented_src0_register));
 
     // exceptions
     diffs_accumulator.pending_exceptions.push(set_panic);
 
     // and memory related staff
-    diffs_accumulator.new_heap_bounds.push((grow_heap, new_heap_upper_bound));
-    diffs_accumulator.new_aux_heap_bounds.push((grow_aux_heap, new_aux_heap_upper_bound));
+    diffs_accumulator
+        .new_heap_bounds
+        .push((grow_heap, new_heap_upper_bound));
+    diffs_accumulator
+        .new_aux_heap_bounds
+        .push((grow_aux_heap, new_aux_heap_upper_bound));
     // pay for growth
-    diffs_accumulator.new_ergs_left_candidates.push((should_apply, ergs_left_after_growth));
+    diffs_accumulator
+        .new_ergs_left_candidates
+        .push((should_apply, ergs_left_after_growth));
     // update sponges and queue states
 
     assert!(UMA_HEAP_READ_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
     assert!(UMA_HEAP_READ_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
 
-    diffs_accumulator.sponge_candidates_to_run.push((false, false, apply_any, sponge_candidates_after_writes));
-    diffs_accumulator.memory_queue_candidates.push((should_apply, new_memory_queue_length_after_writes, new_memory_queue_tail_after_writes));
+    diffs_accumulator.sponge_candidates_to_run.push((
+        false,
+        false,
+        apply_any,
+        sponge_candidates_after_writes,
+    ));
+    diffs_accumulator.memory_queue_candidates.push((
+        should_apply,
+        new_memory_queue_length_after_writes,
+        new_memory_queue_tail_after_writes,
+    ));
 }
 
 pub struct QuasiFatPtrInUMA<F: SmallField> {
@@ -848,42 +919,39 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
         let skip_if_legitimate_fat_ptr = Boolean::multi_and(cs, &[out_of_bounds, is_fat_ptr]);
 
         // check that we agree in logic with out-of-circuit comparisons
-        debug_assert_eq!(zkevm_opcode_defs::uma::MAX_OFFSET_TO_DEREF_LOW_U32 + 32u32, u32::MAX);
+        debug_assert_eq!(
+            zkevm_opcode_defs::uma::MAX_OFFSET_TO_DEREF_LOW_U32 + 32u32,
+            u32::MAX
+        );
 
         let formal_start = start.mask(cs, is_fat_ptr); // 0 of it's heap/aux heap, otherwise use what we have
-        let (absolute_address, _of, _) =
-            formal_start.overflowing_add(cs, offset);
+        let (absolute_address, _of, _) = formal_start.overflowing_add(cs, offset);
 
         let u32_constant_32 = UInt32::allocated_constant(cs, 32);
 
         let (incremented_offset, is_non_addressable, _) =
             offset.overflowing_add(cs, u32_constant_32);
 
-        let should_set_panic = Boolean::multi_or(
-            cs,
-            &[
-                already_panicked,
-                is_non_addressable
-            ],
-        );
+        let should_set_panic = Boolean::multi_or(cs, &[already_panicked, is_non_addressable]);
 
-        let skip_op = Boolean::multi_or(cs, 
+        let skip_op = Boolean::multi_or(
+            cs,
             &[
                 already_panicked,
                 skip_if_legitimate_fat_ptr,
                 is_non_addressable,
-            ]
+            ],
         );
 
-        let (mut bytes_out_of_bound, uf, _) =
-            incremented_offset.overflowing_sub(cs, length);
+        let (mut bytes_out_of_bound, uf, _) = incremented_offset.overflowing_sub(cs, length);
 
         bytes_out_of_bound = bytes_out_of_bound.mask_negated(cs, skip_op);
         bytes_out_of_bound = bytes_out_of_bound.mask_negated(cs, uf);
 
         let (_, bytes_out_of_bound) = bytes_out_of_bound.div_by_constant(cs, 32);
-        let bytes_to_cleanup_out_of_bounds = unsafe { UInt8::from_variable_unchecked(bytes_out_of_bound.get_variable()) };
-        
+        let bytes_to_cleanup_out_of_bounds =
+            unsafe { UInt8::from_variable_unchecked(bytes_out_of_bound.get_variable()) };
+
         let new = Self {
             absolute_address,
             page_candidate: page,

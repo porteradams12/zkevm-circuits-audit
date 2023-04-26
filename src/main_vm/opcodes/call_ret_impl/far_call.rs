@@ -1,31 +1,28 @@
 use zkevm_opcode_defs::system_params::STORAGE_AUX_BYTE;
 
-use boojum::{
-    gadgets::{u160::UInt160, u256::UInt256},
-    
-};
 use crate::base_structures::{
     log_query::{self, LogQuery},
     register::VMRegister,
     vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH,
 };
+use boojum::gadgets::{u160::UInt160, u256::UInt256};
 
 use super::*;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
-use boojum::gadgets::traits::allocatable::CSAllocatableExt;
+use crate::base_structures::decommit_query::DecommitQuery;
+use crate::base_structures::decommit_query::DecommitQueryWitness;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecordWitness;
 use crate::base_structures::vm_state::GlobalContext;
 use crate::base_structures::vm_state::QUEUE_STATE_WIDTH;
+use crate::main_vm::opcodes::call_ret_impl::far_call::log_query::LogQueryWitness;
 use crate::main_vm::state_diffs::MAX_SPONGES_PER_CYCLE;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use arrayvec::ArrayVec;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::DstBuffer;
-use crate::base_structures::decommit_query::DecommitQuery;
-use crate::base_structures::decommit_query::DecommitQueryWitness;
-use crate::main_vm::opcodes::call_ret_impl::far_call::log_query::LogQueryWitness;
+use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 
 pub(crate) struct FarCallData<F: SmallField> {
     pub(crate) apply_far_call: Boolean<F>,
@@ -70,9 +67,16 @@ impl<F: SmallField> FarCallPartialABI<F> {
         let ergs_passed = input.u32x8_view[6];
 
         // higher parts of highest 64 bits
-        let shard_id = input.u8x32_view[zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_SHARD_ID_BYTE_IDX];
-        let constructor_call = input.u8x32_view[zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_CONSTRUCTOR_CALL_BYTE_IDX].is_zero(cs).negated(cs);
-        let system_call = input.u8x32_view[zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_SYSTEM_CALL_BYTE_IDX].is_zero(cs).negated(cs);
+        let shard_id = input.u8x32_view
+            [zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_SHARD_ID_BYTE_IDX];
+        let constructor_call = input.u8x32_view
+            [zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_CONSTRUCTOR_CALL_BYTE_IDX]
+            .is_zero(cs)
+            .negated(cs);
+        let system_call = input.u8x32_view
+            [zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_SYSTEM_CALL_BYTE_IDX]
+            .is_zero(cs)
+            .negated(cs);
 
         let new = Self {
             ergs_passed,
@@ -157,7 +161,8 @@ impl<F: SmallField> FatPtrInABI<F> {
         let offset_is_zero = offset.is_zero(cs);
         let offset_is_non_zero = offset_is_zero.negated(cs);
 
-        let non_zero_offset_if_should_be_fresh = Boolean::multi_and(cs, &[offset_is_non_zero, as_fresh]);
+        let non_zero_offset_if_should_be_fresh =
+            Boolean::multi_and(cs, &[offset_is_non_zero, as_fresh]);
 
         let (end_non_inclusive, out_of_bounds, _) = start.overflowing_add(cs, length);
 
@@ -171,7 +176,15 @@ impl<F: SmallField> FatPtrInABI<F> {
         let is_out_of_bounds = is_in_bounds.negated(cs);
         let is_non_addressable = is_addresable.negated(cs);
 
-        let ptr_is_invalid = Boolean::multi_or(cs, &[non_zero_offset_if_should_be_fresh, out_of_bounds, is_out_of_bounds, is_non_addressable]);
+        let ptr_is_invalid = Boolean::multi_or(
+            cs,
+            &[
+                non_zero_offset_if_should_be_fresh,
+                out_of_bounds,
+                is_out_of_bounds,
+                is_non_addressable,
+            ],
+        );
 
         let offset = offset.mask_negated(cs, ptr_is_invalid);
         let page = page.mask_negated(cs, ptr_is_invalid);
@@ -325,8 +338,14 @@ where
     // we need a completely fresh one
     let mut new_callstack_entry = ExecutionContextRecord::uninitialized(cs);
     // apply memory stipends right away
-    new_callstack_entry.heap_upper_bound = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::NEW_FRAME_MEMORY_STIPEND);
-    new_callstack_entry.aux_heap_upper_bound = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::NEW_FRAME_MEMORY_STIPEND);
+    new_callstack_entry.heap_upper_bound = UInt32::allocated_constant(
+        cs,
+        zkevm_opcode_defs::system_params::NEW_FRAME_MEMORY_STIPEND,
+    );
+    new_callstack_entry.aux_heap_upper_bound = UInt32::allocated_constant(
+        cs,
+        zkevm_opcode_defs::system_params::NEW_FRAME_MEMORY_STIPEND,
+    );
 
     // now also create target for mimic
     let implicit_mimic_call_reg = draft_vm_state.registers
@@ -548,7 +567,8 @@ where
 
     // at the end of the day all our exceptions will lead to memory page being 0
 
-    let masked_bytecode_hash_upper_decomposition = masked_bytecode_hash.inner[3].decompose_into_bytes(cs);
+    let masked_bytecode_hash_upper_decomposition =
+        masked_bytecode_hash.inner[3].decompose_into_bytes(cs);
 
     let mut code_hash_length_in_words = UInt16::from_le_bytes(
         cs,
@@ -563,7 +583,8 @@ where
     // and we should put an exception here
 
     let can_not_call_code = can_call_code.negated(cs);
-    let call_now_in_construction_kernel = Boolean::multi_and(cs, &[can_not_call_code, target_is_kernel]);
+    let call_now_in_construction_kernel =
+        Boolean::multi_and(cs, &[can_not_call_code, target_is_kernel]);
 
     // exceptions, along with `bytecode_hash_is_trivial` indicate whether we will or will decommit code
     // into memory, or will just use UNMAPPED_PAGE
@@ -674,24 +695,37 @@ where
 
     // now any extra cost
     let callee_stipend = {
-        let is_msg_value_simulator_address_low = UInt32::allocated_constant(cs, zkevm_opcode_defs::ADDRESS_MSG_VALUE as u32);
-        let target_low_is_msg_value_simulator = UInt32::equals(cs, &destination_address.inner[0], &is_msg_value_simulator_address_low);
+        let is_msg_value_simulator_address_low =
+            UInt32::allocated_constant(cs, zkevm_opcode_defs::ADDRESS_MSG_VALUE as u32);
+        let target_low_is_msg_value_simulator = UInt32::equals(
+            cs,
+            &destination_address.inner[0],
+            &is_msg_value_simulator_address_low,
+        );
         // we know that that msg.value simulator is kernel, so we test equality of low address segment and test for kernel
-        let target_is_msg_value = Boolean::multi_and(cs, &[target_is_kernel, target_low_is_msg_value_simulator]);
+        let target_is_msg_value =
+            Boolean::multi_and(cs, &[target_is_kernel, target_low_is_msg_value_simulator]);
         let is_system_abi = far_call_abi.system_call;
         let require_extra = Boolean::multi_and(cs, &[target_is_msg_value, is_system_abi]);
 
-        let additive_cost = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_ADDITIVE_COST);
-        let max_pubdata_bytes = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_PUBDATA_BYTES_TO_PREPAY);
-        
-        let (pubdata_cost, _) = max_pubdata_bytes.non_widening_mul(cs, &draft_vm_state.ergs_per_pubdata_byte);
+        let additive_cost = UInt32::allocated_constant(
+            cs,
+            zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_ADDITIVE_COST,
+        );
+        let max_pubdata_bytes = UInt32::allocated_constant(
+            cs,
+            zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_PUBDATA_BYTES_TO_PREPAY,
+        );
+
+        let (pubdata_cost, _) =
+            max_pubdata_bytes.non_widening_mul(cs, &draft_vm_state.ergs_per_pubdata_byte);
         let (cost, _) = pubdata_cost.add_no_overflow(cs, additive_cost);
 
         cost.mask(cs, require_extra)
     };
 
-    let (ergs_left_after_extra_costs, uf, _) = ergs_left_after_growth
-        .overflowing_sub(cs, callee_stipend);
+    let (ergs_left_after_extra_costs, uf, _) =
+        ergs_left_after_growth.overflowing_sub(cs, callee_stipend);
     let ergs_left_after_extra_costs = ergs_left_after_extra_costs.mask_negated(cs, uf); // if not enough - set to 0
     let callee_stipend = callee_stipend.mask_negated(cs, uf); // also set to 0 if we were not able to take it
     exceptions.push(uf);
@@ -731,7 +765,10 @@ where
 
     let oracle = witness_oracle.clone();
 
-    let dependencies = [call_timestamp.get_variable().into(), execute.get_variable().into()];
+    let dependencies = [
+        call_timestamp.get_variable().into(),
+        execute.get_variable().into(),
+    ];
 
     // we always access witness, as even for writes we have to get a claimed read value!
     let potential_rollback_queue_segment_tail =
@@ -876,7 +913,13 @@ where
         <ExecutionContextRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 2,
     );
     dependencies.push(execute.get_variable().into());
-    dependencies.push(draft_vm_state.callstack.context_stack_depth.get_variable().into());
+    dependencies.push(
+        draft_vm_state
+            .callstack
+            .context_stack_depth
+            .get_variable()
+            .into(),
+    );
     dependencies.extend(Place::from_variables(
         current_callstack_entry.flatten_as_variables(),
     ));

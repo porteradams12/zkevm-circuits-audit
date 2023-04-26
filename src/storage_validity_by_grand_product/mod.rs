@@ -82,10 +82,7 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
                     original_encoding[EXTENDED_TIMESTAMP_ENCODING_ELEMENT],
                     F::ONE,
                 ),
-                (
-                    timestamp.get_variable(),
-                    F::from_u64_unchecked(1u64 << 8),
-                ),
+                (timestamp.get_variable(), F::from_u64_unchecked(1u64 << 8)),
             ],
         )
         .get_variable();
@@ -114,9 +111,11 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
 
     fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
         // NOTE(shamatar) Using CSAllocatableExt causes cyclic dependency here, so we use workaround
-        let mut record_values = [F::ZERO; crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH];
-        record_values
-            .copy_from_slice(&values[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH]);
+        let mut record_values =
+            [F::ZERO; crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH];
+        record_values.copy_from_slice(
+            &values[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH],
+        );
         let record = log_query_witness_from_values(record_values);
         let other_timestamp: u32 = WitnessCastable::cast_from_source(values[36]);
 
@@ -131,13 +130,16 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
         todo!()
     }
 
-    fn flatten_as_variables(&self) -> [Variable; 37] where
+    fn flatten_as_variables(&self) -> [Variable; 37]
+    where
         [(); Self::INTERNAL_STRUCT_LEN]:,
     {
         let mut result = [Variable::placeholder(); 37];
         let record_variables = self.record.flatten_as_variables_impl();
-        result[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH].copy_from_slice(&record_variables);
-        result[crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH] = self.timestamp.get_variable();
+        result[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH]
+            .copy_from_slice(&record_variables);
+        result[crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH] =
+            self.timestamp.get_variable();
         assert_no_placeholder_variables(&result);
 
         result
@@ -331,33 +333,42 @@ where
     );
 
     // get challenges for permutation argument
-    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
-        cs, 
-        structured_input
-            .observable_input
-            .unsorted_log_queue_state
-            .tail, 
+    let challenges = crate::utils::produce_fs_challenges::<
+        F,
+        CS,
+        R,
+        QUEUE_STATE_WIDTH,
+        { TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1 },
+        DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
+    >(
+        cs,
         structured_input
             .observable_input
             .unsorted_log_queue_state
             .tail,
-        round_function
+        structured_input
+            .observable_input
+            .unsorted_log_queue_state
+            .tail,
+        round_function,
     );
 
     let one = Num::allocated_constant(cs, F::ONE);
-    let initial_lhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
-        &structured_input.hidden_fsm_input.lhs_accumulator,
-    );
+    let initial_lhs =
+        <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            &structured_input.hidden_fsm_input.lhs_accumulator,
+        );
 
-    let initial_rhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
-        &structured_input.hidden_fsm_input.rhs_accumulator,
-    );
+    let initial_rhs =
+        <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            &structured_input.hidden_fsm_input.rhs_accumulator,
+        );
 
     let zero_u32: UInt32<F> = UInt32::zero(cs);
 
@@ -368,7 +379,6 @@ where
         &[zero_u32; PACKED_KEY_LENGTH],
         &structured_input.hidden_fsm_input.previous_packed_key,
     );
-
 
     let cycle_idx = UInt32::conditionally_select(
         cs,
@@ -518,7 +528,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
     sorted_queue: &mut StorageLogQueue<F, R>,
     is_start: Boolean<F>,
     mut cycle_idx: UInt32<F>,
-    fs_challenges: [[Num<F>; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    fs_challenges: [[Num<F>; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1];
+        DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut previous_packed_key: [UInt32<F>; PACKED_KEY_LENGTH],
     mut previous_key: UInt256<F>,
     mut previous_address: UInt160<F>,
@@ -592,7 +603,8 @@ where
                 &original_timestamp,
             );
 
-        let shard_id_is_valid = UInt8::equals(cs, &shard_id_to_process, &sorted_item.record.shard_id);
+        let shard_id_is_valid =
+            UInt8::equals(cs, &shard_id_to_process, &sorted_item.record.shard_id);
         shard_id_is_valid.conditionally_enforce_true(cs, should_pop);
 
         assert_eq!(extended_original_encoding.len(), sorted_encoding.len());
@@ -608,8 +620,8 @@ where
             .map(|v| Num::from_variable(*v))
             .collect::<Vec<Num<F>>>();
 
-        for (((lhs_dst, rhs_dst), challenges), additive_part) in 
-            lhs.iter_mut()
+        for (((lhs_dst, rhs_dst), challenges), additive_part) in lhs
+            .iter_mut()
             .zip(rhs.iter_mut())
             .zip(fs_challenges.iter())
             .zip(additive_parts.iter())
@@ -655,10 +667,7 @@ where
         //     prepacked_long_comparison(cs, &previous_packed_key, &packed_key, &PACKED_WIDTHS);
 
         // now resolve a logic about sorting itself
-        let packed_key = concatenate_key(
-            cs,
-            (record.address.clone(), record.key),
-        );
+        let packed_key = concatenate_key(cs, (record.address.clone(), record.key));
 
         // ensure sorting
         let (keys_are_equal, previous_key_is_greater) =
@@ -1185,7 +1194,6 @@ pub fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
         key.inner[5],
         key.inner[6],
         key.inner[7],
-
         address.inner[0],
         address.inner[1],
         address.inner[2],
@@ -1202,15 +1210,19 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
     a: &[UInt32<F>; N],
     b: &[UInt32<F>; N],
 ) -> (Boolean<F>, Boolean<F>) {
-
     let mut borrow = Boolean::allocated_constant(cs, false);
     let zero_u32 = UInt32::zero(cs);
     let mut result = [zero_u32; N];
     for ((b, a), dst) in b.iter().zip(a.iter()).zip(result.iter_mut()) {
-        let (c, new_borrow) = UIntXAddGate::<32>::perform_subtraction(cs, b.get_variable(), a.get_variable(), borrow.get_variable());
+        let (c, new_borrow) = UIntXAddGate::<32>::perform_subtraction(
+            cs,
+            b.get_variable(),
+            a.get_variable(),
+            borrow.get_variable(),
+        );
         let (c, _) = UInt32::from_variable_checked(cs, c);
         *dst = c;
-        borrow = unsafe {Boolean::from_variable_unchecked(new_borrow) };
+        borrow = unsafe { Boolean::from_variable_unchecked(new_borrow) };
     }
 
     let zero_limbs = result.map(|el| el.is_zero(cs));

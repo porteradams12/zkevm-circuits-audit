@@ -8,18 +8,18 @@ use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::u32::UInt32;
 
+use boojum::config::*;
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::Place;
 use boojum::cs::Variable;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
-use boojum::gadgets::traits::encodable::CircuitEncodable;
-use boojum::gadgets::traits::selectable::Selectable;
-use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::castable::WitnessCastable;
-use ethereum_types::U256;
-use boojum::config::*;
+use boojum::gadgets::traits::encodable::CircuitEncodable;
 use boojum::gadgets::traits::encodable::CircuitEncodableExt;
+use boojum::gadgets::traits::selectable::Selectable;
+use ethereum_types::U256;
 
 use cs_derive::*;
 
@@ -78,18 +78,10 @@ impl<F: SmallField> CSAllocatableExt<F> for MemoryQuery<F> {
         let rw_flag: bool = WitnessCastable::cast_from_source(values[3]);
         let is_ptr: bool = WitnessCastable::cast_from_source(values[4]);
 
-        let value: U256 = WitnessCastable::cast_from_source(
-            [
-                values[5],
-                values[6],
-                values[7],
-                values[8],
-                values[9],
-                values[10],
-                values[11],
-                values[12],
-            ]
-        );
+        let value: U256 = WitnessCastable::cast_from_source([
+            values[5], values[6], values[7], values[8], values[9], values[10], values[11],
+            values[12],
+        ]);
 
         Self::Witness {
             timestamp,
@@ -119,8 +111,14 @@ impl<F: SmallField> CircuitEncodable<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQue
             cs,
             &[
                 (self.index.get_variable(), F::ONE),
-                (self.rw_flag.get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (self.is_ptr.get_variable(), F::from_u64_unchecked(1u64 << 33)),
+                (
+                    self.rw_flag.get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    self.is_ptr.get_variable(),
+                    F::from_u64_unchecked(1u64 << 33),
+                ),
             ],
         )
         .get_variable();
@@ -223,8 +221,8 @@ pub struct MemoryValue<F: SmallField> {
     pub value: UInt256<F>,
 }
 
-use boojum::gadgets::u256::decompose_u256_as_u32x8;
 use crate::main_vm::witness_oracle::MemoryWitness;
+use boojum::gadgets::u256::decompose_u256_as_u32x8;
 
 impl<F: SmallField> MemoryValue<F> {
     pub fn allocate_from_closure_and_dependencies<
@@ -300,5 +298,6 @@ impl<F: SmallField> MemoryValue<F> {
     }
 }
 
-pub type MemoryQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
+pub type MemoryQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
+    FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
 pub type MemoryQueue<F, R> = MemoryQueryQueue<F, 8, 12, 4, R>;

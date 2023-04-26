@@ -1,6 +1,8 @@
 use super::*;
 
+use crate::base_structures::vm_state::VmLocalState;
 use crate::config::*;
+use boojum::config::*;
 use boojum::cs::gates::PublicInputGate;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::{Place, Variable};
@@ -12,12 +14,11 @@ use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
 use boojum::utils::u64_as_bool;
-use crate::base_structures::vm_state::VmLocalState;
 use boojum::{field::SmallField, gadgets::u16::UInt16};
-use boojum::config::*;
 
 pub mod cycle;
 pub mod decoded_opcode;
+pub mod loading;
 pub mod opcode_bitmask;
 pub mod opcodes;
 pub mod pre_state;
@@ -25,24 +26,23 @@ pub mod register_input_view;
 pub mod state_diffs;
 pub mod utils;
 pub mod witness_oracle;
-pub mod loading;
 
-use crate::base_structures::vm_state::{QUEUE_STATE_WIDTH, FULL_SPONGE_QUEUE_STATE_WIDTH};
-use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
-use crate::fsm_input_output::circuit_inputs::main_vm::VmCircuitWitness;
-use crate::main_vm::witness_oracle::{WitnessOracle, SynchronizedWitnessOracle};
-use boojum::gadgets::poseidon::CircuitRoundFunction;
-use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
-use crate::base_structures::log_query::LogQuery;
 use crate::base_structures::decommit_query::DecommitQuery;
+use crate::base_structures::log_query::LogQuery;
 use crate::base_structures::memory_query::MemoryQuery;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
+use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
+use crate::base_structures::vm_state::{FULL_SPONGE_QUEUE_STATE_WIDTH, QUEUE_STATE_WIDTH};
+use crate::fsm_input_output::circuit_inputs::main_vm::VmCircuitWitness;
 use crate::fsm_input_output::circuit_inputs::main_vm::*;
-use crate::main_vm::loading::initial_bootloader_state;
-use crate::main_vm::cycle::vm_cycle;
-use crate::fsm_input_output::ClosedFormInputCompactForm;
+use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::fsm_input_output::commit_variable_length_encodable_item;
+use crate::fsm_input_output::ClosedFormInputCompactForm;
+use crate::main_vm::cycle::vm_cycle;
+use crate::main_vm::loading::initial_bootloader_state;
+use crate::main_vm::witness_oracle::{SynchronizedWitnessOracle, WitnessOracle};
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use boojum::gadgets::traits::witnessable::WitnessHookable;
 
 pub fn main_vm_entry_point<
@@ -55,7 +55,7 @@ pub fn main_vm_entry_point<
     witness: VmCircuitWitness<F, W>,
     round_function: &R,
     limit: usize,
-) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH] 
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
 where
     [(); <ExecutionContextRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
@@ -116,12 +116,8 @@ where
     let done = state.callstack.is_empty(cs);
 
     // we can not fail exiting, so check for our convention that pc == 0 on success, and != 0 in failure
-    let bootloader_exited_successfully = state
-        .callstack
-        .current_context
-        .saved_context
-        .pc
-        .is_zero(cs);
+    let bootloader_exited_successfully =
+        state.callstack.current_context.saved_context.pc.is_zero(cs);
 
     // bootloader must exist succesfully
     bootloader_exited_successfully.conditionally_enforce_true(cs, done);
@@ -140,32 +136,29 @@ where
 
     let memory_queue_current_tail = QueueTailState {
         tail: final_state.memory_queue_state,
-        length: final_state.memory_queue_length
+        length: final_state.memory_queue_length,
     };
     let memory_queue_final_tail = QueueTailState::conditionally_select(
-        cs, 
+        cs,
         structured_input.completion_flag,
         &memory_queue_current_tail,
-        &full_empty_state_large.tail
+        &full_empty_state_large.tail,
     );
 
     // code decommit
     let decommitment_queue_current_tail = QueueTailState {
         tail: final_state.code_decommittment_queue_state,
-        length: final_state.code_decommittment_queue_length
+        length: final_state.code_decommittment_queue_length,
     };
     let decommitment_queue_final_tail = QueueTailState::conditionally_select(
-        cs, 
+        cs,
         structured_input.completion_flag,
         &decommitment_queue_current_tail,
-        &full_empty_state_large.tail
+        &full_empty_state_large.tail,
     );
 
     // log. We IGNORE rollbacks that never happened obviously
-    let final_log_state_tail = final_state
-        .callstack
-        .current_context
-        .log_queue_forward_tail;
+    let final_log_state_tail = final_state.callstack.current_context.log_queue_forward_tail;
     let final_log_state_length = final_state
         .callstack
         .current_context
@@ -174,11 +167,12 @@ where
     // but we CAN still check that it's potentially mergeable, basically to check that witness generation is good
     for (a, b) in final_log_state_tail.iter().zip(
         final_state
-        .callstack
-        .current_context
-        .saved_context
-        .reverted_queue_head.iter()) 
-    {
+            .callstack
+            .current_context
+            .saved_context
+            .reverted_queue_head
+            .iter(),
+    ) {
         Num::conditionally_enforce_equal(cs, structured_input.completion_flag, a, b);
     }
 
@@ -186,16 +180,16 @@ where
 
     let log_queue_current_tail = QueueTailState {
         tail: final_log_state_tail,
-        length: final_log_state_length
+        length: final_log_state_length,
     };
     let log_queue_final_tail = QueueTailState::conditionally_select(
-        cs, 
+        cs,
         structured_input.completion_flag,
         &log_queue_current_tail,
-        &full_empty_state_small.tail
+        &full_empty_state_small.tail,
     );
 
-    // set everything 
+    // set everything
 
     observable_output.log_queue_final_state.tail = log_queue_final_tail;
     observable_output.memory_queue_final_state.tail = memory_queue_final_tail;
@@ -212,7 +206,7 @@ where
     //     assert_eq!(circuit_result, closed_form_input);
     // }
 
-    // if we generate witness then we can self-check 
+    // if we generate witness then we can self-check
     if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
         let value_fn = move |_ins: [F; 1]| {
             let mut guard = synchronized_oracle.inner.write().expect("not poisoned");
@@ -225,16 +219,17 @@ where
         };
 
         cs.set_values_with_dependencies(
-            &[structured_input.completion_flag.get_variable().into()], 
-            &[], 
-            value_fn
+            &[structured_input.completion_flag.get_variable().into()],
+            &[],
+            value_fn,
         );
     }
 
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
 
-    let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &compact_form, round_function);
+    let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
+        commit_variable_length_encodable_item(cs, &compact_form, round_function);
     for el in input_commitment.iter() {
         let gate = PublicInputGate::new(el.get_variable());
         gate.add_to_cs(cs);

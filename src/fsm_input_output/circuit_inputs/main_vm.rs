@@ -1,14 +1,10 @@
 use super::*;
-use cs_derive::*;
-use boojum::serde_utils::BigArraySerde;
 use crate::base_structures::vm_state::*;
 use boojum::gadgets::queue::*;
+use boojum::serde_utils::BigArraySerde;
+use cs_derive::*;
 
-fn assert_hookable<F: SmallField, H: WitnessHookable<F>>(
-    _t: Option<H>
-) {
-
-}
+fn assert_hookable<F: SmallField, H: WitnessHookable<F>>(_t: Option<H>) {}
 
 fn tmp<F: SmallField>() {
     assert_hookable::<F, VmInputData<F>>(None);
@@ -34,14 +30,12 @@ impl<F: SmallField> CSPlaceholder<F> for VmInputData<F> {
             rollback_queue_tail_for_block: [zero_num; QUEUE_STATE_WIDTH],
             memory_queue_initial_state: empty_tail,
             decommitment_queue_initial_state: empty_tail,
-            per_block_context: placeholder_ctx
+            per_block_context: placeholder_ctx,
         }
     }
 }
 
-#[derive(
-    Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable
-)]
+#[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Debug)]
 pub struct VmOutputData<F: SmallField> {
     pub log_queue_final_state: QueueState<F, QUEUE_STATE_WIDTH>,
@@ -56,7 +50,7 @@ impl<F: SmallField> CSPlaceholder<F> for VmOutputData<F> {
         Self {
             log_queue_final_state: empty_small,
             memory_queue_final_state: empty_large,
-            decommitment_queue_final_state: empty_large
+            decommitment_queue_final_state: empty_large,
         }
     }
 }
@@ -65,8 +59,12 @@ use crate::base_structures::vm_state::VmLocalState;
 
 pub type VmCircuitInputOutput<F> =
     crate::fsm_input_output::ClosedFormInput<F, VmLocalState<F>, VmInputData<F>, VmOutputData<F>>;
-pub type VmCircuitInputOutputWitness<F> =
-crate::fsm_input_output::ClosedFormInputWitness<F, VmLocalState<F>, VmInputData<F>, VmOutputData<F>>;
+pub type VmCircuitInputOutputWitness<F> = crate::fsm_input_output::ClosedFormInputWitness<
+    F,
+    VmLocalState<F>,
+    VmInputData<F>,
+    VmOutputData<F>,
+>;
 
 use crate::main_vm::witness_oracle::WitnessOracle;
 

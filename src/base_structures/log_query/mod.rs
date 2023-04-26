@@ -496,7 +496,9 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
     }
 }
 
-pub(crate) fn log_query_witness_from_values<F: SmallField>(values: [F; FLATTENED_VARIABLE_LENGTH]) -> <LogQuery<F> as CSAllocatable<F>>::Witness {
+pub(crate) fn log_query_witness_from_values<F: SmallField>(
+    values: [F; FLATTENED_VARIABLE_LENGTH],
+) -> <LogQuery<F> as CSAllocatable<F>>::Witness {
     let address: [u32; 5] = [
         WitnessCastable::cast_from_source(values[0]),
         WitnessCastable::cast_from_source(values[1]),

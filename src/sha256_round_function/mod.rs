@@ -1,48 +1,47 @@
 use super::*;
-use arrayvec::ArrayVec;
-use boojum::cs::gates::ConstantAllocatableCS;
-use boojum::field::SmallField;
-use boojum::gadgets::curves::sw_projective::SWProjectivePoint;
-use boojum::gadgets::keccak256::keccak256;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
-use boojum::gadgets::u16::UInt16;
-use cs_derive::*;
-use boojum::gadgets::u32::UInt32;
-use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::u256::UInt256;
-use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::traits::selectable::Selectable;
-use boojum::gadgets::non_native_field::traits::NonNativeField;
-use boojum::gadgets::non_native_field::implementations::*;
-use ethereum_types::U256;
-use boojum::crypto_bigint::{U1024, Zero};
-use boojum::gadgets::num::Num;
-use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
-use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
-use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
-use boojum::pairing::{CurveAffine, GenericCurveProjective};
-use boojum::gadgets::u8::UInt8;
-use boojum::gadgets::queue::QueueState;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use crate::base_structures::log_query::*;
-use crate::fsm_input_output::*;
-use boojum::gadgets::u160::UInt160;
-use crate::demux_log_queue::StorageLogQueue;
-use boojum::gadgets::queue::CircuitQueueWitness;
 use crate::base_structures::memory_query::*;
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
+use crate::demux_log_queue::StorageLogQueue;
+use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use crate::fsm_input_output::*;
 use crate::storage_application::ConditionalWitnessAllocator;
-use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
-use boojum::gadgets::traits::allocatable::CSAllocatable;
+use arrayvec::ArrayVec;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::crypto_bigint::{Zero, U1024};
+use boojum::cs::gates::ConstantAllocatableCS;
+use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::Variable;
+use boojum::field::SmallField;
+use boojum::gadgets::boolean::Boolean;
+use boojum::gadgets::curves::sw_projective::SWProjectivePoint;
+use boojum::gadgets::keccak256::keccak256;
+use boojum::gadgets::non_native_field::implementations::*;
+use boojum::gadgets::non_native_field::traits::NonNativeField;
+use boojum::gadgets::num::Num;
+use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::queue::CircuitQueueWitness;
+use boojum::gadgets::queue::QueueState;
 use boojum::gadgets::sha256::{self};
+use boojum::gadgets::traits::allocatable::CSAllocatable;
+use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
+use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
+use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
+use boojum::gadgets::u16::UInt16;
+use boojum::gadgets::u160::UInt160;
+use boojum::gadgets::u256::UInt256;
+use boojum::gadgets::u32::UInt32;
+use boojum::gadgets::u8::UInt8;
+use boojum::pairing::{CurveAffine, GenericCurveProjective};
+use cs_derive::*;
+use ethereum_types::U256;
+use std::collections::VecDeque;
+use std::sync::{Arc, RwLock};
+use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 
 pub mod input;
 use self::input::*;
-
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
@@ -69,10 +68,7 @@ impl<F: SmallField> CSPlaceholder<F> for Sha256PrecompileCallParams<F> {
 }
 
 impl<F: SmallField> Sha256PrecompileCallParams<F> {
-    pub fn from_encoding<CS: ConstraintSystem<F>>(
-        _cs: &mut CS,
-        encoding: UInt256<F>,
-    ) -> Self {
+    pub fn from_encoding<CS: ConstraintSystem<F>>(_cs: &mut CS, encoding: UInt256<F>) -> Self {
         let input_offset = encoding.inner[0];
         let output_offset = encoding.inner[2];
         let input_page = encoding.inner[4];
@@ -92,7 +88,6 @@ impl<F: SmallField> Sha256PrecompileCallParams<F> {
     }
 }
 
-
 pub const MEMORY_READ_QUERIES_PER_CYCLE: usize = 2;
 
 pub fn sha256_precompile_inner<
@@ -107,15 +102,19 @@ pub fn sha256_precompile_inner<
     mut state: Sha256RoundFunctionFSM<F>,
     _round_function: &R,
     limit: usize,
-) -> Sha256RoundFunctionFSM<F> 
-where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+) -> Sha256RoundFunctionFSM<F>
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]: 
+    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]:,
 {
     assert!(limit <= u32::MAX as usize);
 
-    let precompile_address = UInt160::allocated_constant(cs, *zkevm_opcode_defs::system_params::SHA256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
+    let precompile_address = UInt160::allocated_constant(
+        cs,
+        *zkevm_opcode_defs::system_params::SHA256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS,
+    );
     let aux_byte_for_precompile = UInt8::allocated_constant(cs, PRECOMPILE_AUX_BYTE);
 
     let boolean_false = Boolean::allocated_constant(cs, false);
@@ -131,9 +130,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     // main work cycle
     for _cycle in 0..limit {
         // if we are in a proper state then get the ABI from the queue
-        let (precompile_call, _) =
-            precompile_calls_queue.pop_front(cs, state.read_precompile_call);
-
+        let (precompile_call, _) = precompile_calls_queue.pop_front(cs, state.read_precompile_call);
 
         Num::conditionally_enforce_equal(
             cs,
@@ -141,14 +138,19 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
             &Num::from_variable(precompile_call.aux_byte.get_variable()),
             &Num::from_variable(aux_byte_for_precompile.get_variable()),
         );
-        for (a, b) in precompile_call.address.inner.iter().zip(precompile_address.inner.iter()) {
+        for (a, b) in precompile_call
+            .address
+            .inner
+            .iter()
+            .zip(precompile_address.inner.iter())
+        {
             Num::conditionally_enforce_equal(
                 cs,
                 state.read_precompile_call,
                 &Num::from_variable(a.get_variable()),
                 &Num::from_variable(b.get_variable()),
             );
-        }    
+        }
 
         // now compute some parameters that describe the call itself
 
@@ -170,7 +172,8 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         );
 
         // timestamps have large space, so this can be expected
-        let timestamp_to_use_for_write = unsafe {state.timestamp_to_use_for_read.increment_unchecked(cs)};
+        let timestamp_to_use_for_write =
+            unsafe { state.timestamp_to_use_for_read.increment_unchecked(cs) };
         state.timestamp_to_use_for_write = UInt32::conditionally_select(
             cs,
             state.read_precompile_call,
@@ -201,14 +204,19 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
                 index: state.precompile_call_params.input_offset,
                 rw_flag: boolean_false,
                 is_ptr: boolean_false,
-                value: read_query_value
+                value: read_query_value,
             };
 
-            let may_be_new_offset = unsafe { state.precompile_call_params.input_offset.increment_unchecked(cs) };
+            let may_be_new_offset = unsafe {
+                state
+                    .precompile_call_params
+                    .input_offset
+                    .increment_unchecked(cs)
+            };
             state.precompile_call_params.input_offset = UInt32::conditionally_select(
                 cs,
-                state.read_words_for_round, 
-                &may_be_new_offset, 
+                state.read_words_for_round,
+                &may_be_new_offset,
                 &state.precompile_call_params.input_offset,
             );
 
@@ -223,11 +231,16 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
             }
         }
 
-        let may_be_new_num_rounds = unsafe { state.precompile_call_params.num_rounds.decrement_unchecked(cs) };
+        let may_be_new_num_rounds = unsafe {
+            state
+                .precompile_call_params
+                .num_rounds
+                .decrement_unchecked(cs)
+        };
         state.precompile_call_params.num_rounds = UInt32::conditionally_select(
             cs,
-            state.read_words_for_round, 
-            &may_be_new_num_rounds, 
+            state.read_words_for_round,
+            &may_be_new_num_rounds,
             &state.precompile_call_params.num_rounds,
         );
 
@@ -242,9 +255,9 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         );
 
         let sha256_output = sha256::round_function::round_function_over_uint32(
-            cs, 
-            &mut current_sha256_state, 
-            &memory_queries_as_u32_words, 
+            cs,
+            &mut current_sha256_state,
+            &memory_queries_as_u32_words,
         );
         state.sha256_inner_state = current_sha256_state;
 
@@ -292,18 +305,18 @@ pub fn sha256_round_function_entry_point<
     witness: Sha256RoundFunctionCircuitInstanceWitness<F>,
     round_function: &R,
     limit: usize,
-) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH] 
-where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]: 
+    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]:,
 {
-    let Sha256RoundFunctionCircuitInstanceWitness { 
-        closed_form_input, 
-        requests_queue_witness, 
-        memory_reads_witness 
+    let Sha256RoundFunctionCircuitInstanceWitness {
+        closed_form_input,
+        requests_queue_witness,
+        memory_reads_witness,
     } = witness;
-
 
     let mut structured_input = Sha256RoundFunctionCircuitInputOutput::alloc_ignoring_outputs(
         cs,
@@ -312,18 +325,12 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 
     let start_flag = structured_input.start_flag;
 
-    let requests_queue_state_from_input = 
-        structured_input
-            .observable_input
-            .initial_log_queue_state;
+    let requests_queue_state_from_input = structured_input.observable_input.initial_log_queue_state;
 
     // it must be trivial
     requests_queue_state_from_input.enforce_trivial_head(cs);
 
-    let requests_queue_state_from_fsm = 
-        structured_input
-            .hidden_fsm_input
-            .log_queue_state;
+    let requests_queue_state_from_fsm = structured_input.hidden_fsm_input.log_queue_state;
 
     let requests_queue_state = QueueState::conditionally_select(
         cs,
@@ -332,18 +339,13 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         &requests_queue_state_from_fsm,
     );
 
-    let memory_queue_state_from_input = 
-        structured_input
-            .observable_input
-            .initial_memory_queue_state;
+    let memory_queue_state_from_input =
+        structured_input.observable_input.initial_memory_queue_state;
 
     // it must be trivial
     memory_queue_state_from_input.enforce_trivial_head(cs);
 
-    let memory_queue_state_from_fsm = 
-        structured_input
-            .hidden_fsm_input
-            .memory_queue_state;
+    let memory_queue_state_from_fsm = structured_input.hidden_fsm_input.memory_queue_state;
 
     let memory_queue_state = QueueState::conditionally_select(
         cs,
@@ -352,20 +354,14 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         &memory_queue_state_from_fsm,
     );
 
-    let mut requests_queue = StorageLogQueue::<F, R>::from_state(
-        cs,
-        requests_queue_state
-    );
+    let mut requests_queue = StorageLogQueue::<F, R>::from_state(cs, requests_queue_state);
     let queue_witness = CircuitQueueWitness::from_inner_witness(requests_queue_witness);
     requests_queue.witness = Arc::new(queue_witness);
 
-    let mut memory_queue = MemoryQueue::<F, R>::from_state(
-        cs,
-        memory_queue_state,
-    );
+    let mut memory_queue = MemoryQueue::<F, R>::from_state(cs, memory_queue_state);
 
     let read_queries_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
-        witness_source: Arc::new(RwLock::new(memory_reads_witness))
+        witness_source: Arc::new(RwLock::new(memory_reads_witness)),
     };
 
     let mut starting_fsm_state = Sha256RoundFunctionFSM::placeholder(cs);
@@ -396,13 +392,12 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     structured_input.completion_flag = done;
     structured_input.observable_output = PrecompileFunctionOutputData::placeholder(cs);
 
-    structured_input.observable_output.final_memory_state =
-        QueueState::conditionally_select(
-            cs,
-            structured_input.completion_flag,
-            &final_memory_state,
-            &structured_input.observable_output.final_memory_state,
-        );
+    structured_input.observable_output.final_memory_state = QueueState::conditionally_select(
+        cs,
+        structured_input.completion_flag,
+        &final_memory_state,
+        &structured_input.observable_output.final_memory_state,
+    );
 
     structured_input.hidden_fsm_output.internal_fsm = final_state;
     structured_input.hidden_fsm_output.log_queue_state = final_requets_state;

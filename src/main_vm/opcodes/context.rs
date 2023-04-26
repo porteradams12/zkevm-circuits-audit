@@ -1,6 +1,4 @@
-use boojum::{
-    cs::gates::reduction_by_powers_gate, gadgets::u256::UInt256,
-};
+use boojum::{cs::gates::reduction_by_powers_gate, gadgets::u256::UInt256};
 
 use crate::base_structures::register::VMRegister;
 

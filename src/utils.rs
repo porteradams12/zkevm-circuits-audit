@@ -1,10 +1,10 @@
-use boojum::field::SmallField;
-use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::field::SmallField;
+use boojum::gadgets::num::Num;
+use boojum::gadgets::poseidon::CircuitRoundFunction;
 use boojum::gadgets::queue::QueueTailState;
 use boojum::gadgets::u32::UInt32;
-use boojum::gadgets::num::Num;
 
 pub fn produce_fs_challenges<
     F: SmallField,
@@ -17,7 +17,7 @@ pub fn produce_fs_challenges<
     cs: &mut CS,
     unsorted_tail: QueueTailState<F, N>,
     sorted_tail: QueueTailState<F, N>,
-    _round_function: &R
+    _round_function: &R,
 ) -> [[Num<F>; NUM_CHALLENGES]; NUM_REPETITIONS] {
     let mut fs_input = vec![];
     fs_input.extend_from_slice(&unsorted_tail.tail);

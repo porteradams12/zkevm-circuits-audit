@@ -1,17 +1,17 @@
 use super::*;
 use boojum::cs::gates::{ConstantAllocatableCS, ReductionByPowersGate, ReductionGate};
-use cs_derive::*;
 use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::num::Num;
-use boojum::gadgets::u32::UInt32;
-use boojum::{field::SmallField, gadgets::u16::UInt16};
-use boojum::gadgets::traits::allocatable::CSAllocatable;
 use boojum::cs::{Place, Variable};
+use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::impls::limbs_decompose::reduce_terms;
+use boojum::gadgets::num::Num;
+use boojum::gadgets::traits::allocatable::CSAllocatable;
 use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
 use boojum::serde_utils::BigArraySerde;
+use boojum::{field::SmallField, gadgets::u16::UInt16};
+use cs_derive::*;
 
 use zkevm_opcode_defs::{
     OPCODE_INPUT_VARIANT_FLAGS, OPCODE_OUTPUT_VARIANT_FLAGS, OPCODE_TYPE_BITS, REGISTERS_COUNT,
@@ -131,8 +131,9 @@ pub fn perform_initial_decoding<F: SmallField, CS: ConstraintSystem<F>>(
 
     // Ok, now just decompose spreads into bitmasks, and spread and decompose register indexes
 
-    let all_opcodes_props_bits = opcode_boolean_spread_data
-        .spread_into_bits::<_, TOTAL_OPCODE_MEANINGFULL_DESCRIPTION_BITS>(cs);
+    let all_opcodes_props_bits =
+        opcode_boolean_spread_data
+            .spread_into_bits::<_, TOTAL_OPCODE_MEANINGFULL_DESCRIPTION_BITS>(cs);
 
     let src_regs_encoding = initial_decoding
         .src_regs_encoding
@@ -253,15 +254,10 @@ pub(crate) fn encode_flags<F: SmallField, CS: ConstraintSystem<F>>(
             flags.greater_than.get_variable(),
             zero.get_variable(),
         ];
-        let contants = [
-            F::ONE,
-            F::TWO,
-            F::from_u64_unchecked(4),
-            F::ZERO
-        ];
+        let contants = [F::ONE, F::TWO, F::from_u64_unchecked(4), F::ZERO];
         let result = ReductionGate::<F, 4>::reduce_terms(cs, contants, inputs);
 
-         Num::from_variable(result)
+        Num::from_variable(result)
     } else {
         unimplemented!()
     }
@@ -397,7 +393,7 @@ pub fn partially_decode_from_integer_and_resolve_condition<
 
             let variant_and_condition =
                 inputs[0].as_u64_reduced() & VARIANT_AND_CONDITION_ENCODING_MASK;
-            
+
             let variant = variant_and_condition & VARIANT_ENCODING_MASK;
             let unused_bits =
                 (variant_and_condition >> OPCODES_TABLE_WIDTH) & bit_width_to_bitmask(UNUSED_GAP);
@@ -427,19 +423,13 @@ pub fn partially_decode_from_integer_and_resolve_condition<
         cs,
         &[
             (variant_var, F::ONE),
+            (unused_bits_vars[0], F::SHIFTS[OPCODES_TABLE_WIDTH]),
+            (unused_bits_vars[1], F::SHIFTS[OPCODES_TABLE_WIDTH + 1]),
+            (conditionals_var, F::SHIFTS[OPCODES_TABLE_WIDTH + 2]),
             (
-                unused_bits_vars[0],
-                F::SHIFTS[OPCODES_TABLE_WIDTH]
+                opcode_variant_and_conditional_word.get_variable(),
+                F::MINUS_ONE,
             ),
-            (
-                unused_bits_vars[1],
-                F::SHIFTS[OPCODES_TABLE_WIDTH + 1]
-            ),
-            (
-                conditionals_var,
-                F::SHIFTS[OPCODES_TABLE_WIDTH + 2]
-            ),
-            (opcode_variant_and_conditional_word.get_variable(), F::MINUS_ONE),
         ],
     );
 
@@ -468,10 +458,11 @@ pub fn partially_decode_from_integer_and_resolve_condition<
         .get_table_id_for_marker::<VMConditionalResolutionTable>()
         .expect("table must exist");
 
-    let values = cs.perform_lookup::<2, 1>(table_id, &[conditionals_var, encoded_flags.get_variable()]);
+    let values =
+        cs.perform_lookup::<2, 1>(table_id, &[conditionals_var, encoded_flags.get_variable()]);
     let resolution = unsafe { Boolean::from_variable_unchecked(values[0]) };
 
-    // decode the end 
+    // decode the end
     let src_regs_encoding = word_0_bytes[2];
     let dst_regs_encoding = word_0_bytes[3];
 

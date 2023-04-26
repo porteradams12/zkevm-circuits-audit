@@ -1,15 +1,15 @@
 use std::collections::VecDeque;
 
 use super::*;
-use boojum::cs::Variable;
-use boojum::gadgets::traits::allocatable::CSAllocatable;
-use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
-use crate::base_structures::precompile_input_outputs::*;
-use boojum::gadgets::traits::allocatable::CSPlaceholder;
-use boojum::gadgets::queue::*;
-use crate::base_structures::vm_state::*;
 use crate::base_structures::log_query::*;
+use crate::base_structures::precompile_input_outputs::*;
+use crate::base_structures::vm_state::*;
+use boojum::cs::Variable;
+use boojum::gadgets::queue::*;
+use boojum::gadgets::traits::allocatable::CSAllocatable;
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
+use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
@@ -21,7 +21,6 @@ pub struct EcrecoverCircuitFSMInputOutput<F: SmallField> {
 
 impl<F: SmallField> CSPlaceholder<F> for EcrecoverCircuitFSMInputOutput<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
-        
         Self {
             log_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             memory_queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
@@ -43,7 +42,6 @@ pub type EcrecoverCircuitInputOutputWitness<F> = ClosedFormInputWitness<
     PrecompileFunctionInputData<F>,
     PrecompileFunctionOutputData<F>,
 >;
-
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug)]

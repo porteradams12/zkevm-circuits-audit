@@ -1,10 +1,10 @@
 use arrayvec::ArrayVec;
 
+use crate::base_structures::{register::VMRegister, vm_state::ArithmeticFlagsPort};
 use boojum::{
     cs::gates::{ConstantAllocatableCS, UIntXAddGate},
     gadgets::u256::UInt256,
 };
-use crate::base_structures::{register::VMRegister, vm_state::ArithmeticFlagsPort};
 
 use super::*;
 
@@ -51,7 +51,7 @@ pub(crate) fn apply_add_sub<F: SmallField, CS: ConstraintSystem<F>>(
             println!("Applying SUB");
         }
     }
-    
+
     let to_enforce = UInt32::<F>::parallel_select(
         cs,
         apply_add,
@@ -67,7 +67,7 @@ pub(crate) fn apply_add_sub<F: SmallField, CS: ConstraintSystem<F>>(
 
     // relation is a + b == c + of * 2^N,
     // but we compute d - e + 2^N * borrow = f,
-    // so e + f = d + of * 2^N 
+    // so e + f = d + of * 2^N
 
     // Naive options
     // let add_relation = AddSubRelation {
@@ -109,7 +109,7 @@ pub(crate) fn apply_add_sub<F: SmallField, CS: ConstraintSystem<F>>(
         a: new_a,
         b: new_b,
         c: new_c,
-        of: new_of
+        of: new_of,
     };
 
     // now we need to check for zero and output
@@ -127,7 +127,7 @@ pub(crate) fn apply_add_sub<F: SmallField, CS: ConstraintSystem<F>>(
     let candidate_flags = ArithmeticFlagsPort {
         overflow_or_less_than: new_of,
         equal: result_is_zero,
-        greater_than: gt
+        greater_than: gt,
     };
 
     // we only update flags and dst0
@@ -150,11 +150,15 @@ pub(crate) fn apply_add_sub<F: SmallField, CS: ConstraintSystem<F>>(
     diffs_accumulator
         .dst_0_values
         .push((can_write_into_memory, apply_any, dst0));
-    diffs_accumulator.flags.push((update_flags, candidate_flags));
+    diffs_accumulator
+        .flags
+        .push((update_flags, candidate_flags));
 
     let mut add_sub_relations = ArrayVec::new();
     add_sub_relations.push(relation);
-    diffs_accumulator.add_sub_relations.push((apply_any, add_sub_relations));
+    diffs_accumulator
+        .add_sub_relations
+        .push((apply_any, add_sub_relations));
 }
 
 pub fn allocate_addition_result_unchecked<F: SmallField, CS: ConstraintSystem<F>>(

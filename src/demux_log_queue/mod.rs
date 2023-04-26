@@ -32,8 +32,9 @@ use crate::{
 
 use crate::base_structures::log_query::LogQueryQueue;
 
-pub type StorageLogQueue<F, R> = LogQueryQueue::<F, 8, 12, 4, R>;
-pub type StorageLogQueueWitness<F> = CircuitQueueWitness<F, LogQuery<F>, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH>;
+pub type StorageLogQueue<F, R> = LogQueryQueue<F, 8, 12, 4, R>;
+pub type StorageLogQueueWitness<F> =
+    CircuitQueueWitness<F, LogQuery<F>, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH>;
 
 pub fn demultiplex_storage_logs_enty_point<
     F: SmallField,
@@ -44,8 +45,10 @@ pub fn demultiplex_storage_logs_enty_point<
     witness: LogDemuxerCircuitInstanceWitness<F>,
     round_function: &R,
     limit: usize,
-) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH] 
-where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
     let LogDemuxerCircuitInstanceWitness {
         closed_form_input,
         initial_queue_witness,
@@ -359,14 +362,15 @@ pub fn demultiplex_storage_logs_inner<
         let popped = storage_log_queue.pop_front(cs, execute);
 
         let [aux_byte_for_storage, aux_byte_for_event, aux_byte_for_l1_message, aux_byte_for_precompile_call] =
-            [STORAGE_AUX_BYTE, EVENT_AUX_BYTE, L1_MESSAGE_AUX_BYTE, PRECOMPILE_AUX_BYTE]
-                .map(|byte|
-                    Num::from_variable(
-                        cs.allocate_constant(
-                            F::from_u64_unchecked(byte as u64)
-                        )
-                    )
-                );
+            [
+                STORAGE_AUX_BYTE,
+                EVENT_AUX_BYTE,
+                L1_MESSAGE_AUX_BYTE,
+                PRECOMPILE_AUX_BYTE,
+            ]
+            .map(|byte| {
+                Num::from_variable(cs.allocate_constant(F::from_u64_unchecked(byte as u64)))
+            });
 
         let is_storage_aux_byte =
             Num::equals(cs, &aux_byte_for_storage, &popped.0.aux_byte.into_num());
@@ -486,7 +490,7 @@ pub fn push_with_optimize<
 pub fn check_if_bitmask_and_if_empty<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(
     cs: &mut CS,
     mask: [Boolean<F>; N],
-) -> Boolean<F>{
+) -> Boolean<F> {
     let lc: [_; N] = mask.map(|el| (el.get_variable(), F::ONE));
 
     let lc = Num::linear_combination(cs, &lc);

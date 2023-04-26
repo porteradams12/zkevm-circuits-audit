@@ -6,9 +6,6 @@ use crate::base_structures::{
 };
 
 use super::*;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
-use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::base_structures::decommit_query::DecommitQuery;
 use crate::base_structures::vm_state::GlobalContext;
 use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
@@ -17,6 +14,9 @@ use crate::main_vm::state_diffs::MAX_SPONGES_PER_CYCLE;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use arrayvec::ArrayVec;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 
 // call and ret are merged because their main part is manipulation over callstack,
 // and we will keep those functions here
@@ -423,9 +423,12 @@ pub(crate) fn apply_calls_and_ret<
     assert!(NEAR_CALL_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
     assert!(RET_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
 
-    diffs_accumulator
-        .sponge_candidates_to_run
-        .push((false, false, apply_any, common_relations_buffer));
+    diffs_accumulator.sponge_candidates_to_run.push((
+        false,
+        false,
+        apply_any,
+        common_relations_buffer,
+    ));
     diffs_accumulator.flags.push((apply_any, new_flags));
 
     // each opcode may have different register updates
