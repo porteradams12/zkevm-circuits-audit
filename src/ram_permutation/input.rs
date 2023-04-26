@@ -15,11 +15,11 @@ use boojum::gadgets::{
     num::Num,
     u32::UInt32,
     u256::UInt256,
-    poseidon::CircuitRoundFunction,
 };
 use derivative::*;
 use boojum::serde_utils::BigArraySerde;
 use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
+use crate::boojum::gadgets::traits::auxiliary::PrettyComparison;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Debug)]
@@ -46,7 +46,8 @@ pub const RAM_SORTING_KEY_LENGTH: usize = 3;
 pub const RAM_FULL_KEY_LENGTH: usize = 2;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct RamPermutationFSMInputOutput<F: SmallField> {
     pub lhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     pub rhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
@@ -92,10 +93,10 @@ pub type RamPermutationCycleInputOutputWitness<F> =
 pub struct RamPermutationCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: RamPermutationCycleInputOutputWitness<F>,
 
-    pub unsorted_queue_witness: FullStateCircuitQueueRawWitness<F, MemoryQuery<F>, 12, MEMORY_QUERY_PACKED_WIDTH>,
-    pub sorted_queue_witness: FullStateCircuitQueueRawWitness<F, MemoryQuery<F>, 12, MEMORY_QUERY_PACKED_WIDTH>,
+    pub unsorted_queue_witness: FullStateCircuitQueueRawWitness<F, MemoryQuery<F>, FULL_SPONGE_QUEUE_STATE_WIDTH, MEMORY_QUERY_PACKED_WIDTH>,
+    pub sorted_queue_witness: FullStateCircuitQueueRawWitness<F, MemoryQuery<F>, FULL_SPONGE_QUEUE_STATE_WIDTH, MEMORY_QUERY_PACKED_WIDTH>,
 }
 
-pub type MemoryQueriesQueue<F, R: CircuitRoundFunction<F, 8, 12, 4>> =
+pub type MemoryQueriesQueue<F, R> =
     FullStateCircuitQueue<F, MemoryQuery<F>, 8, 12, 4, MEMORY_QUERY_PACKED_WIDTH, R>;
 

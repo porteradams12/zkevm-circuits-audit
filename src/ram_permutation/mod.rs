@@ -1,6 +1,5 @@
 use super::*;
 
-use std::borrow;
 use std::sync::Arc;
 use boojum::field::SmallField;
 use boojum::cs::traits::cs::ConstraintSystem;
@@ -14,13 +13,14 @@ use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
 use boojum::gadgets::poseidon::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::base_structures::memory_query::MemoryQuery;
-use boojum::gadgets::queue::{QueueState, QueueTailState};
+use boojum::gadgets::queue::{QueueState};
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::base_structures::memory_query::MEMORY_QUERY_PACKED_WIDTH;
 use crate::fsm_input_output::ClosedFormInputCompactForm;
 use crate::fsm_input_output::commit_variable_length_encodable_item;
 use boojum::cs::gates::PublicInputGate;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use crate::storage_validity_by_grand_product::unpacked_long_comparison;
 
 use zkevm_opcode_defs::BOOTLOADER_HEAP_PAGE;
 
@@ -40,8 +40,6 @@ pub fn ram_permutation_entry_point<
 where
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
-    // Add tables for the RAM permutation
-
     let RamPermutationCircuitInstanceWitness {
         closed_form_input,
         unsorted_queue_witness,
@@ -54,7 +52,6 @@ where
     let start_flag = structured_input.start_flag;
     let observable_input = structured_input.observable_input.clone();
     let hidden_fsm_input = structured_input.hidden_fsm_input.clone();
-
 
     // passthrought must be trivial
     observable_input.unsorted_queue_initial_state.enforce_trivial_head(cs);
@@ -181,6 +178,7 @@ where
 
     structured_input.completion_flag = completed;
 
+    structured_input.hook_compare_witness(cs, &closed_form_input);
 
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
@@ -272,11 +270,13 @@ where
             let comparison_key = [sorted_item.index, sorted_item.memory_page];
 
             // ensure sorting
-            let (keys_are_equal, previous_key_is_greater) = le_long_comparison(
+            let (keys_are_equal, previous_key_is_greater) = unpacked_long_comparison(
                 cs,
+                previous_sorting_key,
                 &sorting_key,
-                previous_sorting_key
             );
+
+            // we can not have previous sorting key even to be >= than our current key
 
             // keys_are_in_ascending_order = !previous_key_is_greater and !keys_are_equal
             let keys_are_in_ascending_order = {
@@ -369,31 +369,8 @@ where
 }
 
 use boojum::gadgets::traits::allocatable::CSAllocatable;
-fn le_long_comparison<
-    F: SmallField, 
-    CS: ConstraintSystem<F>,
-    const N: usize
->(
-    cs: &mut CS,
-    a: &[UInt32<F>; N],
-    b: &[UInt32<F>; N]
-) -> (Boolean<F>, Boolean<F>) {
-    let boolean_default = Boolean::allocate_without_value(cs);
-    let mut equals = [boolean_default; N];
-    let mut second_is_greater = Boolean::allocated_constant(cs, false);
 
-    for i in 0..N {
-        let (diff, borrow, _) = a[i].overflowing_sub_with_borrow_in(cs, b[i], second_is_greater);
-        second_is_greater = borrow;
-        equals[i] = diff.is_zero(cs);
-    }
-
-    let equal = Boolean::multi_and(cs, &equals);
-
-    (equal, second_is_greater)
-}
-
-fn long_equals<
+pub(crate) fn long_equals<
     F: SmallField, 
     CS: ConstraintSystem<F>,
     const N: usize
