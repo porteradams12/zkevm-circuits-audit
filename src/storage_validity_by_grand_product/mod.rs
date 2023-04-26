@@ -339,7 +339,7 @@ where
             .tail, 
         structured_input
             .observable_input
-            .unsorted_log_queue_state
+            .intermediate_sorted_queue_state
             .tail,
         round_function
     );

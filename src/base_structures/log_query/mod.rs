@@ -4,7 +4,6 @@ use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::u160::{recompose_address_from_u32x5, UInt160};
 use boojum::gadgets::u256::{recompose_u256_as_u32x8, UInt256};
 use boojum::gadgets::u32::UInt32;
-
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::Variable;
@@ -16,9 +15,10 @@ use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitVarLengthEncod
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u8::UInt8;
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use cs_derive::*;
 
-#[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable)]
+#[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable, CSVarLengthEncodable)]
 #[derivative(Clone, Copy, Debug, Hash)]
 pub struct LogQuery<F: SmallField> {
     pub address: UInt160<F>,
@@ -95,6 +95,24 @@ impl<F: SmallField> LogQuery<F> {
             self.tx_number_in_block.get_variable(),
             self.timestamp.get_variable(),
         ]
+    }
+}
+impl<F: SmallField> CSPlaceholder<F> for LogQuery<F> {
+    fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        let boolean_false = Boolean::allocated_constant(cs, false);
+        Self {
+            address: UInt160::<F>::zero(cs),
+            key: UInt256::zero(cs),
+            read_value: UInt256::zero(cs),
+            written_value: UInt256::zero(cs),
+            rw_flag: boolean_false,
+            aux_byte: UInt8::zero(cs),
+            rollback: boolean_false,
+            is_service: boolean_false,
+            shard_id: UInt8::zero(cs),
+            tx_number_in_block: UInt32::zero(cs),
+            timestamp: UInt32::zero(cs),
+        }
     }
 }
 
