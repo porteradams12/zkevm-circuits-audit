@@ -13,13 +13,12 @@ use boojum::cs::Place;
 use boojum::cs::Variable;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
-use boojum::gadgets::traits::encodable::CircuitEncodable;
+use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitEncodableExt};
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use ethereum_types::U256;
 use boojum::config::*;
-use boojum::gadgets::traits::encodable::CircuitEncodableExt;
 
 use cs_derive::*;
 
@@ -215,6 +214,7 @@ impl<F: SmallField> CircuitEncodable<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQue
         [v0, v1, v2, v3, v4, v5, v6, v7]
     }
 }
+
 
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug, Hash)]
