@@ -15,6 +15,7 @@ pub mod storage_application;
 pub mod ecrecover;
 pub mod sha256_round_function;
 pub mod keccak256_round_function;
+pub mod sort_decommittment_requests;
 
 use boojum::pairing::ff;
 

@@ -14,6 +14,7 @@ use boojum::{field::SmallField, gadgets::u256::UInt256};
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use ethereum_types::U256;
+use boojum::gadgets::traits::encodable::CircuitEncodableExt;
 
 #[derive(Derivative, CSAllocatable, CSSelectable)]
 #[derivative(Clone, Debug)]
@@ -91,6 +92,7 @@ impl<F: SmallField> CircuitEncodable<F, DECOMMIT_QUERY_PACKED_WIDTH> for Decommi
 
         [v0, v1, v2, v3, v4, v5, v6, v7]
     }
+    
 }
 
 impl<F: SmallField> CSAllocatableExt<F> for DecommitQuery<F> {
@@ -144,3 +146,16 @@ impl<F: SmallField> CSAllocatableExt<F> for DecommitQuery<F> {
         todo!();
     }
 }
+
+impl<F: SmallField> CircuitEncodableExt<F, DECOMMIT_QUERY_PACKED_WIDTH> for DecommitQuery<F> {}
+
+use boojum::gadgets::queue::{
+    CircuitQueue,
+    CircuitQueueWitness,
+};
+
+pub type DecommitQueue<F, const AW: usize, const SW: usize, const CW: usize, const T: usize, R> =
+    CircuitQueue<F, DecommitQuery<F>, AW, SW, CW, T, DECOMMIT_QUERY_PACKED_WIDTH, R>;
+
+pub type DecommitQueueWitness<F, const SW: usize> =
+    CircuitQueueWitness<F, DecommitQuery<F>, SW, DECOMMIT_QUERY_PACKED_WIDTH>;
