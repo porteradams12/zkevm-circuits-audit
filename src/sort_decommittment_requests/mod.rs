@@ -4,6 +4,7 @@ use crate::fsm_input_output::ClosedFormInputCompactForm;
 
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
+use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
 use boojum::gadgets::{
     poseidon::CircuitRoundFunction,
     traits::{selectable::Selectable, allocatable::CSAllocatableExt},
@@ -65,21 +66,21 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     let initial_queue_from_passthrough_state = QueueState {
         head: structured_input
             .observable_input
-            .initial_log_queue_state
+            .initial_queue_state
             .head,
         tail: structured_input
             .observable_input
-            .initial_log_queue_state
+            .initial_queue_state
             .tail,
     };
     let initial_log_queue_state_from_fsm_state = QueueState {
         head: structured_input
             .hidden_fsm_input
-            .initial_log_queue_state
+            .initial_queue_state
             .head,
         tail: structured_input
             .hidden_fsm_input
-            .initial_log_queue_state
+            .initial_queue_state
             .tail,
     };
 
@@ -89,13 +90,13 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &initial_queue_from_passthrough_state,
         &initial_log_queue_state_from_fsm_state,
     );
-    let mut initial_queue = DecommitQueue::<F, 8, 12, 4, 4, R>::from_state(cs, state);
+    let mut initial_queue = DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, state);
 
     // passthrough must be trivial
     initial_queue_from_passthrough_state.enforce_trivial_head(cs);
     
     use std::sync::Arc;
-    let initial_queue_witness = CircuitQueueWitness::from_inner_witness(initial_queue_witness);
+    let initial_queue_witness = FullStateCircuitQueueWitness::from_inner_witness(initial_queue_witness);
     initial_queue.witness = Arc::new(initial_queue_witness);
 
     let intermediate_sorted_queue_from_passthrough_state = QueueState {
@@ -128,9 +129,9 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &intermediate_sorted_queue_from_passthrough_state,
         &intermediate_sorted_queue_from_fsm_input_state
     );
-    let mut intermediate_sorted_queue = DecommitQueue::<F, 8, 12, 4, 4, R>::from_state(cs, state);
+    let mut intermediate_sorted_queue = DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, state);
 
-    let sorted_queue_witness = CircuitQueueWitness::from_inner_witness(sorted_queue_witness);
+    let sorted_queue_witness = FullStateCircuitQueueWitness::from_inner_witness(sorted_queue_witness);
     intermediate_sorted_queue.witness = Arc::new(sorted_queue_witness);
 
     let empty_state = QueueState::empty(cs);
@@ -152,13 +153,13 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &empty_state,
         &final_sorted_queue_from_fsm_state,
     );
-    let mut final_sorted_queue = DecommitQueue::<F, 8, 12, 4, 4, R>::from_state(cs, state);
+    let mut final_sorted_queue = DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, state);
 
-    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
+    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, FULL_SPONGE_QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
         cs, 
         structured_input
             .observable_input
-            .initial_log_queue_state
+            .initial_queue_state
             .tail, 
         structured_input
             .observable_input
@@ -227,7 +228,7 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     structured_input.observable_output = CodeDecommittmentsDeduplicatorOutputData::placeholder(cs);
 
     structured_input.hidden_fsm_output = CodeDecommittmentsDeduplicatorFSMInputOutput::placeholder(cs);
-    structured_input.hidden_fsm_output.initial_log_queue_state = initial_queue.into_state();
+    structured_input.hidden_fsm_output.initial_queue_state = initial_queue.into_state();
     structured_input.hidden_fsm_output.sorted_queue_state = intermediate_sorted_queue.into_state();
     structured_input.hidden_fsm_output.final_queue_state = final_sorted_queue.into_state();
     structured_input.hidden_fsm_output.lhs_accumulator = new_lhs;
@@ -265,9 +266,9 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
-    original_queue: &mut DecommitQueue<F, 8, 12, 4, QUEUE_STATE_WIDTH, R>,
-    sorted_queue: &mut DecommitQueue<F, 8, 12, 4, QUEUE_STATE_WIDTH, R>,
-    result_queue: &mut DecommitQueue<F, 8, 12, 4, QUEUE_STATE_WIDTH, R>,
+    original_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
+    sorted_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
+    result_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
     mut lhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut rhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],

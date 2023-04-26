@@ -1,6 +1,7 @@
 mod input;
 use input::*;
 
+use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use ethereum_types::U256;
 use boojum::cs::Variable;
@@ -40,6 +41,8 @@ use crate::{
     fsm_input_output::{*, circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH} 
 };
 
+use crate::storage_application::ConditionalWitnessAllocator;
+
 pub fn unpack_code_into_memory_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
@@ -53,14 +56,19 @@ pub fn unpack_code_into_memory_entry_point<
 where 
     [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-    [(); UInt256::<F>::INTERNAL_STRUCT_LEN]:
+    [(); UInt256::<F>::INTERNAL_STRUCT_LEN]:,
+    [(); UInt256::<F>::INTERNAL_STRUCT_LEN + 1]:,
 {
-    let structured_input_witness = witness.closed_form_input;
-    let sorted_requests_queue_witness = witness.sorted_requests_queue_witness;
-    let code_words = Arc::new(RwLock::new(witness.code_words));
+    let CodeDecommitterCircuitInstanceWitness {
+        closed_form_input,
+        sorted_requests_queue_witness,
+        code_words,
+    } = witness;
+
+    let code_words: VecDeque<U256> = code_words.into_iter().flatten().collect();
 
     let mut structured_input =
-        CodeDecommitterCycleInputOutput::alloc_ignoring_outputs(cs, structured_input_witness.clone());
+        CodeDecommitterCycleInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
 
     let requests_queue_state = QueueState::conditionally_select(
         cs,
@@ -106,13 +114,17 @@ where
         &structured_input.hidden_fsm_input.internal_fsm,
     );
 
+    let code_words_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
+        witness_source: Arc::new(RwLock::new(code_words))
+    };
+
     let final_state = unpack_code_into_memory_inner(
         cs,
         &mut memory_queue,
         &mut requests_queue,
-        code_words,
-        round_function,
         initial_state,
+        code_words_allocator,
+        round_function,
         limit,
     );
 
@@ -137,6 +149,9 @@ where
         .decommittment_requests_queue_state = final_requets_state;
     structured_input.hidden_fsm_output.memory_queue_state = final_memory_state;
 
+    // self-check
+    structured_input.hook_compare_witness(cs, &closed_form_input);
+
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
 
@@ -160,23 +175,21 @@ pub fn unpack_code_into_memory_inner<
     cs: &mut CS,
     memory_queue: &mut MemoryQueryQueue<F, 8, 12, 4, R>,
     unpack_requests_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
-    mut input_witness: Arc<RwLock<Vec<Vec<U256>>>>,
-    round_function: &R,
     initial_state: CodeDecommittmentFSM<F>,
+    code_word_witness: ConditionalWitnessAllocator::<F, UInt256<F>>,
+    _round_function: &R,
     limit: usize,
 ) -> CodeDecommittmentFSM<F>
 where 
     [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-    [(); UInt256::<F>::INTERNAL_STRUCT_LEN]:
+    [(); UInt256::<F>::INTERNAL_STRUCT_LEN]:,
+    [(); UInt256::<F>::INTERNAL_STRUCT_LEN + 1]:,
 {
     assert!(limit <= u32::MAX as usize);
-    // assert!(cs
-    //     .get_table(crate::vm::VM_BITWISE_LOGICAL_OPS_TABLE_NAME)
-    //     .is_ok());
 
-    const POP_QUEUE_OR_WRITE_ID: u64 = 0;
-    const FINALIZE_SHA256: u64 = 1;
+    // const POP_QUEUE_OR_WRITE_ID: u64 = 0;
+    // const FINALIZE_SHA256: u64 = 1;
 
     let mut state = initial_state;
 
@@ -187,10 +200,12 @@ where
 
     let words_to_bits = UInt32::allocated_constant(cs, 32 * 8);
 
-    let shifts = F::SHIFTS;
+    let initial_state_uint32 = boojum::gadgets::sha256::ivs_as_uint32(cs);
 
-    let initial_state_uint32 = boojum::gadgets::sha256::INITIAL_STATE
-        .map(|x| UInt32::allocated_constant(cs, x));
+    let boolean_false = Boolean::allocated_constant(cs, false);
+    let boolean_true = Boolean::allocated_constant(cs, true);
+
+    let zero_u32 = UInt32::zero(cs);
 
     use zkevm_opcode_defs::VersionedHashDef;
     let versioned_hash_top_16_bits =
@@ -248,7 +263,6 @@ where
         let mut cutted_hash = hash;
         cutted_hash.inner[7] = uint32_zero;
 
-
         state.num_rounds_left = UInt16::conditionally_select(
             cs,
             state.state_get_from_queue,
@@ -301,7 +315,7 @@ where
         // we decommit if we either decommit or just got a new request
         let t = state.state_decommit.or(cs, state.state_get_from_queue);
         state.state_decommit = t;
-        state.state_get_from_queue = Boolean::allocated_constant(cs, false);
+        state.state_get_from_queue = boolean_false;
 
         // even though it's not that useful, we will do it in a checked way for ease of witness
         let may_be_num_rounds_left = unsafe {
@@ -320,29 +334,21 @@ where
         let process_second_word = not_last_round.and(cs, state.state_decommit);
 
         // we either pop from the queue, or absorb-decommit, or finalize hash
-        let (mem_item_0, mem_item_0_chunks) = get_memory_item_and_u8_chunks(
-            cs,
-            state.state_decommit,
-            &input_witness
-        );
+        let code_word_0 = code_word_witness.conditionally_allocate(cs, state.state_decommit);
+        let code_word_0_be_bytes = code_word_0.to_be_bytes(cs);
 
-        let (mem_item_1, mem_item_1_chunks) = get_memory_item_and_u8_chunks(
-            cs,
-            process_second_word,
-            &input_witness
-        );
+        let code_word_1 = code_word_witness.conditionally_allocate(cs, state.state_decommit);
+        let code_word_1_be_bytes = code_word_1.to_be_bytes(cs);
 
         // perform two writes. It's never a "pointer" type
         let mem_query_0 = MemoryQuery {
             timestamp: state.timestamp,
             memory_page: state.current_page,
             index: state.current_index,
-            rw_flag: Boolean::allocated_constant(cs, true),
-            value: mem_item_0,
-            is_ptr: Boolean::allocated_constant(cs, false),
+            rw_flag: boolean_true,
+            value: code_word_0,
+            is_ptr: boolean_false,
         };
-
-        // let raw_mem_query_0 = mem_query_0.into_raw_query(cs)?;
 
         let state_index_incremented = unsafe {
             state
@@ -361,12 +367,10 @@ where
             timestamp: state.timestamp,
             memory_page: state.current_page,
             index: state.current_index,
-            rw_flag: Boolean::allocated_constant(cs, true),
-            value: mem_item_1,
-            is_ptr: Boolean::allocated_constant(cs, false),
+            rw_flag: boolean_true,
+            value: code_word_1,
+            is_ptr: boolean_false,
         };
-
-        // let raw_mem_query_1 = mem_query_1.into_raw_query(cs)?;
 
         // even if we do not write in practice then we will never use next value too
 
@@ -386,28 +390,15 @@ where
         memory_queue.push(cs, mem_query_0, state.state_decommit);
         memory_queue.push(cs, mem_query_1, process_second_word);
 
-        let mut sha256_input = [UInt32::allocate_without_value(cs); 16];
-        // mind endianess! out bytes are LE here, but memory is BE
-        for (i, chunk) in mem_item_0_chunks
-            .chunks(4)
-            .rev()
-            .chain(mem_item_1_chunks.chunks(4).rev())
-            .enumerate()
-        {
-            sha256_input[i] = UInt32::from_le_bytes(
-                cs, 
-                [
-                    chunk[0],
-                    chunk[1],
-                    chunk[2],
-                    chunk[3],
-                ]
-            );
+        // mind endianess!
+        let mut sha256_input = [zero_u32; 16];
+        for (dst, src) in sha256_input.iter_mut().zip(code_word_0_be_bytes.array_chunks::<4>().chain(code_word_1_be_bytes.array_chunks::<4>())) {
+            *dst = UInt32::from_be_bytes(cs, *src);
         }
 
         // then conditionally form the second half of the block
 
-        let mut sha256_padding = [UInt32::allocated_constant(cs, 0); 8];
+        let mut sha256_padding = [zero_u32; 8];
 
         // padding of single byte of 1<<7 and some zeroes after
         sha256_padding[0] = UInt32::allocated_constant(cs, 1 << 31);
@@ -494,69 +485,4 @@ fn decompose_uint32_to_uint16s<F: SmallField, CS: ConstraintSystem<F>>(
         UInt16::from_le_bytes(cs, [byte_0, byte_1]),
         UInt16::from_le_bytes(cs, [byte_2, byte_3])
     ]
-}
-
-fn get_memory_item_and_u8_chunks<F: SmallField, CS: ConstraintSystem<F>> (
-    cs: &mut CS,
-    flag: Boolean<F>,
-    input_witness: &Arc<RwLock<Vec<Vec<U256>>>>,
-) -> (UInt256<F>, [UInt8<F>; 32]) 
-where 
-    [(); UInt256::<F>::INTERNAL_STRUCT_LEN]:
-{
-    use boojum::config::*;
-    use boojum::cs::Place;
-    use boojum::cs::traits::cs::DstBuffer;
-    use boojum::gadgets::traits::castable::WitnessCastable;
-
-    let number = UInt256::create_without_value(cs);
-
-    if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
-        let internal_structure = number.flatten_as_variables();
-        let dependencies: [Place; 1] = [flag.get_variable().into()];
-
-        let witness_storage = Arc::clone(input_witness);
-
-        cs.set_values_with_dependencies_vararg(
-            &dependencies,
-            &Place::from_variables(internal_structure),
-            move |ins: &[F], outs: &mut DstBuffer<'_, '_, F>| {
-                let should_pop: bool = WitnessCastable::cast_from_source([ins[0]]);
-                let witness_element = if should_pop {
-                    get_next_element(witness_storage)
-                } else {
-                    UInt256::<F>::placeholder_witness()
-                };
-
-                UInt256::set_internal_variables_values(witness_element, outs);
-            },
-        );
-    }
-
-    let bytes = number.to_le_bytes(cs);
-
-    (number, bytes)
-}
-
-fn get_next_element(
-    elements: Arc<RwLock<Vec<Vec<U256>>>>,
-) -> U256 {
-    if let Ok(mut elements) = elements.write() {
-        if let Some(last_high_level_vec) = elements.first_mut() {
-            if let Some(last_inner_item) = last_high_level_vec.first().cloned() {
-                let _ = last_high_level_vec.drain(0..1);
-                if last_high_level_vec.is_empty() {
-                    let _ = elements.drain(0..1);
-                }
-
-                last_inner_item
-            } else {
-                unreachable!("we can not have non-empty outer but empty inner");
-            }
-        } else {
-            U256::zero()
-        }
-    } else {
-        unreachable!()
-    }
 }

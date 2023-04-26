@@ -496,22 +496,6 @@ pub fn repack_and_prove_events_rollbacks_inner<
     )
 }
 
-pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
-    cs: &mut CS,
-    key_tuple: (UInt32<F>, Boolean<F>),
-) -> Num<F>{
-
-
-    let (timestamp, rollback) = key_tuple;
-    // 32 + 1 = 33 in total
-    let value_0 = Num::linear_combination(
-        cs,
-        &[(rollback.get_variable(), F::ONE),
-        (timestamp.get_variable(), F::from_u64_unchecked(1u64 << 32)),
-        ]
-    );
-    value_0
-}
 /// Check that a == b and a > b by performing a long subtraction b - a with borrow.
 /// Both a and b are considered as least significant word first
 #[track_caller]

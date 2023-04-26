@@ -13,7 +13,6 @@ use boojum::{field::SmallField, gadgets::u256::UInt256};
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use ethereum_types::U256;
-use boojum::gadgets::traits::encodable::CircuitEncodableExt;
 use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::traits::allocatable::CSPlaceholder;
@@ -164,13 +163,14 @@ impl<F: SmallField> CSPlaceholder<F> for DecommitQuery<F> {
     }
 }
 
-use boojum::gadgets::queue::{
-    CircuitQueue,
-    CircuitQueueWitness,
+
+use boojum::gadgets::queue::full_state_queue::{
+    FullStateCircuitQueue,
+    FullStateCircuitQueueWitness,
 };
 
-pub type DecommitQueue<F, const AW: usize, const SW: usize, const CW: usize, const T: usize, R> =
-    CircuitQueue<F, DecommitQuery<F>, AW, SW, CW, T, DECOMMIT_QUERY_PACKED_WIDTH, R>;
+pub type DecommitQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
+    FullStateCircuitQueue<F, DecommitQuery<F>, AW, SW, CW, DECOMMIT_QUERY_PACKED_WIDTH, R>;
 
 pub type DecommitQueueWitness<F, const SW: usize> =
-    CircuitQueueWitness<F, DecommitQuery<F>, SW, DECOMMIT_QUERY_PACKED_WIDTH>;
+    FullStateCircuitQueueWitness<F, DecommitQuery<F>, SW, DECOMMIT_QUERY_PACKED_WIDTH>;

@@ -19,13 +19,13 @@ use boojum::gadgets::{
 };
 use boojum::serde_utils::BigArraySerde;
 use derivative::*;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 pub struct CodeDecommittmentFSM<F: SmallField> {
     pub sha256_inner_state: [UInt32<F>; 8], // 8 uint32 words of internal sha256 state
-    // CHECK!!! \/
-    pub hash_to_compare_against: UInt256<F>, // [Num<F>; 2], // endianess has been taken care of
+    pub hash_to_compare_against: UInt256<F>, 
     pub current_index: UInt32<F>,
     pub current_page: UInt32<F>,
     pub timestamp: UInt32<F>,
@@ -61,6 +61,7 @@ impl<F: SmallField> CSPlaceholder<F> for CodeDecommittmentFSM<F> {
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct CodeDecommitterFSMInputOutput<F: SmallField> {
     pub internal_fsm: CodeDecommittmentFSM<F>,
     pub decommittment_requests_queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
@@ -95,6 +96,7 @@ impl<F: SmallField> CSPlaceholder<F> for CodeDecommitterInputData<F> {
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct CodeDecommitterOutputData<F: SmallField> {
     pub memory_queue_final_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
 }

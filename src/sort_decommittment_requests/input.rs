@@ -14,8 +14,9 @@ use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use derivative::*;
 use boojum::serde_utils::BigArraySerde;
-use crate::base_structures::decommit_query::{DecommitQueryWitness, DECOMMIT_QUERY_PACKED_WIDTH};
+use crate::base_structures::decommit_query::{DECOMMIT_QUERY_PACKED_WIDTH};
 use crate::sort_decommittment_requests::*;
+use crate::sort_decommittment_requests::full_state_queue::FullStateCircuitQueueRawWitness;
 
 pub const PACKED_KEY_LENGTH: usize = 8 + 1;
 
@@ -23,9 +24,9 @@ pub const PACKED_KEY_LENGTH: usize = 8 + 1;
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
 pub struct CodeDecommittmentsDeduplicatorFSMInputOutput<F: SmallField> {
-    pub initial_log_queue_state:  QueueState<F, QUEUE_STATE_WIDTH>,
-    pub sorted_queue_state:  QueueState<F, QUEUE_STATE_WIDTH>,
-    pub final_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
+    pub initial_queue_state:  QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+    pub sorted_queue_state:  QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+    pub final_queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
 
     pub lhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     pub rhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
@@ -41,9 +42,9 @@ impl<F: SmallField> CSPlaceholder<F> for CodeDecommittmentsDeduplicatorFSMInputO
         let zero_u32 = UInt32::zero(cs);
 
         Self {
-            initial_log_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
-            sorted_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
-            final_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
+            initial_queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
+            sorted_queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
+            final_queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
 
             lhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
             rhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
@@ -59,15 +60,15 @@ impl<F: SmallField> CSPlaceholder<F> for CodeDecommittmentsDeduplicatorFSMInputO
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
 pub struct CodeDecommittmentsDeduplicatorInputData<F: SmallField> {
-    pub initial_log_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
-    pub sorted_queue_initial_state: QueueState<F, QUEUE_STATE_WIDTH>,
+    pub initial_queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+    pub sorted_queue_initial_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
 }
 
 impl<F: SmallField> CSPlaceholder<F> for CodeDecommittmentsDeduplicatorInputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            initial_log_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
-            sorted_queue_initial_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
+            initial_queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
+            sorted_queue_initial_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
         }
     }
 }
@@ -76,13 +77,13 @@ impl<F: SmallField> CSPlaceholder<F> for CodeDecommittmentsDeduplicatorInputData
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
 pub struct CodeDecommittmentsDeduplicatorOutputData<F: SmallField> {
-    pub final_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
+    pub final_queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
 }
 
 impl<F: SmallField> CSPlaceholder<F> for CodeDecommittmentsDeduplicatorOutputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            final_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
+            final_queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
         }
     }
 }
@@ -106,6 +107,6 @@ pub type CodeDecommittmentsDeduplicatorInputOutputWitness<F> =
 #[serde(bound = "")]
 pub struct CodeDecommittmentsDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: CodeDecommittmentsDeduplicatorInputOutputWitness<F>,
-    pub initial_queue_witness: CircuitQueueRawWitness<F, DecommitQuery<F>, 4, DECOMMIT_QUERY_PACKED_WIDTH>,
-    pub sorted_queue_witness:  CircuitQueueRawWitness<F, DecommitQuery<F>, 4, DECOMMIT_QUERY_PACKED_WIDTH>,
+    pub initial_queue_witness: FullStateCircuitQueueRawWitness<F, DecommitQuery<F>, FULL_SPONGE_QUEUE_STATE_WIDTH, DECOMMIT_QUERY_PACKED_WIDTH>,
+    pub sorted_queue_witness:  FullStateCircuitQueueRawWitness<F, DecommitQuery<F>, FULL_SPONGE_QUEUE_STATE_WIDTH, DECOMMIT_QUERY_PACKED_WIDTH>,
 }
