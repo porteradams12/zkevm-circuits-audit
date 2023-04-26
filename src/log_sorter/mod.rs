@@ -16,6 +16,7 @@ use crate::fsm_input_output::{ClosedFormInputCompactForm, commit_variable_length
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::base_structures::log_query::LogQuery;
 use crate::base_structures::vm_state::*;
+use crate::storage_validity_by_grand_product::unpacked_long_comparison;
 
 use crate::demux_log_queue::StorageLogQueue;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -160,7 +161,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     );
 
     // get challenges for permutation argument
-    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_CHUNKS> (
+    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
         cs, 
         structured_input
             .observable_input
@@ -177,24 +178,24 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     let initial_lhs = Num::parallel_select(
         cs,
         structured_input.start_flag,
-        &[one; DEFAULT_NUM_CHUNKS],
+        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
         &structured_input.hidden_fsm_input.lhs_accumulator,
     );
 
     let initial_rhs = Num::parallel_select(
         cs,
         structured_input.start_flag,
-        &[one; DEFAULT_NUM_CHUNKS],
+        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
         &structured_input.hidden_fsm_input.rhs_accumulator,
     );
 
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
-    let zero = Num::zero(cs);
-    let previous_packed_key = Num::conditionally_select(
+    let zero_u32 = UInt32::zero(cs);
+    let previous_key = UInt32::conditionally_select(
         cs,
         structured_input.start_flag,
-        &zero,
-        &structured_input.hidden_fsm_input.previous_packed_key
+        &zero_u32,
+        &structured_input.hidden_fsm_input.previous_key
     );
 
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
@@ -210,7 +211,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     let (
         new_lhs,
         new_rhs,
-        previous_packed_key,
+        previous_key,
         previous_item,
     ) = repack_and_prove_events_rollbacks_inner(
         cs,
@@ -221,7 +222,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &mut final_sorted_queue,
         structured_input.start_flag,
         challenges,
-        previous_packed_key,
+        previous_key,
         previous_item,
         limit,
     );
@@ -236,7 +237,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         Num::conditionally_enforce_equal(cs, completed, lhs, rhs);
     }
     // form the final state
-    structured_input.hidden_fsm_output.previous_packed_key = previous_packed_key;
+    structured_input.hidden_fsm_output.previous_key = previous_key;
     structured_input.hidden_fsm_output.previous_item = previous_item;
     structured_input.hidden_fsm_output.lhs_accumulator = new_lhs;
     structured_input.hidden_fsm_output.rhs_accumulator = new_rhs;
@@ -283,20 +284,20 @@ pub fn repack_and_prove_events_rollbacks_inner<
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
-    mut lhs: [Num<F>; DEFAULT_NUM_CHUNKS],
-    mut rhs: [Num<F>; DEFAULT_NUM_CHUNKS],
+    mut lhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    mut rhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     unsorted_queue: &mut StorageLogQueue<F, R>,
     intermediate_sorted_queue: &mut StorageLogQueue<F, R>,
     result_queue: &mut StorageLogQueue<F, R>,
     is_start: Boolean<F>,
-    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_CHUNKS],
-    mut previous_packed_key: Num<F>,
+    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    mut previous_key: UInt32<F>,
     mut previous_item: LogQuery<F>,
     limit: usize,
 ) -> (
-    [Num<F>; DEFAULT_NUM_CHUNKS], 
-    [Num<F>; DEFAULT_NUM_CHUNKS],
-        Num<F>,
+        [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS], 
+        [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+        UInt32<F>,
         LogQuery<F>
     ) where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
     assert!(limit <= u32::MAX as usize);
@@ -314,15 +315,13 @@ pub fn repack_and_prove_events_rollbacks_inner<
 
     // reallocate and simultaneously collapse rollbacks
 
-    const PACKED_WIDTHS: [usize; 1] = [33];
-
     for _cycle in 0..limit {
         let original_is_empty = unsorted_queue.is_empty(cs);
         let sorted_is_empty = intermediate_sorted_queue.is_empty(cs);
         Boolean::enforce_equal(cs, &original_is_empty, &sorted_is_empty);
 
         let should_pop = original_is_empty.negated(cs);
-        let is_trivial = should_pop.negated(cs);
+        let is_trivial = original_is_empty;
 
         let (_, original_encoding) = unsorted_queue.pop_front(
             cs,
@@ -367,22 +366,28 @@ pub fn repack_and_prove_events_rollbacks_inner<
             sorted_item.rw_flag.conditionally_enforce_false(cs,  is_trivial);
 
             // check if keys are equal and check a value
-            let packed_key = pack_key(cs, (sorted_item.timestamp, sorted_item.rollback));
+
+            // We compare timestamps, and then resolve logic over rollbacks, so the only way when
+            // keys are equal can be when we do rollback
+            let sorting_key = sorted_item.timestamp;
 
             // ensure sorting for uniqueness timestamp and rollback flag
             // We know that timestamps are unique accross logs, and are also the same between write and rollback
-            let (_keys_are_equal, new_key_is_greater) =
-                prepacked_long_comparison(cs, &[packed_key], &[previous_packed_key], &PACKED_WIDTHS);
+            let (keys_are_equal, new_key_is_greater) =
+                unpacked_long_comparison(cs, &[sorting_key], &[previous_key]);
 
             // keys are always ordered no matter what, and are never equal unless it's padding
-            new_key_is_greater.conditionally_enforce_false(cs, is_trivial);
+            new_key_is_greater.conditionally_enforce_false(cs, should_pop);
 
             // there are only two cases when keys are equal:
             // - it's a padding element
             // - it's a rollback
 
             // it's enough to compare timestamps as VM circuit guarantees uniqueness of the if it's not a padding
-            let same_log = UInt32::equals(cs, &sorted_item.timestamp, &previous_item.timestamp);
+            let previous_is_not_rollback = previous_item.rollback.negated(cs);
+            let enforce_sequential_rollback = Boolean::multi_and(cs, &[previous_is_not_rollback, sorted_item.rollback, should_pop]);
+            keys_are_equal.conditionally_enforce_true(cs, enforce_sequential_rollback);
+            let same_log = keys_are_equal;
 
             let mut tmp = vec![];
             for (a, b) in sorted_item.written_value.inner.iter().zip(previous_item.written_value.inner.iter()){
@@ -447,7 +452,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
 
             previous_is_trivial = is_trivial;
             previous_item = sorted_item;
-            previous_packed_key = packed_key;
+            previous_key = sorting_key;
         }
     }
     
@@ -486,7 +491,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
     (
         lhs,
         rhs,
-        previous_packed_key,
+        previous_key,
         previous_item
     )
 }

@@ -14,7 +14,7 @@ use boojum::gadgets::{
 };
 use boojum::gadgets::traits::encodable::CircuitEncodable;
 use boojum::gadgets::traits::allocatable::CSPlaceholder;
-use crate::log_sorter::prepacked_long_comparison;
+use crate::storage_validity_by_grand_product::unpacked_long_comparison;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::base_structures::vm_state::*;
 use crate::base_structures::decommit_query::DecommitQueue;
@@ -34,7 +34,7 @@ pub mod input;
 // Those logs do not affect a global state and may either be rolled back in full or not.
 // We identify equality of logs using "timestamp" field that is a monotonic unique counter
 // across the block
-const NUM_PERMUTATION_ARG_CHALLENGES: usize = STORAGE_LOG_RECORD_ENCODING_LEN + 1;
+pub const NUM_PERMUTATION_ARG_CHALLENGES: usize = STORAGE_LOG_RECORD_ENCODING_LEN + 1;
 
 pub fn sort_and_deduplicate_code_decommittments_entry_point<
     F: SmallField,
@@ -55,7 +55,6 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         closed_form_input,
         initial_queue_witness,
         sorted_queue_witness,
-        previous_record_witness
     } = witness;
 
     let mut structured_input = CodeDecommittmentsDeduplicatorInputOutput::alloc_ignoring_outputs(
@@ -84,7 +83,6 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
             .tail,
     };
 
-
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
@@ -93,14 +91,12 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     );
     let mut initial_queue = DecommitQueue::<F, 8, 12, 4, 4, R>::from_state(cs, state);
 
-
     // passthrough must be trivial
     initial_queue_from_passthrough_state.enforce_trivial_head(cs);
     
     use std::sync::Arc;
     let initial_queue_witness = CircuitQueueWitness::from_inner_witness(initial_queue_witness);
     initial_queue.witness = Arc::new(initial_queue_witness);
-
 
     let intermediate_sorted_queue_from_passthrough_state = QueueState {
         head: structured_input
@@ -137,7 +133,6 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     let sorted_queue_witness = CircuitQueueWitness::from_inner_witness(sorted_queue_witness);
     intermediate_sorted_queue.witness = Arc::new(sorted_queue_witness);
 
-
     let empty_state = QueueState::empty(cs);
 
     let final_sorted_queue_from_fsm_state = QueueState {
@@ -159,7 +154,7 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     );
     let mut final_sorted_queue = DecommitQueue::<F, 8, 12, 4, 4, R>::from_state(cs, state);
 
-    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_CHUNKS> (
+    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
         cs, 
         structured_input
             .observable_input
@@ -176,25 +171,38 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     let initial_lhs = Num::parallel_select(
         cs,
         structured_input.start_flag,
-        &[one; DEFAULT_NUM_CHUNKS],
+        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
         &structured_input.hidden_fsm_input.lhs_accumulator,
     );
 
     let initial_rhs = Num::parallel_select(
         cs,
         structured_input.start_flag,
-        &[one; DEFAULT_NUM_CHUNKS],
+        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
         &structured_input.hidden_fsm_input.rhs_accumulator,
     );
 
-    let mut previous_packed_key = structured_input.hidden_fsm_input.previous_packed_key;
-    let mut previous_item_is_trivial = structured_input.hidden_fsm_input.previous_item_is_trivial;
-    let mut first_encountered_timestamp = structured_input.hidden_fsm_input.first_encountered_timestamp;
-    let previous_record_encoding = structured_input.hidden_fsm_input.previous_record_encoding;
-    let mut previous_record = allocate_and_prove_encoding(
-        cs,
-        &previous_record_encoding,
-        previous_record_witness,
+    let trivial_record = DecommitQuery::placeholder(cs);
+    let mut previous_record = DecommitQuery::conditionally_select(
+        cs, 
+        structured_input.start_flag, 
+        &trivial_record, 
+        &structured_input.hidden_fsm_input.previous_record,
+    );
+
+    let zero_u32 = UInt32::zero(cs);
+    let mut previous_packed_key = <[UInt32<F>; PACKED_KEY_LENGTH]>::conditionally_select(
+        cs, 
+        structured_input.start_flag, 
+        &[zero_u32; PACKED_KEY_LENGTH], 
+        &structured_input.hidden_fsm_input.previous_packed_key,
+    );
+
+    let mut first_encountered_timestamp = UInt32::conditionally_select(
+        cs, 
+        structured_input.start_flag, 
+        &zero_u32, 
+        &structured_input.hidden_fsm_input.first_encountered_timestamp,
     );
 
     let (completed, new_lhs,new_rhs) = sort_and_deduplicate_code_decommittments_inner(
@@ -206,7 +214,6 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         initial_rhs,
         challenges,
         &mut previous_packed_key,
-        &mut previous_item_is_trivial,
         &mut first_encountered_timestamp,
         &mut previous_record,
         structured_input.start_flag,
@@ -216,8 +223,6 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     for (lhs, rhs) in new_lhs.iter().zip(new_rhs.iter()) {
         Num::conditionally_enforce_equal(cs, completed, lhs, rhs);
     }
-    let previous_record_var = previous_record.encode(cs);
-    let previous_record = previous_record_var.map(|el| Num::from_variable(el));
     // form the final state
     structured_input.observable_output = CodeDecommittmentsDeduplicatorOutputData::placeholder(cs);
 
@@ -228,9 +233,8 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     structured_input.hidden_fsm_output.lhs_accumulator = new_lhs;
     structured_input.hidden_fsm_output.rhs_accumulator = new_rhs;
     structured_input.hidden_fsm_output.previous_packed_key = previous_packed_key;
-    structured_input.hidden_fsm_output.previous_item_is_trivial = previous_item_is_trivial;
+    structured_input.hidden_fsm_output.previous_record = previous_record;
     structured_input.hidden_fsm_output.first_encountered_timestamp = first_encountered_timestamp;
-    structured_input.hidden_fsm_output.previous_record_encoding = previous_record;
 
     structured_input.observable_output.final_queue_state = QueueState::conditionally_select(
         cs,
@@ -264,25 +268,33 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     original_queue: &mut DecommitQueue<F, 8, 12, 4, QUEUE_STATE_WIDTH, R>,
     sorted_queue: &mut DecommitQueue<F, 8, 12, 4, QUEUE_STATE_WIDTH, R>,
     result_queue: &mut DecommitQueue<F, 8, 12, 4, QUEUE_STATE_WIDTH, R>,
-    mut lhs: [Num<F>; DEFAULT_NUM_CHUNKS],
-    mut rhs: [Num<F>; DEFAULT_NUM_CHUNKS],
-    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_CHUNKS],
-    previous_packed_key: &mut [Num<F>; 5],
-    previous_item_is_trivial: &mut Boolean<F>,
+    mut lhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    mut rhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    previous_packed_key: &mut [UInt32<F>; PACKED_KEY_LENGTH],
     first_encountered_timestamp: &mut UInt32<F>,
     previous_record: &mut DecommitQuery<F>,
     start_flag: Boolean<F>,
     limit: usize,
-) -> (Boolean<F>, [Num<F>; DEFAULT_NUM_CHUNKS], [Num<F>; DEFAULT_NUM_CHUNKS]) where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
+) -> (
+    Boolean<F>, 
+    [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS], 
+    [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]
+) 
+    where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
     assert!(limit <= u32::MAX as usize);
     let unsorted_queue_lenght = Num::from_variable(original_queue.length.get_variable());
     let intermediate_sorted_queue_lenght = Num::from_variable(sorted_queue.length.get_variable());
 
     Num::enforce_equal(cs,  &unsorted_queue_lenght, &intermediate_sorted_queue_lenght);
 
-    // reallocate in a proper order
-    let mut sorted_items = vec![];
-    let mut triviality_flags = vec![];
+    let no_work = original_queue.is_empty(cs);
+    // we can not have circuits that just do nothing
+    no_work.conditionally_enforce_false(cs, start_flag);
+    let mut previous_item_is_trivial = no_work.or(cs, start_flag);
+
+    // Simultaneously pop, prove sorting and resolve logic
 
     for _cycle in 0..limit {
         let original_is_empty = original_queue.is_empty(cs);
@@ -290,6 +302,7 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
         Boolean::enforce_equal(cs, &original_is_empty, &sorted_is_empty);
 
         let should_pop = original_is_empty.negated(cs);
+        let is_trivial = original_is_empty;
 
         let (_, original_encoding) =
             original_queue.pop_front(cs, should_pop);
@@ -297,8 +310,6 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
             sorted_queue.pop_front(cs, should_pop);
 
         // we make encoding that is the same as defined for timestamped item
-        triviality_flags.push(sorted_is_empty);
-        sorted_items.push(sorted_item);
         assert_eq!(original_encoding.len(), sorted_encoding.len());
         assert_eq!(lhs.len(), rhs.len());
 
@@ -328,6 +339,57 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
             *rhs = Num::conditionally_select(cs, should_pop, &new_rhs, &rhs);
         }
 
+        // check if keys are equal and check a value
+        let packed_key = concatenate_key(cs, (sorted_item.timestamp, sorted_item.code_hash));
+
+        // ensure sorting for uniqueness timestamp and rollback flag
+        // We know that timestamps are unique accross logs, and are also the same between write and rollback
+        let (_keys_are_equal, new_key_is_greater) =
+            unpacked_long_comparison(cs, &packed_key, &*previous_packed_key);
+        // always ascedning
+        new_key_is_greater.conditionally_enforce_true(cs, should_pop);
+        
+        let same_hash = UInt256::equals(
+            cs,
+            &previous_record.code_hash,
+            &sorted_item.code_hash,
+        );
+
+        // if we get new hash then it my have a "first" marker
+        let different_hash = same_hash.negated(cs);
+        let enforce_must_be_first = Boolean::multi_and(cs, &[different_hash, should_pop]);
+        sorted_item.is_first.conditionally_enforce_true(cs, enforce_must_be_first);
+
+        // otherwise it should have the same memory page
+        let previous_is_non_trivial = previous_item_is_trivial.negated(cs);
+        let enforce_same_memory_page = Boolean::multi_and(cs, &[same_hash, previous_is_non_trivial]);
+        
+        Num::conditionally_enforce_equal(
+            cs,
+            enforce_same_memory_page,
+            &sorted_item.page.into_num(),
+            &previous_record.page.into_num(),
+        );
+    
+
+        // decide if we should add the PREVIOUS into the queue
+        let add_to_the_queue = Boolean::multi_and(cs, &[previous_is_non_trivial, different_hash]);
+
+        let mut record_to_add = *previous_record;
+        record_to_add.is_first = Boolean::allocated_constant(cs, true); // we use convension to be easier consistent with out of circuit part
+        record_to_add.timestamp = *first_encountered_timestamp;
+        result_queue.push(cs, record_to_add, add_to_the_queue);
+
+        previous_item_is_trivial = is_trivial;
+        // may be update the timestamp
+        *first_encountered_timestamp = UInt32::conditionally_select(
+            cs,
+            same_hash,
+            &first_encountered_timestamp,
+            &sorted_item.timestamp,
+        );
+        *previous_record = sorted_item;
+        *previous_packed_key = packed_key;
     }
 
     // if this circuit is the last one the queues must be empty and grand products must be equal
@@ -335,103 +397,12 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     let sorted_queue_is_empty = sorted_queue.is_empty(cs);
     Boolean::enforce_equal(cs, &completed, &sorted_queue_is_empty);
 
-    let it = sorted_items.into_iter().zip(triviality_flags.into_iter());
-
-    // we uniquely identify by the timestamp value, and sort such that if there
-    // exists a log with the same timestamp and with a rollback flag
-    // then it immediately follows
-
-    // now resolve a logic
-
-    let mut first_iter = true;
-    for (record, is_trivial) in it {
-        let is_trivial_negate = is_trivial.negated(cs);
-        if first_iter {
-            // first one must always be unique
-            let boolean_true = Boolean::allocated_constant(cs, true);
-            is_trivial_negate.conditionally_enforce_true(cs, boolean_true);
-            record.is_first.conditionally_enforce_true(cs, start_flag);
-        }
-
-        // check if keys are equal and check a value
-        let packed_key = pack_key(cs, (record.clone().code_hash, record.timestamp));
-
-        // ensure sorting for uniqueness timestamp and rollback flag
-        // We know that timestamps are unique accross logs, and are also the same between write and rollback
-        let (_keys_are_equal, new_key_is_greater) =
-            prepacked_long_comparison(cs, &packed_key, previous_packed_key, &PACKED_WIDTHS);
-
-        let start_flag_negate =start_flag.negated(cs);
-        // keys are always ordered no matter what, and are never equal unless it's padding
-        let enforce_must_be_greater = if first_iter {
-            is_trivial_negate.and(cs, start_flag_negate)
-        } else {
-            is_trivial_negate
-        };
-        new_key_is_greater.conditionally_enforce_true(cs, enforce_must_be_greater);
-
-        let same_hash = UInt256::equals(
-            cs,
-            &previous_record.clone().code_hash,
-            &record.clone().code_hash,
-        );
-
-        // if we get new hash then it my have a "first" marker
-        let same_hash_negate = same_hash.negated(cs);
-        let enforce_must_be_first = if first_iter {
-            Boolean::multi_and(cs, &[same_hash_negate, is_trivial_negate, start_flag_negate])
-        } else {
-            Boolean::multi_and(cs, &[same_hash_negate, is_trivial_negate])
-        };
-        record.is_first.conditionally_enforce_true(cs, enforce_must_be_first);
-
-        // otherwise it should have the same memory page
-        let previous_item_is_trivial_negate = previous_item_is_trivial.negated(cs);
-        let enforce_same_memory_page = if first_iter {
-            Boolean::multi_and(cs, &[same_hash, previous_item_is_trivial_negate, start_flag_negate])
-        } else {
-            Boolean::multi_and(cs, &[same_hash, previous_item_is_trivial_negate])
-        };
-        Num::conditionally_enforce_equal(
-            cs,
-            enforce_same_memory_page,
-            &record.page.into_num(),
-            &previous_record.page.into_num(),
-        );
-    
-
-        // decide if we should add the PREVIOUS into the queue
-        let add_to_the_queue = if first_iter {
-            Boolean::multi_and(cs, &[previous_item_is_trivial_negate, same_hash_negate, start_flag_negate])
-        } else {
-            Boolean::multi_and(cs, &[previous_item_is_trivial_negate, same_hash_negate])
-        };
-
-        let mut record_to_add = previous_record.clone();
-        record_to_add.is_first = Boolean::allocated_constant(cs, true);// we use convension to be easier consistent with out of circuit part
-        record_to_add.timestamp = *first_encountered_timestamp;
-        result_queue.push(cs, record_to_add, add_to_the_queue);
-
-        *previous_item_is_trivial = is_trivial;
-        // may be update the timestamp
-        *first_encountered_timestamp = UInt32::conditionally_select(
-            cs,
-            same_hash,
-            &first_encountered_timestamp,
-            &record.timestamp,
-        );
-        *previous_record = record;
-        *previous_packed_key = packed_key;
-
-        first_iter = false;
-    }
-    
     // finalization step - push the last one if necessary
     {
-        let previous_item_is_trivial_negate = previous_item_is_trivial.negated(cs);
-        let add_to_the_queue = previous_item_is_trivial_negate.and(cs,completed);
+        let previous_is_non_trivial = previous_item_is_trivial.negated(cs);
+        let add_to_the_queue = Boolean::multi_and(cs, &[previous_is_non_trivial, completed]);
 
-        let mut record_to_add = previous_record.clone();
+        let mut record_to_add = *previous_record;
         record_to_add.is_first = Boolean::allocated_constant(cs, true); // we use convension to be easier consistent with out of circuit part
         record_to_add.timestamp = *first_encountered_timestamp;
 
@@ -441,56 +412,22 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     (completed, lhs, rhs)
 }
 
-const PACKED_WIDTHS: [usize; 2] = [96, 192];
+fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
+    _cs: &mut CS,
+    key_tuple: (UInt32<F>, UInt256<F>),
+) -> [UInt32<F>; PACKED_KEY_LENGTH] {
+    // LE packing so comparison is subtraction
+    let (timestamp, key) = key_tuple;
+    [
+        timestamp,
 
-fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
-    cs: &mut CS,
-    key_tuple: (UInt256<F>, UInt32<F>),
-) -> [Num<F>; 5] {
-
-    let (hash, timestamp) = key_tuple;
-    let v0 = Num::linear_combination(
-        cs,
-        &[
-            (timestamp.get_variable(), F::ONE),
-            (hash.inner[0].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-        ],
-    );
-
-    let v1 = Num::linear_combination(
-        cs,
-        &[
-            (hash.inner[1].get_variable(), F::ONE),
-            (hash.inner[2].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-        ],
-    );
-    let v2 = Num::linear_combination(
-        cs,
-        &[
-            (hash.inner[3].get_variable(), F::ONE),
-            (hash.inner[4].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-        ],
-    );
-    let v3 = Num::linear_combination(
-        cs,
-        &[
-            (hash.inner[5].get_variable(), F::ONE),
-            (hash.inner[6].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-        ],
-    );
-    let v4 = Num::linear_combination(
-        cs,
-        &[
-            (hash.inner[7].get_variable(), F::ONE),
-        ],
-    );
-    [v0, v1, v2, v3, v4]
-}
-use crate::base_structures::decommit_query::DecommitQueryWitness;
-fn allocate_and_prove_encoding<F: SmallField, CS: ConstraintSystem<F>>(
-    cs: &mut CS,
-    values: &[Num<F>],
-    witness: DecommitQueryWitness<F>,
-) -> DecommitQuery<F>{
-    todo!();
+        key.inner[0],
+        key.inner[1],
+        key.inner[2],
+        key.inner[3],
+        key.inner[4],
+        key.inner[5],
+        key.inner[6],
+        key.inner[7],
+    ]
 }

@@ -16,7 +16,9 @@ use derivative::*;
 use boojum::serde_utils::BigArraySerde;
 use crate::base_structures::decommit_query::{DecommitQueryWitness, DECOMMIT_QUERY_PACKED_WIDTH};
 use crate::sort_decommittment_requests::*;
-pub const DEFAULT_NUM_CHUNKS: usize = 2;
+
+pub const PACKED_KEY_LENGTH: usize = 8 + 1;
+
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
@@ -25,29 +27,30 @@ pub struct CodeDecommittmentsDeduplicatorFSMInputOutput<F: SmallField> {
     pub sorted_queue_state:  QueueState<F, QUEUE_STATE_WIDTH>,
     pub final_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
 
-    pub lhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
-    pub rhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
+    pub lhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    pub rhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
 
-    pub previous_packed_key: [Num<F>; 5],
-    pub previous_item_is_trivial: Boolean<F>,
+    pub previous_packed_key: [UInt32<F>; PACKED_KEY_LENGTH],
     pub first_encountered_timestamp: UInt32<F>,
-    pub previous_record_encoding: [Num<F>; DECOMMIT_QUERY_PACKED_WIDTH],
+    pub previous_record: DecommitQuery<F>,
 }
 
 impl<F: SmallField> CSPlaceholder<F> for CodeDecommittmentsDeduplicatorFSMInputOutput<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        let zero_num = Num::zero(cs);
+        let zero_u32 = UInt32::zero(cs);
+
         Self {
             initial_log_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             sorted_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             final_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
 
-            lhs_accumulator: [Num::zero(cs); DEFAULT_NUM_CHUNKS],
-            rhs_accumulator: [Num::zero(cs); DEFAULT_NUM_CHUNKS],
+            lhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            rhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
 
-            previous_packed_key: [Num::zero(cs); 5],
-            previous_item_is_trivial: Boolean::allocated_constant(cs, true),
-            first_encountered_timestamp: UInt32::placeholder(cs),
-            previous_record_encoding: [Num::zero(cs); DECOMMIT_QUERY_PACKED_WIDTH],
+            previous_packed_key: [zero_u32; PACKED_KEY_LENGTH],
+            first_encountered_timestamp: zero_u32,
+            previous_record: DecommitQuery::<F>::placeholder(cs),
         }
     }
 }
@@ -103,9 +106,6 @@ pub type CodeDecommittmentsDeduplicatorInputOutputWitness<F> =
 #[serde(bound = "")]
 pub struct CodeDecommittmentsDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: CodeDecommittmentsDeduplicatorInputOutputWitness<F>,
-
     pub initial_queue_witness: CircuitQueueRawWitness<F, DecommitQuery<F>, 4, DECOMMIT_QUERY_PACKED_WIDTH>,
-
     pub sorted_queue_witness:  CircuitQueueRawWitness<F, DecommitQuery<F>, 4, DECOMMIT_QUERY_PACKED_WIDTH>,
-    pub previous_record_witness: DecommitQueryWitness<F>,
 }

@@ -97,6 +97,7 @@ impl<F: SmallField> LogQuery<F> {
         ]
     }
 }
+
 impl<F: SmallField> CSPlaceholder<F> for LogQuery<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         let boolean_false = Boolean::allocated_constant(cs, false);

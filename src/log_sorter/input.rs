@@ -1,3 +1,4 @@
+use boojum::gadgets::u32::UInt32;
 use derivative::*;
 use cs_derive::*;
 use boojum::cs::{
@@ -17,31 +18,32 @@ use boojum::gadgets::{
     num::Num
 };
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
-
-pub const DEFAULT_NUM_CHUNKS: usize = 2;
+use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
 
 #[derive(Derivative, CSAllocatable, CSVarLengthEncodable, CSSelectable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
 pub struct EventsDeduplicatorFSMInputOutput<F: SmallField> {
-    pub lhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
-    pub rhs_accumulator: [Num<F>; DEFAULT_NUM_CHUNKS],
+    pub lhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    pub rhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     pub initial_unsorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub intermediate_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub final_result_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
-    pub previous_packed_key: Num<F>,
+    pub previous_key: UInt32<F>,
     pub previous_item: LogQuery<F>
 }
 
 impl<F: SmallField> CSPlaceholder<F> for EventsDeduplicatorFSMInputOutput<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        let zero_num = Num::zero(cs);
+        let zero_u32 = UInt32::zero(cs);
         Self {
-            lhs_accumulator: [Num::zero(cs); DEFAULT_NUM_CHUNKS],
-            rhs_accumulator: [Num::zero(cs); DEFAULT_NUM_CHUNKS],
+            lhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            rhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
             initial_unsorted_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             intermediate_sorted_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             final_result_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
-            previous_packed_key:Num::zero(cs),
+            previous_key: zero_u32,
             previous_item: LogQuery::<F>::placeholder(cs),
         }
     }

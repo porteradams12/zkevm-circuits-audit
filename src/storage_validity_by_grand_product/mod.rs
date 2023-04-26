@@ -13,7 +13,6 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
-use boojum::gadgets::non_native_field::implementations::utils::u16_long_subtraction;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::{
     boolean::Boolean,
@@ -562,8 +561,6 @@ where
 
     // to ensure uniqueness we place timestamps in a addition to the
 
-    // const PACKED_WIDTHS: [usize; 8] = [56, 56, 56, 56, 56, 56, 56, 32];
-
     let mut lhs_lc = Vec::with_capacity(TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1);
     let mut rhs_lc = Vec::with_capacity(TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1);
 
@@ -911,7 +908,7 @@ where
 }
 
 
-pub fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
+fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
     _cs: &mut CS,
     key_tuple: (UInt160<F>, UInt256<F>),
 ) -> [UInt32<F>; PACKED_KEY_LENGTH] {
