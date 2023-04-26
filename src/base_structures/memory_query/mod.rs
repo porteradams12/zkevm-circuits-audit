@@ -215,6 +215,7 @@ impl<F: SmallField> CircuitEncodable<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQue
     }
 }
 
+
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug, Hash)]
 pub struct MemoryValue<F: SmallField> {

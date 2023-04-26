@@ -45,7 +45,7 @@ fn u64_as_u32x2_conditionally_increment<F: SmallField, CS: ConstraintSystem<F>>(
     selected
 }
 
-fn keccak256_conditionally_absorb_and_run_permutation<F: SmallField, CS: ConstraintSystem<F>>(
+pub(crate) fn keccak256_conditionally_absorb_and_run_permutation<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     condition: Boolean<F>,
     state: &mut [[[Variable; keccak256::BYTES_PER_WORD]; keccak256::LANE_WIDTH]; keccak256::LANE_WIDTH],
@@ -268,9 +268,11 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
         (el as u32, (el >> 32) as u32)
     }).collect();
 
+    let merkle_paths: VecDeque<[[u8; 32]; STORAGE_DEPTH]> = merkle_paths.into_iter().map(|el| el.try_into().expect("length must match")).collect();
+
     let mut structured_input = StorageApplicationInputOutput::alloc_ignoring_outputs(
         cs,
-        closed_form_input,
+        closed_form_input.clone(),
     );
     let start_flag = structured_input.start_flag;
 
@@ -631,6 +633,9 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
         &empty_observable_output,
     );
     structured_input.observable_output = observable_output;
+
+    // self-check
+    structured_input.hook_compare_witness(cs, &closed_form_input);
 
     use crate::fsm_input_output::ClosedFormInputCompactForm;
     use crate::fsm_input_output::commit_variable_length_encodable_item;

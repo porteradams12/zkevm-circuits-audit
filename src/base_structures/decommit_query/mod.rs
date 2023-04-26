@@ -13,9 +13,13 @@ use boojum::{field::SmallField, gadgets::u256::UInt256};
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use ethereum_types::U256;
+use boojum::gadgets::traits::encodable::CircuitEncodableExt;
+use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
 
-#[derive(Derivative, CSAllocatable, CSSelectable)]
-#[derivative(Clone, Debug)]
+#[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable, CSVarLengthEncodable)]
+#[derivative(Clone, Copy, Debug)]
 pub struct DecommitQuery<F: SmallField> {
     pub code_hash: UInt256<F>,
     pub page: UInt32<F>,
@@ -90,6 +94,7 @@ impl<F: SmallField> CircuitEncodable<F, DECOMMIT_QUERY_PACKED_WIDTH> for Decommi
 
         [v0, v1, v2, v3, v4, v5, v6, v7]
     }
+    
 }
 
 impl<F: SmallField> CSAllocatableExt<F> for DecommitQuery<F> {
@@ -146,13 +151,26 @@ impl<F: SmallField> CSAllocatableExt<F> for DecommitQuery<F> {
 
 impl<F: SmallField> CircuitEncodableExt<F, DECOMMIT_QUERY_PACKED_WIDTH> for DecommitQuery<F> {}
 
-use boojum::gadgets::queue::full_state_queue::{
-    FullStateCircuitQueue,
-    FullStateCircuitQueueWitness,
+impl<F: SmallField> CSPlaceholder<F> for DecommitQuery<F> {
+    fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        let zero_u32 = UInt32::zero(cs);
+        let boolean_false = Boolean::allocated_constant(cs, false);
+        Self {
+            code_hash: UInt256::<F>::zero(cs),
+            page: zero_u32,
+            is_first: boolean_false,
+            timestamp: zero_u32,
+        }
+    }
+}
+
+use boojum::gadgets::queue::{
+    CircuitQueue,
+    CircuitQueueWitness,
 };
 
-pub type DecommitQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
-    FullStateCircuitQueue<F, DecommitQuery<F>, AW, SW, CW, DECOMMIT_QUERY_PACKED_WIDTH, R>;
+pub type DecommitQueue<F, const AW: usize, const SW: usize, const CW: usize, const T: usize, R> =
+    CircuitQueue<F, DecommitQuery<F>, AW, SW, CW, T, DECOMMIT_QUERY_PACKED_WIDTH, R>;
 
 pub type DecommitQueueWitness<F, const SW: usize> =
-    FullStateCircuitQueueWitness<F, DecommitQuery<F>, SW, DECOMMIT_QUERY_PACKED_WIDTH>;
+    CircuitQueueWitness<F, DecommitQuery<F>, SW, DECOMMIT_QUERY_PACKED_WIDTH>;

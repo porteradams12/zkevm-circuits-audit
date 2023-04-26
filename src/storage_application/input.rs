@@ -110,13 +110,6 @@ pub struct StorageApplicationCircuitInstanceWitness<F: SmallField> {
     //     deserialize = "CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>: serde::de::DeserializeOwned"
     // ))]
     pub storage_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
-    #[derivative(Debug = "ignore")]
-    #[serde(bound(
-        serialize = "[[u8; 32]; STORAGE_DEPTH]: serde::Serialize"
-    ))]
-    #[serde(bound(
-        deserialize = "[[u8; 32]; STORAGE_DEPTH]: serde::de::DeserializeOwned"
-    ))]
-    pub merkle_paths: VecDeque<[[u8; 32]; STORAGE_DEPTH]>,
+    pub merkle_paths: VecDeque<Vec<[u8; 32]>>,
     pub leaf_indexes_for_reads: VecDeque<u64>,
 }

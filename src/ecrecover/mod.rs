@@ -97,8 +97,6 @@ const SECP_B_COEF: u64 = 7;
 const EXCEPTION_FLAGS_ARR_LEN: usize = 8;
 const NUM_MEMORY_READS_PER_CYCLE: usize = 4;
 const X_POWERS_ARR_LEN: usize = 256;
-const UNPADDED_KECCAK_INPUT_WORDS_LEN: usize = 8;
-const KECCAK_DIGEST_WORDS_SIZE: usize = 3;
 const VALID_Y_IN_EXTERNAL_FIELD: u64 = 4;
 const VALID_X_CUBED_IN_EXTERNAL_FIELD: u64 = 9;
 
@@ -712,18 +710,8 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     structured_input.hidden_fsm_output.log_queue_state = final_requets_state;
     structured_input.hidden_fsm_output.memory_queue_state = final_memory_state;
 
-    if let Some(circuit_result) = (structured_input.witness_hook(&*cs))() {
-        use boojum::gadgets::traits::auxiliary::PrettyComparison;
-        let comparison_lines = <EcrecoverCircuitFSMInputOutput<F> as PrettyComparison<F>>::find_diffs(&circuit_result.hidden_fsm_output, &closed_form_input.hidden_fsm_output);
-        if comparison_lines.is_empty() == false {
-            panic!("Difference in FSM:\n{}", comparison_lines.join("\n"));
-        }
-        let comparison_lines = <PrecompileFunctionOutputData<F> as PrettyComparison<F>>::find_diffs(&circuit_result.observable_output, &closed_form_input.observable_output);
-        if comparison_lines.is_empty() == false {
-            panic!("Difference in observable output:\n{}", comparison_lines.join("\n"));
-        }
-        assert_eq!(circuit_result, closed_form_input);
-    }
+    // self-check
+    structured_input.hook_compare_witness(cs, &closed_form_input);
 
     use boojum::cs::gates::PublicInputGate;
 
@@ -743,6 +731,7 @@ mod test {
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::traits::allocatable::CSAllocatable;
     use boojum::pairing::ff::{Field, PrimeField, SqrtField};
+    use boojum::worker::Worker;
 
     use super::*;
 
@@ -932,8 +921,11 @@ mod test {
         let recovered_address = recovered_address.witness_hook(cs)().unwrap();
         assert_eq!(&recovered_address[12..], &eth_address[..]);
 
-        // cs.pad_and_shrink();
         dbg!(cs.next_available_row());
-        cs.print_gate_stats()
+        cs.print_gate_stats();
+
+        cs.pad_and_shrink();
+        let worker = Worker::new();
+        assert!(owned_cs.check_if_satisfied(&worker));
     }
 }
