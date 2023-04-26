@@ -19,37 +19,37 @@ use boojum::gadgets::{
 };
 use derivative::*;
 use boojum::serde_utils::BigArraySerde;
+use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Debug)]
 pub struct RamPermutationInputData<F: SmallField> {
-    pub unsorted_queue_initial_state: QueueTailState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
-    pub sorted_queue_initial_state: QueueTailState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+    pub unsorted_queue_initial_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+    pub sorted_queue_initial_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
     pub non_deterministic_bootloader_memory_snapshot_length: UInt32<F>,
 }
 
 impl<F: SmallField> CSPlaceholder<F> for RamPermutationInputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         let zero_u32 = UInt32::zero(cs);
-        let empty_tail = QueueTailState::placeholder(cs);
+        let empty_state = QueueState::placeholder(cs);
 
         Self {
-            unsorted_queue_initial_state: empty_tail,
-            sorted_queue_initial_state: empty_tail,
+            unsorted_queue_initial_state: empty_state,
+            sorted_queue_initial_state: empty_state,
             non_deterministic_bootloader_memory_snapshot_length: zero_u32
         }
     }
 }
 
-pub const NUM_PERMUTATION_ARGUMENT_CHALLENGES: usize = 4;
 pub const RAM_SORTING_KEY_LENGTH: usize = 3;
 pub const RAM_FULL_KEY_LENGTH: usize = 2;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Debug)]
 pub struct RamPermutationFSMInputOutput<F: SmallField> {
-    pub lhs_accumulator: [Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
-    pub rhs_accumulator: [Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+    pub lhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    pub rhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     pub current_unsorted_queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
     pub current_sorted_queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
     pub previous_sorting_key: [UInt32<F>; RAM_SORTING_KEY_LENGTH],
@@ -68,8 +68,8 @@ impl<F: SmallField> CSPlaceholder<F> for RamPermutationFSMInputOutput<F> {
         let empty_state = QueueState::placeholder(cs);
 
         Self {
-            lhs_accumulator: [zero_num; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
-            rhs_accumulator: [zero_num; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+            lhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            rhs_accumulator: [zero_num; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
             current_unsorted_queue_state: empty_state,
             current_sorted_queue_state: empty_state,
             previous_sorting_key: [zero_u32; RAM_SORTING_KEY_LENGTH],
@@ -86,27 +86,16 @@ pub type RamPermutationCycleInputOutput<F> =
 pub type RamPermutationCycleInputOutputWitness<F> =
     crate::fsm_input_output::ClosedFormInputWitness<F, RamPermutationFSMInputOutput<F>, RamPermutationInputData<F>, ()>;
 
-
+#[derive(Derivative, serde::Serialize, serde::Deserialize)]
+#[derivative(Clone, Debug)]
+#[serde(bound = "")]
 pub struct RamPermutationCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: RamPermutationCycleInputOutputWitness<F>,
-    // #[serde(bound(
-    //     serialize = "<RawMemoryQuery<E> as CSWitnessable<E>>::Witness: serde::Serialize"
-    // ))]
-    // #[serde(bound(
-    //     deserialize = "<RawMemoryQuery<E> as CSWitnessable<E>>::Witness: serde::de::DeserializeOwned"
-    // ))]
-    pub unsorted_queue_witness: MemoryQueriesQueueWitness<F>,
-    // #[serde(bound(
-    //     serialize = "<RawMemoryQuery<E> as CSWitnessable<E>>::Witness: serde::Serialize"
-    // ))]
-    // #[serde(bound(
-    //     deserialize = "<RawMemoryQuery<E> as CSWitnessable<E>>::Witness: serde::de::DeserializeOwned"
-    // ))]
-    pub sorted_queue_witness: MemoryQueriesQueueWitness<F>,
+
+    pub unsorted_queue_witness: FullStateCircuitQueueRawWitness<F, MemoryQuery<F>, 12, MEMORY_QUERY_PACKED_WIDTH>,
+    pub sorted_queue_witness: FullStateCircuitQueueRawWitness<F, MemoryQuery<F>, 12, MEMORY_QUERY_PACKED_WIDTH>,
 }
 
 pub type MemoryQueriesQueue<F, R: CircuitRoundFunction<F, 8, 12, 4>> =
     FullStateCircuitQueue<F, MemoryQuery<F>, 8, 12, 4, MEMORY_QUERY_PACKED_WIDTH, R>;
-pub type MemoryQueriesQueueWitness<F> =
-    FullStateCircuitQueueWitness<F, MemoryQuery<F>, 12, MEMORY_QUERY_PACKED_WIDTH>;
 

@@ -10,6 +10,7 @@ use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u256::UInt256;
 
+use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
 use boojum::gadgets::poseidon::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::base_structures::memory_query::MemoryQuery;
@@ -54,82 +55,62 @@ where
     let observable_input = structured_input.observable_input.clone();
     let hidden_fsm_input = structured_input.hidden_fsm_input.clone();
 
-    let zero_el = Num::allocated_constant(cs, F::ZERO);
 
-    let unsorted_queue_head = <[Num<F>; 12]>::conditionally_select(
-        cs,
-        start_flag,
-        &[zero_el; 12],
-        &hidden_fsm_input.current_unsorted_queue_state.head,
-    ); 
-    let unsorted_queue_tail = <[Num<F>; 12]>::conditionally_select(
-        cs,
-        start_flag,
-        &observable_input.unsorted_queue_initial_state.tail,
-        &hidden_fsm_input.current_unsorted_queue_state.tail.tail,
-    ); 
-    let unsorted_queue_length = UInt32::conditionally_select(
-        cs,
-        start_flag,
-        &observable_input.unsorted_queue_initial_state.length,
-        &hidden_fsm_input.current_unsorted_queue_state.tail.length,
+    // passthrought must be trivial
+    observable_input.unsorted_queue_initial_state.enforce_trivial_head(cs);
+
+    let unsorted_queue_state = QueueState::conditionally_select(
+        cs, 
+        start_flag, 
+        &observable_input.unsorted_queue_initial_state, 
+        &hidden_fsm_input.current_unsorted_queue_state,
     );
 
-    let mut unsorted_queue = MemoryQueriesQueue::<F, R>::from_raw_parts(
-        cs,
-        unsorted_queue_head,
-        unsorted_queue_tail,
-        unsorted_queue_length,
-    );
-    unsorted_queue.witness = Arc::new(unsorted_queue_witness);
+    use crate::boojum::gadgets::queue::full_state_queue::FullStateCircuitQueue;
+    let mut unsorted_queue: FullStateCircuitQueue<F, MemoryQuery<F>, 8, 12, 4, MEMORY_QUERY_PACKED_WIDTH, R> = 
+        MemoryQueriesQueue::from_state(cs, unsorted_queue_state);
+
+    unsorted_queue.witness = Arc::new(FullStateCircuitQueueWitness::from_inner_witness(
+        unsorted_queue_witness,
+    ));
 
 
-    let sorted_queue_head = <[Num<F>; 12]>::conditionally_select(
-        cs,
-        start_flag,
-        &[zero_el; 12],
-        &hidden_fsm_input.current_sorted_queue_state.head,
-    ); 
-    let sorted_queue_tail = <[Num<F>; 12]>::conditionally_select(
-        cs,
-        start_flag,
-        &observable_input.sorted_queue_initial_state.tail,
-        &hidden_fsm_input.current_sorted_queue_state.tail.tail,
-    ); 
-    let sorted_queue_length = UInt32::conditionally_select(
-        cs,
-        start_flag,
-        &observable_input.sorted_queue_initial_state.length,
-        &hidden_fsm_input.current_sorted_queue_state.tail.length,
+    // passthrought must be trivial
+    observable_input.sorted_queue_initial_state.enforce_trivial_head(cs);
+
+    let sorted_queue_state = QueueState::conditionally_select(
+        cs, 
+        start_flag, 
+        &observable_input.sorted_queue_initial_state, 
+        &hidden_fsm_input.current_sorted_queue_state,
     );
 
-    let mut sorted_queue = MemoryQueriesQueue::<F, R>::from_raw_parts(
-        cs,
-        sorted_queue_head,
-        sorted_queue_tail,
-        sorted_queue_length,
+    let mut sorted_queue: FullStateCircuitQueue<F, MemoryQuery<F>, 8, 12, 4, MEMORY_QUERY_PACKED_WIDTH, R> = 
+        MemoryQueriesQueue::from_state(cs, sorted_queue_state);
+
+    sorted_queue.witness = Arc::new(FullStateCircuitQueueWitness::from_inner_witness(
+        sorted_queue_witness,
+    ));
+
+    // get challenges for permutation argument
+    let fs_challenges = crate::utils::produce_fs_challenges(
+        cs, 
+        observable_input.unsorted_queue_initial_state.tail, 
+        observable_input.sorted_queue_initial_state.tail,
+        round_function
     );
-    sorted_queue.witness = Arc::new(sorted_queue_witness);
-
-
-    let fs_challenges = generate_challenges::<F, CS, R>(
-        cs,
-        &observable_input.unsorted_queue_initial_state,
-        &observable_input.sorted_queue_initial_state,
-    );
-
 
     let num_one = Num::allocated_constant(cs, F::ONE);
-    let mut lhs = <[Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES]>::conditionally_select(
+    let mut lhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
         cs,
         start_flag,
-        &[num_one; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+        &[num_one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
         &hidden_fsm_input.lhs_accumulator,
     );
-    let mut rhs = <[Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES]>::conditionally_select(
+    let mut rhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
         cs,
         start_flag,
-        &[num_one; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+        &[num_one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
         &hidden_fsm_input.rhs_accumulator,
     );
 
@@ -147,7 +128,7 @@ where
     let mut previous_is_ptr = hidden_fsm_input.previous_is_ptr;
 
 
-    partial_accumulate_inner(
+    partial_accumulate_inner::<F, CS, R>(
         cs,
         &mut unsorted_queue,
         &mut sorted_queue,
@@ -221,10 +202,10 @@ pub fn partial_accumulate_inner<
     cs: &mut CS,
     unsorted_queue: &mut MemoryQueriesQueue<F, R>,
     sorted_queue: &mut MemoryQueriesQueue<F, R>,
-    fs_challenges: &[[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+    fs_challenges: &[[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     is_start: Boolean<F>,
-    lhs: &mut [Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
-    rhs: &mut [Num<F>; NUM_PERMUTATION_ARGUMENT_CHALLENGES],
+    lhs: &mut [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    rhs: &mut [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     previous_sorting_key: &mut [UInt32<F>; RAM_SORTING_KEY_LENGTH],
     previous_comparison_key: &mut [UInt32<F>; RAM_FULL_KEY_LENGTH],
     previous_element_value: &mut UInt256<F>,
@@ -385,85 +366,6 @@ where
             *rhs = Num::conditionally_select(cs, can_pop, &new_rhs, &rhs);
         }
     }
-}
-
-use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
-fn generate_challenges<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
-    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>
->(
-    cs: &mut CS,
-    unsorted_queue_initial_state: &QueueTailState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
-    sorted_queue_initial_state: &QueueTailState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
-) -> [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARGUMENT_CHALLENGES] {
-    let mut fs_input = vec![];
-    fs_input.extend_from_slice(&unsorted_queue_initial_state.tail);
-    // length must be original of the full queue
-    fs_input.push(
-        unsorted_queue_initial_state
-            .length
-            .into_num()
-    );
-    fs_input.extend_from_slice(&sorted_queue_initial_state.tail);
-    fs_input.push(
-        sorted_queue_initial_state
-            .length
-            .into_num()
-    );
-
-    // Absorb fs_input
-    let total_elements_to_absorb = 2 * (FULL_SPONGE_QUEUE_STATE_WIDTH + 1);
-    let num_rounds = (total_elements_to_absorb + 12 - 1) / 12;
-    let mut elements_source = fs_input
-        .into_iter();
-
-    let zero_element = Num::zero(cs);
-
-    let mut capacity_elements = [zero_element; 4];
-
-    let mut sponge_state = [zero_element; 12];
-
-    for _ in 0..num_rounds {
-        let mut to_absorb = [zero_element; 8];
-        for (dst, src) in to_absorb.iter_mut().zip(&mut elements_source) {
-            *dst = src;
-        }
-
-        let result_state = R::absorb_with_replacement_over_nums(
-            cs, 
-            to_absorb, 
-            capacity_elements
-        );
-        capacity_elements.copy_from_slice(&result_state[8..]);
-        sponge_state = result_state;
-    }
-    
-    let mut taken = 0; // up to absorbtion length
-    let mut fs_challenges = vec![];
-    let total_challenges_num = (MEMORY_QUERY_PACKED_WIDTH + 1) * NUM_PERMUTATION_ARGUMENT_CHALLENGES;
-    for _ in 0..total_challenges_num {
-        if taken == 8 {
-            // run round
-            sponge_state = R::compute_round_function_over_nums(cs, sponge_state);
-            taken = 0;
-        }
-
-        let challenge = sponge_state[taken];
-        fs_challenges.push(challenge);
-
-        taken += 1;
-    }
-
-    let mut result = [[zero_element; MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARGUMENT_CHALLENGES];
-
-    for (src, dst) in fs_challenges
-        .chunks(MEMORY_QUERY_PACKED_WIDTH + 1)
-        .zip(result.iter_mut()) {
-            dst.copy_from_slice(src);
-        }
-
-    result
 }
 
 use boojum::gadgets::traits::allocatable::CSAllocatable;
