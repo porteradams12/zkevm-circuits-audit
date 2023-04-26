@@ -1,4 +1,5 @@
-mod input;
+pub mod input;
+
 use super::*;
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
@@ -14,7 +15,7 @@ use boojum::gadgets::{
 };
 use crate::fsm_input_output::{ClosedFormInputCompactForm, commit_variable_length_encodable_item};
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
-use crate::base_structures::log_query::LogQuery;
+use crate::base_structures::log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH};
 use crate::base_structures::vm_state::*;
 use crate::storage_validity_by_grand_product::unpacked_long_comparison;
 
@@ -24,7 +25,8 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 // Those logs do not affect a global state and may either be rolled back in full or not.
 // We identify equality of logs using "timestamp" field that is a monotonic unique counter
 // across the block
-pub const STORAGE_LOG_RECORD_ENCODING_LEN: usize = 5;
+
+pub const NUM_PERMUTATION_ARG_CHALLENGES: usize = LOG_QUERY_PACKED_WIDTH + 1;
 
 use crate::log_sorter::input::*;
 

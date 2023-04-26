@@ -36,6 +36,7 @@ pub struct LogQuery<F: SmallField> {
 impl<F: SmallField> CircuitEncodableExt<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> {}
 
 pub const LOG_QUERY_PACKED_WIDTH: usize = 20;
+pub const LOG_QUERY_ABSORBTION_ROUNDS: usize = 3;
 
 // NOTE: (shamatar): workaround for cost generics for now
 pub(crate) const FLATTENED_VARIABLE_LENGTH: usize = 36;

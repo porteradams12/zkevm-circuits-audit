@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::base_structures::log_query::LOG_QUERY_PACKED_WIDTH;
 use crate::fsm_input_output::ClosedFormInputCompactForm;
 
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
@@ -27,7 +28,6 @@ use crate::base_structures::{
     decommit_query::DecommitQuery,
     memory_query::MEMORY_QUERY_PACKED_WIDTH};
 use crate::sort_decommittment_requests::input::*;
-use crate::log_sorter::STORAGE_LOG_RECORD_ENCODING_LEN;
 
 pub mod input;
 
@@ -35,7 +35,7 @@ pub mod input;
 // Those logs do not affect a global state and may either be rolled back in full or not.
 // We identify equality of logs using "timestamp" field that is a monotonic unique counter
 // across the block
-pub const NUM_PERMUTATION_ARG_CHALLENGES: usize = STORAGE_LOG_RECORD_ENCODING_LEN + 1;
+pub const NUM_PERMUTATION_ARG_CHALLENGES: usize = LOG_QUERY_PACKED_WIDTH + 1;
 
 pub fn sort_and_deduplicate_code_decommittments_entry_point<
     F: SmallField,

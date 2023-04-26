@@ -18,6 +18,7 @@ use boojum::gadgets::{
     num::Num
 };
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
+
 use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
 
 #[derive(Derivative, CSAllocatable, CSVarLengthEncodable, CSSelectable, WitnessHookable)]
