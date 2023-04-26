@@ -63,83 +63,74 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         closed_form_input.clone()
     );
 
-    let queue_states_from_fsm = [
-        &structured_input.hidden_fsm_input.initial_log_queue_state,
-        &structured_input.hidden_fsm_input.sorted_queue_state,
-        &structured_input.hidden_fsm_input.final_queue_state,
-    ];
-
-    let [
-        initial_log_queue_state_from_fsm, 
-        sorted_queue_state_from_fsm, 
-        final_queue_state_from_fsm
-        ]= queue_states_from_fsm.map(|el| {
-            DecommitQueue::<F, 8, 12, 4, 4, R>::from_state(cs, *el)
-    });
-
-    let initial_queue_from_passthrough = DecommitQueue::<F, 8, 12, 4, 4, R>::from_raw_parts(
-        cs,
-        structured_input
+    let initial_queue_from_passthrough_state = QueueState {
+        head: structured_input
             .observable_input
             .initial_log_queue_state
             .head,
-        structured_input
+        tail: structured_input
             .observable_input
             .initial_log_queue_state
-            .tail.tail,
-        structured_input
-            .observable_input
+            .tail,
+    };
+    let initial_log_queue_state_from_fsm_state = QueueState {
+        head: structured_input
+            .hidden_fsm_input
             .initial_log_queue_state
-            .tail.length,
-    );
+            .head,
+        tail: structured_input
+            .hidden_fsm_input
+            .initial_log_queue_state
+            .tail,
+    };
+
 
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
-        &initial_queue_from_passthrough.into_state(),
-        &initial_log_queue_state_from_fsm.into_state(),
+        &initial_queue_from_passthrough_state,
+        &initial_log_queue_state_from_fsm_state,
     );
     let mut initial_queue = DecommitQueue::<F, 8, 12, 4, 4, R>::from_state(cs, state);
 
 
     // passthrough must be trivial
-    let zero_num = Num::zero(cs);
-    for el in initial_queue_from_passthrough.head.iter() {
-        Num::enforce_equal(cs, el, &zero_num);
-    }
+    initial_queue_from_passthrough_state.enforce_trivial_head(cs);
     
     use std::sync::Arc;
     let initial_queue_witness = CircuitQueueWitness::from_inner_witness(initial_queue_witness);
     initial_queue.witness = Arc::new(initial_queue_witness);
 
 
-    let intermediate_sorted_queue_from_passthrough = DecommitQueue::<F, 8, 12, 4, 4, R>::from_raw_parts(
-        cs,
-        structured_input
+    let intermediate_sorted_queue_from_passthrough_state = QueueState {
+        head: structured_input
             .observable_input
             .sorted_queue_initial_state
             .head,
-        structured_input
+        tail: structured_input
             .observable_input
             .sorted_queue_initial_state
-            .tail.tail,
-        structured_input
-            .observable_input
-            .sorted_queue_initial_state
-            .tail.length,
-    );
+            .tail,
+    };
+    let intermediate_sorted_queue_from_fsm_input_state = QueueState {
+        head: structured_input
+            .hidden_fsm_input
+            .sorted_queue_state
+            .head,
+        tail: structured_input
+            .hidden_fsm_input
+            .sorted_queue_state
+            .tail,
+    };
 
     // it must be trivial
-    let zero_num = Num::zero(cs);
-    for el in intermediate_sorted_queue_from_passthrough.head.iter() {
-        Num::enforce_equal(cs, el, &zero_num);
-    }
+    intermediate_sorted_queue_from_passthrough_state.enforce_trivial_head(cs);
 
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
-        &intermediate_sorted_queue_from_passthrough.into_state(),
-        &sorted_queue_state_from_fsm.into_state()
+        &intermediate_sorted_queue_from_passthrough_state,
+        &intermediate_sorted_queue_from_fsm_input_state
     );
     let mut intermediate_sorted_queue = DecommitQueue::<F, 8, 12, 4, 4, R>::from_state(cs, state);
 
@@ -149,76 +140,50 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
 
     let empty_state = QueueState::empty(cs);
 
+    let final_sorted_queue_from_fsm_state = QueueState {
+        head: structured_input
+            .hidden_fsm_input
+            .final_queue_state
+            .head,
+        tail: structured_input
+            .hidden_fsm_input
+            .final_queue_state
+            .tail,
+    };
+    
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &empty_state,
-        &final_queue_state_from_fsm.into_state(),
+        &final_sorted_queue_from_fsm_state,
     );
     let mut final_sorted_queue = DecommitQueue::<F, 8, 12, 4, 4, R>::from_state(cs, state);
 
-    let mut fs_input = vec![];
-    fs_input.extend_from_slice(&initial_queue_from_passthrough.tail.map(|el| el.get_variable()));
-    fs_input.push(initial_queue_from_passthrough.length.get_variable());
-    fs_input.extend_from_slice(&intermediate_sorted_queue_from_passthrough.tail.map(|el| el.get_variable()));
-    fs_input.push(intermediate_sorted_queue_from_passthrough.length.get_variable());
+    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_CHUNKS> (
+        cs, 
+        structured_input
+            .observable_input
+            .initial_log_queue_state
+            .tail, 
+        structured_input
+            .observable_input
+            .sorted_queue_initial_state
+            .tail,
+        round_function
+    );
 
-
-    let total_elements_to_absorb = MEMORY_QUERY_PACKED_WIDTH;
-    let num_rounds = (total_elements_to_absorb + 8 - 1) / 8;
-    let mut elements_source= fs_input.into_iter();
-
-    let zero_element = cs.allocate_constant(F::ZERO);
-
-    let mut capacity_elements = [zero_element; 4];
-    let mut sponge_state = [zero_element; 12];
-
-    for _ in 0..num_rounds {
-        let mut to_absorb = [zero_element; 8];
-        for (dst, src) in to_absorb.iter_mut().zip(&mut elements_source) {
-            *dst = src;
-        }
-
-        let result_state = R::absorb_with_replacement(cs, to_absorb, capacity_elements);
-        capacity_elements.copy_from_slice(&result_state[8..]);
-        sponge_state = result_state;
-    }
-
-    let mut taken = 0; // up to absorbtion length
-    let mut fs_challenges = vec![];
-    for _ in 0..NUM_PERMUTATION_ARG_CHALLENGES {
-        if taken == MEMORY_QUERY_PACKED_WIDTH {
-            // run round
-            sponge_state = R::compute_round_function(cs, sponge_state);
-            taken = 0;
-        }
-
-        let challenge = sponge_state[taken];
-        fs_challenges.push(Num::from_variable(challenge));
-
-        taken += 1;
-    }
-
-    let mut fs_challenge= [[Num::zero(cs);  MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARG_CHALLENGES];
-    for (src, dst) in fs_challenges
-    .chunks(MEMORY_QUERY_PACKED_WIDTH + 1)
-    .zip(fs_challenge.iter_mut()) {
-        dst.copy_from_slice(src);
-    }
-
-    let one =  Num::from_variable(cs.allocate_constant(F::ONE));
-    let make_one_chunks: [Num<F>; DEFAULT_NUM_CHUNKS] = [one; DEFAULT_NUM_CHUNKS];
+    let one = Num::allocated_constant(cs, F::ONE);
     let initial_lhs = Num::parallel_select(
         cs,
         structured_input.start_flag,
-        &make_one_chunks,
+        &[one; DEFAULT_NUM_CHUNKS],
         &structured_input.hidden_fsm_input.lhs_accumulator,
     );
 
     let initial_rhs = Num::parallel_select(
         cs,
         structured_input.start_flag,
-        &make_one_chunks,
+        &[one; DEFAULT_NUM_CHUNKS],
         &structured_input.hidden_fsm_input.rhs_accumulator,
     );
 
@@ -239,7 +204,7 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &mut final_sorted_queue,
         initial_lhs,
         initial_rhs,
-        fs_challenge,
+        challenges,
         &mut previous_packed_key,
         &mut previous_item_is_trivial,
         &mut first_encountered_timestamp,
@@ -301,7 +266,7 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     result_queue: &mut DecommitQueue<F, 8, 12, 4, QUEUE_STATE_WIDTH, R>,
     mut lhs: [Num<F>; DEFAULT_NUM_CHUNKS],
     mut rhs: [Num<F>; DEFAULT_NUM_CHUNKS],
-    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARG_CHALLENGES],
+    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_CHUNKS],
     previous_packed_key: &mut [Num<F>; 5],
     previous_item_is_trivial: &mut Boolean<F>,
     first_encountered_timestamp: &mut UInt32<F>,
@@ -334,8 +299,8 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
         // we make encoding that is the same as defined for timestamped item
         triviality_flags.push(sorted_is_empty);
         sorted_items.push(sorted_item);
-        // assert_eq!(original_encoding.len(), sorted_encoding.len());
-        // assert_eq!(original_encoding.len(), fs_challenges.len());
+        assert_eq!(original_encoding.len(), sorted_encoding.len());
+        assert_eq!(lhs.len(), rhs.len());
 
         for ((challenges, lhs), rhs) in fs_challenges
             .iter()
