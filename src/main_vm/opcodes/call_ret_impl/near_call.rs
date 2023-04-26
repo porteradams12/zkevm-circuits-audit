@@ -1,5 +1,3 @@
-use boojum::cs::gates::reduction_by_powers_gate;
-
 use super::*;
 
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;

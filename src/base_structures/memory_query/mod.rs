@@ -2,6 +2,7 @@ use super::*;
 
 use boojum::field::SmallField;
 
+use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueue;
 use boojum::gadgets::u256::UInt256;
 
 use boojum::gadgets::boolean::Boolean;
@@ -34,6 +35,8 @@ pub struct MemoryQuery<F: SmallField> {
     pub value: UInt256<F>,
 }
 
+impl<F: SmallField> CircuitEncodableExt<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQuery<F> {}
+
 // in practice we use memory queue, so we need to have a nice way to pack memory query into
 // 8 field elements. In addition we can exploit the fact that when we will process the elements
 // we will only need to exploit timestamp, page, index, value and r/w flag in their types, but
@@ -63,7 +66,7 @@ impl<F: SmallField> CSAllocatableExt<F> for MemoryQuery<F> {
         ]
     }
 
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, F>) {
+    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
         todo!()
     }
 
@@ -212,8 +215,6 @@ impl<F: SmallField> CircuitEncodable<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQue
     }
 }
 
-impl<F: SmallField> CircuitEncodableExt<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQuery<F> {}
-
 
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug, Hash)]
@@ -237,7 +238,7 @@ impl<F: SmallField> MemoryValue<F> {
         let outputs = cs.alloc_multiple_variables_without_values::<9>();
 
         if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
-            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, F>| {
+            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, '_, F>| {
                 debug_assert!(F::CAPACITY_BITS >= 32);
                 let witness = (witness_closure)(inputs);
                 let chunks = decompose_u256_as_u32x8(witness.value);
@@ -275,7 +276,7 @@ impl<F: SmallField> MemoryValue<F> {
         let outputs = cs.alloc_multiple_variables_without_values::<8>();
 
         if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
-            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, F>| {
+            let value_fn = move |inputs: &[F], output_buffer: &mut DstBuffer<'_, '_, F>| {
                 debug_assert!(F::CAPACITY_BITS >= 32);
                 let witness = (witness_closure)(inputs);
                 let chunks = decompose_u256_as_u32x8(witness.value);
@@ -298,3 +299,6 @@ impl<F: SmallField> MemoryValue<F> {
         }
     }
 }
+
+pub type MemoryQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
+pub type MemoryQueue<F, R> = MemoryQueryQueue<F, 8, 12, 4, R>;

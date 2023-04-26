@@ -1,6 +1,5 @@
-use boojum::{
-    cs::gates::reduction_by_powers_gate,
-};
+use boojum::cs::traits::cs::DstBuffer;
+use boojum::gadgets::traits::castable::WitnessCastable;
 
 use crate::base_structures::{
     log_query::LogQuery, vm_state::saved_context::ExecutionContextRecord,
@@ -41,7 +40,7 @@ pub(crate) fn apply_calls_and_ret<
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
-    let (common_part, far_call_abi, _ret_abi, far_call_forwarding_data, ret_forwarding_data) =
+    let (common_part, far_call_abi, call_ret_forwarding_mode) =
         compute_shared_abi_parts(cs, &common_opcode_state.src0_view);
 
     let near_call_data = callstack_candidate_for_near_call(
@@ -61,7 +60,7 @@ pub(crate) fn apply_calls_and_ret<
         global_context,
         &common_part,
         &far_call_abi,
-        &far_call_forwarding_data,
+        &call_ret_forwarding_mode,
         round_function,
     );
 
@@ -72,7 +71,7 @@ pub(crate) fn apply_calls_and_ret<
         opcode_carry_parts,
         witness_oracle,
         &common_part,
-        &ret_forwarding_data,
+        &call_ret_forwarding_mode,
     );
 
     // select callstack that will become current
@@ -368,11 +367,65 @@ pub(crate) fn apply_calls_and_ret<
     let mut new_flags = common_opcode_state.reseted_flags;
     new_flags.overflow_or_less_than = is_ret_panic_if_apply;
 
+    // report to witness oracle
+    let oracle = witness_oracle.clone();
+    // we should assemble all the dependencies here, and we will use AllocateExt here
+    let mut dependencies = Vec::with_capacity(
+        <ExecutionContextRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 3,
+    );
+    dependencies.push(apply_any.get_variable().into());
+    dependencies.push(is_call_like.get_variable().into());
+    dependencies.push(new_callstack_depth.get_variable().into());
+    dependencies.extend(Place::from_variables(
+        new_callstack_entry.flatten_as_variables(),
+    ));
+
+    cs.set_values_with_dependencies_vararg(
+        &dependencies,
+        &[],
+        move |inputs: &[F], _buffer: &mut DstBuffer<'_, '_, F>| {
+            let execute = inputs[0].as_u64();
+            let execute = u64_as_bool(execute);
+
+            let is_call_like = inputs[1].as_u64();
+            let is_call_like = u64_as_bool(is_call_like);
+
+            let new_depth = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[2]);
+
+            let mut query =
+                [F::ZERO; <ExecutionContextRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN];
+            query.copy_from_slice(&inputs[3..]);
+            use crate::base_structures::vm_state::saved_context::ExecutionContextRecordWitness;
+            let query: ExecutionContextRecordWitness<F> =
+                CSAllocatableExt::witness_from_set_of_values(query);
+
+            let mut guard = oracle.inner.write().expect("not poisoned");
+            guard.report_new_callstack_frame(&query, new_depth, is_call_like, execute);
+            drop(guard);
+        },
+    );
+
     // add everything to state diffs
+
+    // we should check that opcode can not use src0/dst0 in memory
+    const FAR_CALL_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::FarCall(zkevm_opcode_defs::FarCallOpcode::Normal);
+    const NEAR_CALL_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::NearCall(zkevm_opcode_defs::NearCallOpcode);
+    const RET_OPCODE: zkevm_opcode_defs::Opcode =
+        zkevm_opcode_defs::Opcode::Ret(zkevm_opcode_defs::RetOpcode::Ok);
+
+    assert!(FAR_CALL_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
+    assert!(NEAR_CALL_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
+    assert!(RET_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
+
+    assert!(FAR_CALL_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
+    assert!(NEAR_CALL_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
+    assert!(RET_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
 
     diffs_accumulator
         .sponge_candidates_to_run
-        .push((apply_any, common_relations_buffer));
+        .push((false, false, apply_any, common_relations_buffer));
     diffs_accumulator.flags.push((apply_any, new_flags));
 
     // each opcode may have different register updates
