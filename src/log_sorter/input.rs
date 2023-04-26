@@ -18,7 +18,7 @@ use boojum::gadgets::{
 };
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
 
-pub const DEFAULT_NUM_CHUNKS: usize = 4;
+pub const DEFAULT_NUM_CHUNKS: usize = 2;
 
 #[derive(Derivative, CSAllocatable, CSVarLengthEncodable, CSSelectable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]

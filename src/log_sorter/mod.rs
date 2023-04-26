@@ -15,8 +15,7 @@ use boojum::gadgets::{
 use crate::fsm_input_output::{ClosedFormInputCompactForm, commit_variable_length_encodable_item};
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::base_structures::log_query::LogQuery;
-use crate::base_structures::{vm_state::*, 
-    log_query::{LOG_QUERY_PACKED_WIDTH}};
+use crate::base_structures::vm_state::*;
 
 use crate::demux_log_queue::StorageLogQueue;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -27,7 +26,6 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 pub const STORAGE_LOG_RECORD_ENCODING_LEN: usize = 5;
 
 use crate::log_sorter::input::*;
-const NUM_PERMUTATION_ARG_CHALLENGES: usize = STORAGE_LOG_RECORD_ENCODING_LEN + 1;
 
 pub fn sort_and_deduplicate_events_entry_point<
     F: SmallField,
@@ -51,49 +49,36 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     let mut structured_input =
         EventsDeduplicatorInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
 
-    let unsorted_queue_from_passthrough: CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R> = StorageLogQueue::from_raw_parts(
-        cs,
-        structured_input
-            .observable_input
-            .initial_log_queue_state
-            .head,
-        structured_input
-            .observable_input
-            .initial_log_queue_state
-            .tail.tail,
-        structured_input
-            .observable_input
-            .initial_log_queue_state
-            .tail.length,
-    );
+        let unsorted_queue_from_passthrough_state = QueueState {
+            head: structured_input
+                .observable_input
+                .initial_log_queue_state
+                .head,
+            tail: structured_input
+                .observable_input
+                .initial_log_queue_state
+                .tail,
+        };
 
     // passthrough must be trivial
-    let zero_num = Num::zero(cs);
-     for el in unsorted_queue_from_passthrough.head.iter() {
-        Num::enforce_equal(cs, el, &zero_num);
-    }
+    unsorted_queue_from_passthrough_state.enforce_trivial_head(cs);
 
-    let unsorted_queue_from_fsm: CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R> = StorageLogQueue::from_raw_parts(
-        cs,
-        structured_input
+    let unsorted_queue_from_fsm_input_state = QueueState {
+        head: structured_input
             .hidden_fsm_input
             .initial_unsorted_queue_state
             .head,
-        structured_input
+        tail: structured_input
             .hidden_fsm_input
             .initial_unsorted_queue_state
-            .tail.tail,
-        structured_input
-            .hidden_fsm_input
-            .initial_unsorted_queue_state
-            .tail.length,
-    );
+            .tail,
+    };
 
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
-        &unsorted_queue_from_passthrough.into_state(),
-        &unsorted_queue_from_fsm.into_state()
+        &unsorted_queue_from_passthrough_state,
+        &unsorted_queue_from_fsm_input_state
     );
 
     let mut unsorted_queue = StorageLogQueue::<F, R>::from_raw_parts(
@@ -107,49 +92,37 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     let initial_queue_witness = CircuitQueueWitness::from_inner_witness(initial_queue_witness);
     unsorted_queue.witness = Arc::new(initial_queue_witness);
 
-    let intermediate_sorted_queue_from_passthrough: CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R> = StorageLogQueue::from_raw_parts(
-        cs,
-        structured_input
+    let intermediate_sorted_queue_from_passthrough_state = QueueState {
+        head: structured_input
             .observable_input
             .intermediate_sorted_queue_state
             .head,
-        structured_input
+        tail: structured_input
             .observable_input
             .intermediate_sorted_queue_state
-            .tail.tail,
-        structured_input
-            .observable_input
-            .intermediate_sorted_queue_state
-            .tail.length,
-    );
+            .tail,
+    };
 
     // passthrough must be trivial
-    let zero_num = Num::zero(cs);
-    for el in intermediate_sorted_queue_from_passthrough.head.iter() {
-        Num::enforce_equal(cs, el, &zero_num);
-    }
+    intermediate_sorted_queue_from_passthrough_state.enforce_trivial_head(cs);
 
-    let intermediate_sorted_queue_from_fsm: CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R> = StorageLogQueue::from_raw_parts(
-        cs,
-        structured_input
+
+    let intermediate_sorted_queue_from_fsm_state  = QueueState {
+        head: structured_input
             .hidden_fsm_input
             .intermediate_sorted_queue_state
             .head,
-        structured_input
+        tail: structured_input
             .hidden_fsm_input
             .intermediate_sorted_queue_state
-            .tail.tail,
-        structured_input
-            .hidden_fsm_input
-            .intermediate_sorted_queue_state
-            .tail.length,
-    );
+            .tail,
+    };
 
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
-        &intermediate_sorted_queue_from_passthrough.into_state(),
-        &intermediate_sorted_queue_from_fsm.into_state()
+        &intermediate_sorted_queue_from_passthrough_state,
+        &intermediate_sorted_queue_from_fsm_state
     );
     let mut intermediate_sorted_queue = StorageLogQueue::<F, R>::from_raw_parts(
         cs, 
@@ -161,28 +134,23 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     intermediate_sorted_queue.witness = Arc::new(intermediate_sorted_queue_witness);
 
 
-    let final_sorted_queue_from_fsm: CircuitQueue<F, LogQuery<F>, 8, 12, 4, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R> = StorageLogQueue::from_raw_parts(
-        cs,
-        structured_input
+    let final_sorted_queue_from_fsm = QueueState {
+        head: structured_input
             .hidden_fsm_input
             .final_result_queue_state
             .head,
-        structured_input
+        tail: structured_input
             .hidden_fsm_input
             .final_result_queue_state
-            .tail.tail,
-        structured_input
-            .hidden_fsm_input
-            .final_result_queue_state
-            .tail.length,
-    );
+            .tail,
+    };
     let empty_state = QueueState::empty(cs);
 
     let final_sorted_state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &empty_state,
-        &final_sorted_queue_from_fsm.into_state()
+        &final_sorted_queue_from_fsm
     );
     let mut final_sorted_queue = StorageLogQueue::<F, R>::from_raw_parts(
         cs, 
@@ -192,71 +160,31 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     );
 
     // get challenges for permutation argument
-    let mut fs_input = vec![];
-    fs_input.extend_from_slice(&unsorted_queue_from_passthrough.tail.map(|el| el.get_variable()));
-    fs_input.push(unsorted_queue_from_passthrough.length.get_variable());
+    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_CHUNKS> (
+        cs, 
+        structured_input
+            .observable_input
+            .initial_log_queue_state
+            .tail, 
+        structured_input
+            .observable_input
+            .intermediate_sorted_queue_state
+            .tail,
+        round_function
+    );
 
-    fs_input.extend_from_slice(&intermediate_sorted_queue_from_passthrough.tail.map(|el| el.get_variable()));
-    fs_input.push(intermediate_sorted_queue_from_passthrough.length.get_variable());
-
-
-    let total_elements_to_absorb = MEMORY_QUERY_PACKED_WIDTH;
-    let num_rounds = (total_elements_to_absorb + 8 - 1) / 8;
-    let mut elements_source= fs_input.into_iter();
-
-    let zero_element = cs.allocate_constant(F::ZERO);
-
-    let mut capacity_elements = [zero_element; 4];
-    let mut sponge_state = [zero_element; 12];
-
-    for _ in 0..num_rounds {
-        let mut to_absorb = [zero_element; 8];
-        for (dst, src) in to_absorb.iter_mut().zip(&mut elements_source) {
-            *dst = src;
-        }
-
-        let result_state = R::absorb_with_replacement(cs, to_absorb, capacity_elements);
-        capacity_elements.copy_from_slice(&result_state[8..]);
-        sponge_state = result_state;
-    }
-
-    let mut taken = 0; // up to absorbtion length
-    let mut fs_challenges = vec![];
-    for _ in 0..NUM_PERMUTATION_ARG_CHALLENGES {
-        if taken == MEMORY_QUERY_PACKED_WIDTH {
-            // run round
-            sponge_state = R::compute_round_function(cs, sponge_state);
-            taken = 0;
-        }
-
-        let challenge = sponge_state[taken];
-        fs_challenges.push(Num::from_variable(challenge));
-
-        taken += 1;
-    }
-
-    let mut fs_challenge= [[Num::zero(cs);  MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARG_CHALLENGES];
-    for (src, dst) in fs_challenges
-    .chunks(MEMORY_QUERY_PACKED_WIDTH + 1)
-    .zip(fs_challenge.iter_mut()) {
-        dst.copy_from_slice(src);
-    }
-
-
-    let one =  Num::from_variable(cs.allocate_constant(F::ONE));
-    let zero = Num::from_variable(cs.allocate_constant(F::ZERO));
-    let make_one_chunks: [Num<F>; DEFAULT_NUM_CHUNKS] = [one, zero, zero, zero];
+    let one = Num::allocated_constant(cs, F::ONE);
     let initial_lhs = Num::parallel_select(
         cs,
         structured_input.start_flag,
-        &make_one_chunks,
+        &[one; DEFAULT_NUM_CHUNKS],
         &structured_input.hidden_fsm_input.lhs_accumulator,
     );
 
     let initial_rhs = Num::parallel_select(
         cs,
         structured_input.start_flag,
-        &make_one_chunks,
+        &[one; DEFAULT_NUM_CHUNKS],
         &structured_input.hidden_fsm_input.rhs_accumulator,
     );
 
@@ -270,7 +198,8 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     );
 
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
-    let empty_storage = LogQuery::empty(cs);
+    use boojum::gadgets::traits::allocatable::CSPlaceholder;
+    let empty_storage = LogQuery::placeholder(cs);
     let previous_item = LogQuery::conditionally_select(
         cs,
         structured_input.start_flag,
@@ -291,7 +220,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &mut intermediate_sorted_queue,
         &mut final_sorted_queue,
         structured_input.start_flag,
-        fs_challenge,
+        challenges,
         previous_packed_key,
         previous_item,
         limit,
@@ -354,19 +283,19 @@ pub fn repack_and_prove_events_rollbacks_inner<
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
-    mut lhs: [Num<F>; 4],
-    mut rhs: [Num<F>; 4],
+    mut lhs: [Num<F>; DEFAULT_NUM_CHUNKS],
+    mut rhs: [Num<F>; DEFAULT_NUM_CHUNKS],
     unsorted_queue: &mut StorageLogQueue<F, R>,
     intermediate_sorted_queue: &mut StorageLogQueue<F, R>,
     result_queue: &mut StorageLogQueue<F, R>,
     is_start: Boolean<F>,
-    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; NUM_PERMUTATION_ARG_CHALLENGES],
+    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_CHUNKS],
     mut previous_packed_key: Num<F>,
     mut previous_item: LogQuery<F>,
     limit: usize,
 ) -> (
-    [Num<F>; 4], 
-    [Num<F>; 4],
+    [Num<F>; DEFAULT_NUM_CHUNKS], 
+    [Num<F>; DEFAULT_NUM_CHUNKS],
         Num<F>,
         LogQuery<F>
     ) where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
@@ -406,7 +335,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
         sorted_item.rw_flag.conditionally_enforce_false(cs, original_is_empty);
 
         assert_eq!(original_encoding.len(), sorted_encoding.len());
-        assert_eq!(original_encoding.len(), fs_challenges.len() - 1);
+        assert_eq!(lhs.len(), rhs.len());
         for ((challenges, lhs), rhs) in fs_challenges
             .iter()
             .zip(lhs.iter_mut())

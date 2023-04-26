@@ -268,6 +268,8 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
         (el as u32, (el >> 32) as u32)
     }).collect();
 
+    let merkle_paths: VecDeque<[[u8; 32]; STORAGE_DEPTH]> = merkle_paths.into_iter().map(|el| el.try_into().expect("length must match")).collect();
+
     let mut structured_input = StorageApplicationInputOutput::alloc_ignoring_outputs(
         cs,
         closed_form_input.clone(),
