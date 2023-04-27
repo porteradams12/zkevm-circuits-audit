@@ -24,7 +24,7 @@ use crate::storage_validity_by_grand_product::unpacked_long_comparison;
 
 use zkevm_opcode_defs::BOOTLOADER_HEAP_PAGE;
 
-mod input;
+pub mod input;
 use input::*;
 
 pub fn ram_permutation_entry_point<
