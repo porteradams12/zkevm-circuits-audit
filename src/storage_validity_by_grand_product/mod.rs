@@ -1014,6 +1014,10 @@ mod tests {
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
+        let owned_cs = PoseidonGate::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
         let owned_cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
