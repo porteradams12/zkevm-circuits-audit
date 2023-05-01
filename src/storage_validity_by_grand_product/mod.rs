@@ -1,6 +1,8 @@
 use super::*;
 
 pub mod input;
+#[cfg(test)]
+mod test_input;
 
 use crate::base_structures::log_query::log_query_witness_from_values;
 use crate::fsm_input_output::ClosedFormInputCompactForm;
@@ -82,10 +84,7 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
                     original_encoding[EXTENDED_TIMESTAMP_ENCODING_ELEMENT],
                     F::ONE,
                 ),
-                (
-                    timestamp.get_variable(),
-                    F::from_u64_unchecked(1u64 << 8),
-                ),
+                (timestamp.get_variable(), F::from_u64_unchecked(1u64 << 8)),
             ],
         )
         .get_variable();
@@ -114,9 +113,11 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
 
     fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
         // NOTE(shamatar) Using CSAllocatableExt causes cyclic dependency here, so we use workaround
-        let mut record_values = [F::ZERO; crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH];
-        record_values
-            .copy_from_slice(&values[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH]);
+        let mut record_values =
+            [F::ZERO; crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH];
+        record_values.copy_from_slice(
+            &values[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH],
+        );
         let record = log_query_witness_from_values(record_values);
         let other_timestamp: u32 = WitnessCastable::cast_from_source(values[36]);
 
@@ -131,13 +132,16 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
         todo!()
     }
 
-    fn flatten_as_variables(&self) -> [Variable; 37] where
+    fn flatten_as_variables(&self) -> [Variable; 37]
+    where
         [(); Self::INTERNAL_STRUCT_LEN]:,
     {
         let mut result = [Variable::placeholder(); 37];
         let record_variables = self.record.flatten_as_variables_impl();
-        result[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH].copy_from_slice(&record_variables);
-        result[crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH] = self.timestamp.get_variable();
+        result[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH]
+            .copy_from_slice(&record_variables);
+        result[crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH] =
+            self.timestamp.get_variable();
         assert_no_placeholder_variables(&result);
 
         result
@@ -331,33 +335,42 @@ where
     );
 
     // get challenges for permutation argument
-    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
-        cs, 
-        structured_input
-            .observable_input
-            .unsorted_log_queue_state
-            .tail, 
+    let challenges = crate::utils::produce_fs_challenges::<
+        F,
+        CS,
+        R,
+        QUEUE_STATE_WIDTH,
+        { TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1 },
+        DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
+    >(
+        cs,
         structured_input
             .observable_input
             .unsorted_log_queue_state
             .tail,
-        round_function
+        structured_input
+            .observable_input
+            .unsorted_log_queue_state
+            .tail,
+        round_function,
     );
 
     let one = Num::allocated_constant(cs, F::ONE);
-    let initial_lhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
-        &structured_input.hidden_fsm_input.lhs_accumulator,
-    );
+    let initial_lhs =
+        <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            &structured_input.hidden_fsm_input.lhs_accumulator,
+        );
 
-    let initial_rhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
-        &structured_input.hidden_fsm_input.rhs_accumulator,
-    );
+    let initial_rhs =
+        <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            &structured_input.hidden_fsm_input.rhs_accumulator,
+        );
 
     let zero_u32: UInt32<F> = UInt32::zero(cs);
 
@@ -368,7 +381,6 @@ where
         &[zero_u32; PACKED_KEY_LENGTH],
         &structured_input.hidden_fsm_input.previous_packed_key,
     );
-
 
     let cycle_idx = UInt32::conditionally_select(
         cs,
@@ -412,7 +424,6 @@ where
         structured_input.hidden_fsm_input.this_cell_current_value,
         structured_input.hidden_fsm_input.this_cell_current_depth,
         shard_id,
-        round_function,
         limit,
     );
 
@@ -518,7 +529,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
     sorted_queue: &mut StorageLogQueue<F, R>,
     is_start: Boolean<F>,
     mut cycle_idx: UInt32<F>,
-    fs_challenges: [[Num<F>; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    fs_challenges: [[Num<F>; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1];
+        DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut previous_packed_key: [UInt32<F>; PACKED_KEY_LENGTH],
     mut previous_key: UInt256<F>,
     mut previous_address: UInt160<F>,
@@ -528,7 +540,6 @@ pub fn sort_and_deduplicate_storage_access_inner<
     mut this_cell_current_value: UInt256<F>,
     mut this_cell_current_depth: UInt32<F>,
     shard_id_to_process: UInt8<F>,
-    _round_function: &R,
     limit: usize,
 ) -> (
     [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
@@ -562,8 +573,6 @@ where
 
     // to ensure uniqueness we place timestamps in a addition to the
 
-    // const PACKED_WIDTHS: [usize; 8] = [56, 56, 56, 56, 56, 56, 56, 32];
-
     let mut lhs_lc = Vec::with_capacity(TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1);
     let mut rhs_lc = Vec::with_capacity(TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1);
 
@@ -592,7 +601,8 @@ where
                 &original_timestamp,
             );
 
-        let shard_id_is_valid = UInt8::equals(cs, &shard_id_to_process, &sorted_item.record.shard_id);
+        let shard_id_is_valid =
+            UInt8::equals(cs, &shard_id_to_process, &sorted_item.record.shard_id);
         shard_id_is_valid.conditionally_enforce_true(cs, should_pop);
 
         assert_eq!(extended_original_encoding.len(), sorted_encoding.len());
@@ -608,8 +618,8 @@ where
             .map(|v| Num::from_variable(*v))
             .collect::<Vec<Num<F>>>();
 
-        for (((lhs_dst, rhs_dst), challenges), additive_part) in 
-            lhs.iter_mut()
+        for (((lhs_dst, rhs_dst), challenges), additive_part) in lhs
+            .iter_mut()
             .zip(rhs.iter_mut())
             .zip(fs_challenges.iter())
             .zip(additive_parts.iter())
@@ -644,21 +654,8 @@ where
 
         let TimestampedStorageLogRecord { record, timestamp } = sorted_item;
 
-        // // now resolve a logic about sorting itself
-        // let packed_key = pack_key(
-        //     cs,
-        //     (record.shard_id.clone(), record.address.clone(), record.key),
-        // );
-
-        // // ensure sorting
-        // let (keys_are_equal, previous_key_is_greater) =
-        //     prepacked_long_comparison(cs, &previous_packed_key, &packed_key, &PACKED_WIDTHS);
-
         // now resolve a logic about sorting itself
-        let packed_key = concatenate_key(
-            cs,
-            (record.address.clone(), record.key),
-        );
+        let packed_key = concatenate_key(cs, (record.address.clone(), record.key));
 
         // ensure sorting
         let (keys_are_equal, previous_key_is_greater) =
@@ -922,254 +919,6 @@ where
     )
 }
 
-// pub fn pack_key<F: SmallField, CS: ConstraintSystem<F>>(
-//     cs: &mut CS,
-//     key_tuple: (UInt8<F>, UInt160<F>, UInt256<F>),
-// ) -> [Num<F>; 8] {
-//     debug_assert!(F::CAPACITY_BITS >= 56);
-
-//     // LE packing
-//     // Attempting to stick to previous packing methods shown in this repo
-
-//     let (shard_id, address, key) = key_tuple;
-//     let key_bytes = key.inner.map(|el| el.decompose_into_bytes(cs));
-//     let address_bytes = address.inner.map(|el| el.decompose_into_bytes(cs));
-//     let v0 = Num::linear_combination(
-//         cs,
-//         &[
-//             (key_bytes[0][0].get_variable(), F::ONE),
-//             (
-//                 key_bytes[0][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 8),
-//             ),
-//             (
-//                 key_bytes[0][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 16),
-//             ),
-//             (
-//                 key_bytes[0][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 24),
-//             ),
-//             (
-//                 key_bytes[1][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 32),
-//             ),
-//             (
-//                 key_bytes[1][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 40),
-//             ),
-//             (
-//                 key_bytes[1][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 48),
-//             ),
-//         ],
-//     );
-
-//     let v1 = Num::linear_combination(
-//         cs,
-//         &[
-//             (key_bytes[1][3].get_variable(), F::ONE),
-//             (
-//                 key_bytes[2][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 8),
-//             ),
-//             (
-//                 key_bytes[2][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 16),
-//             ),
-//             (
-//                 key_bytes[2][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 24),
-//             ),
-//             (
-//                 key_bytes[2][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 32),
-//             ),
-//             (
-//                 key_bytes[3][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 40),
-//             ),
-//             (
-//                 key_bytes[3][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 48),
-//             ),
-//         ],
-//     );
-
-//     let v2 = Num::linear_combination(
-//         cs,
-//         &[
-//             (key_bytes[3][2].get_variable(), F::ONE),
-//             (
-//                 key_bytes[3][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 8),
-//             ),
-//             (
-//                 key_bytes[4][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 16),
-//             ),
-//             (
-//                 key_bytes[4][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 24),
-//             ),
-//             (
-//                 key_bytes[4][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 32),
-//             ),
-//             (
-//                 key_bytes[4][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 40),
-//             ),
-//             (
-//                 key_bytes[5][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 48),
-//             ),
-//         ],
-//     );
-
-//     let v3 = Num::linear_combination(
-//         cs,
-//         &[
-//             (key_bytes[5][1].get_variable(), F::ONE),
-//             (
-//                 key_bytes[5][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 8),
-//             ),
-//             (
-//                 key_bytes[5][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 16),
-//             ),
-//             (
-//                 key_bytes[6][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 24),
-//             ),
-//             (
-//                 key_bytes[6][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 32),
-//             ),
-//             (
-//                 key_bytes[6][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 40),
-//             ),
-//             (
-//                 key_bytes[6][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 48),
-//             ),
-//         ],
-//     );
-
-//     let v4 = Num::linear_combination(
-//         cs,
-//         &[
-//             (key_bytes[7][0].get_variable(), F::ONE),
-//             (
-//                 key_bytes[7][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 8),
-//             ),
-//             (
-//                 key_bytes[7][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 16),
-//             ),
-//             (
-//                 key_bytes[7][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 24),
-//             ),
-//             (
-//                 address_bytes[0][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 32),
-//             ),
-//             (
-//                 address_bytes[0][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 40),
-//             ),
-//             (
-//                 address_bytes[0][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 48),
-//             ),
-//         ],
-//     );
-
-//     let v5 = Num::linear_combination(
-//         cs,
-//         &[
-//             (address_bytes[0][3].get_variable(), F::ONE),
-//             (
-//                 address_bytes[1][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 8),
-//             ),
-//             (
-//                 address_bytes[1][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 16),
-//             ),
-//             (
-//                 address_bytes[2][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 24),
-//             ),
-//             (
-//                 address_bytes[1][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 32),
-//             ),
-//             (
-//                 address_bytes[2][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 40),
-//             ),
-//             (
-//                 address_bytes[2][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 48),
-//             ),
-//         ],
-//     );
-
-//     let v6 = Num::linear_combination(
-//         cs,
-//         &[
-//             (address_bytes[2][2].get_variable(), F::ONE),
-//             (
-//                 address_bytes[2][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 8),
-//             ),
-//             (
-//                 address_bytes[3][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 16),
-//             ),
-//             (
-//                 address_bytes[3][1].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 24),
-//             ),
-//             (
-//                 address_bytes[3][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 32),
-//             ),
-//             (
-//                 address_bytes[3][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 40),
-//             ),
-//             (
-//                 address_bytes[4][0].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 48),
-//             ),
-//         ],
-//     );
-
-//     let v7 = Num::linear_combination(
-//         cs,
-//         &[
-//             (address_bytes[4][1].get_variable(), F::ONE),
-//             (
-//                 address_bytes[4][2].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 8),
-//             ),
-//             (
-//                 address_bytes[4][3].get_variable(),
-//                 F::from_u64_unchecked(1u64 << 16),
-//             ),
-//             (shard_id.get_variable(), F::from_u64_unchecked(1u64 << 24)),
-//         ],
-//     );
-
-//     [v0, v1, v2, v3, v4, v5, v6, v7]
-// }
-
 pub fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
     _cs: &mut CS,
     key_tuple: (UInt160<F>, UInt256<F>),
@@ -1185,7 +934,6 @@ pub fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
         key.inner[5],
         key.inner[6],
         key.inner[7],
-
         address.inner[0],
         address.inner[1],
         address.inner[2],
@@ -1202,15 +950,19 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
     a: &[UInt32<F>; N],
     b: &[UInt32<F>; N],
 ) -> (Boolean<F>, Boolean<F>) {
-
     let mut borrow = Boolean::allocated_constant(cs, false);
     let zero_u32 = UInt32::zero(cs);
     let mut result = [zero_u32; N];
     for ((b, a), dst) in b.iter().zip(a.iter()).zip(result.iter_mut()) {
-        let (c, new_borrow) = UIntXAddGate::<32>::perform_subtraction(cs, b.get_variable(), a.get_variable(), borrow.get_variable());
+        let (c, new_borrow) = UIntXAddGate::<32>::perform_subtraction(
+            cs,
+            b.get_variable(),
+            a.get_variable(),
+            borrow.get_variable(),
+        );
         let (c, _) = UInt32::from_variable_checked(cs, c);
         *dst = c;
-        borrow = unsafe {Boolean::from_variable_unchecked(new_borrow) };
+        borrow = unsafe { Boolean::from_variable_unchecked(new_borrow) };
     }
 
     let zero_limbs = result.map(|el| el.is_zero(cs));
@@ -1219,70 +971,305 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
     (eq, borrow)
 }
 
-// /// Check that a == b and a > b by performing a long subtraction b - a with borrow.
-// /// Both a and b are considered as least significant word first
-// #[track_caller]
-// pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
-//     cs: &mut CS,
-//     a: &[Num<F>],
-//     b: &[Num<F>],
-//     width_data: &[usize],
-// ) -> (Boolean<F>, Boolean<F>) {
-//     assert_eq!(a.len(), b.len());
-//     assert_eq!(a.len(), width_data.len());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use boojum::cs::implementations::reference_cs::{
+        CSDevelopmentAssembly, CSReferenceImplementation,
+    };
+    use boojum::cs::toolboxes::gate_config::{GatePlacementStrategy, NoGates};
+    use boojum::cs::traits::configurable_cs::ConfigurableCS;
+    use boojum::cs::CSGeometry;
+    use boojum::cs::EmptyToolbox;
+    use boojum::cs::*;
+    use boojum::field::goldilocks::GoldilocksField;
+    use boojum::gadgets::tables::byte_split::ByteSplitTable;
+    use boojum::gadgets::tables::*;
+    use boojum::implementations::poseidon_goldilocks::PoseidonGoldilocks;
+    use boojum::worker::Worker;
 
-//     let mut minus_one = F::ONE;
-//     minus_one.negate();
+    type PoseidonGate = PoseidonFlattenedGate<GoldilocksField, 8, 12, 4, PoseidonGoldilocks>;
+    type F = GoldilocksField;
 
-//     let mut previous_borrow = Boolean::allocated_constant(cs, false);
-//     let mut limbs_are_equal = vec![];
+    fn create_cs<
+        P: boojum::field::traits::field_like::PrimeFieldLikeVectorized<Base = F>,
+        CFG: boojum::config::CSConfig,
+    >(
+        owned_cs: CSReferenceImplementation<F, P, CFG, NoGates, EmptyToolbox>,
+    ) -> CSReferenceImplementation<
+        F,
+        P,
+        CFG,
+        impl boojum::cs::toolboxes::gate_config::GateConfigurationHolder<F>,
+        impl boojum::cs::toolboxes::static_toolbox::StaticToolboxHolder,
+    > {
+        let owned_cs = owned_cs.allow_lookup(
+            LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                width: 3,
+                num_repetitions: 8,
+                share_table_id: true,
+            },
+        );
+        let owned_cs = ConstantsAllocatorGate::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = ReductionGate::<F, 4>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
+        let owned_cs = BooleanConstraintGate::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = UIntXAddGate::<32>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = UIntXAddGate::<16>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = SelectionGate::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = ZeroCheckGate::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+            false,
+        );
+        let owned_cs = DotProductGate::<4>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
+        let owned_cs =
+            NopGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
 
-//     for ((a, b), width) in a.iter().zip(b.iter()).zip(width_data.iter()) {
-//         let (result_witness, borrow_witness) = {
-//             use num_integer::Integer;
-//             use num_traits::Zero;
+        let mut owned_cs = owned_cs.freeze();
 
-//             let a = a.witness_hook(&*cs)().unwrap().as_raw_u64();
-//             let b = b.witness_hook(&*cs)().unwrap().as_raw_u64();
-//             let borrow_guard = 1u64 << width;
+        // add tables
+        let table = create_xor8_table();
+        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
 
-//             let tmp =
-//                 borrow_guard.clone() + b - a - previous_borrow.witness_hook(&*cs)().unwrap() as u64;
-//             let (q, r) = tmp.div_rem(&borrow_guard);
+        let table = create_and8_table();
+        owned_cs.add_lookup_table::<And8Table, 3>(table);
 
-//             let borrow = q.is_zero();
-//             let wit = F::from_u64_unchecked(r);
+        let table = create_byte_split_table::<F, 1>();
+        owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
+        let table = create_byte_split_table::<F, 2>();
+        owned_cs.add_lookup_table::<ByteSplitTable<2>, 3>(table);
+        let table = create_byte_split_table::<F, 3>();
+        owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
+        let table = create_byte_split_table::<F, 4>();
+        owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
 
-//             (wit, borrow)
-//         };
+        owned_cs
+    }
 
-//         let borrow = Boolean::allocate(cs, borrow_witness);
-//         let intermediate_result = Num::allocate(cs, result_witness);
-//         intermediate_result.constraint_bit_length_as_bytes(cs, *width);
+    #[test]
+    fn test_storage_validity_circuit() {
+        let geometry = CSGeometry {
+            num_columns_under_copy_permutation: 100,
+            num_witness_columns: 0,
+            num_constant_columns: 8,
+            max_allowed_constraint_degree: 4,
+        };
 
-//         let intermediate_is_zero = intermediate_result.is_zero(cs);
-//         limbs_are_equal.push(intermediate_is_zero);
+        let owned_cs =
+            CSDevelopmentAssembly::<F, _, _>::new_for_geometry(geometry, 1 << 26, 1 << 20);
+        let mut owned_cs = create_cs(owned_cs);
+        let cs = &mut owned_cs;
 
-//         // b - a - previous_borrow + 2^X * borrow = intermediate
+        let mut lhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
+            DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
+        let mut rhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
+            DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
 
-//         let result = Num::<F>::linear_combination(
-//             cs,
-//             &[
-//                 (b.get_variable(), F::ONE),
-//                 (a.get_variable(), minus_one),
-//                 (previous_borrow.get_variable(), minus_one),
-//                 (intermediate_result.get_variable(), minus_one),
-//                 (borrow.get_variable(), F::from_u64_unchecked(1u64 << width)),
-//             ],
-//         )
-//         .get_variable();
-//         ZeroCheckGate::check_if_zero(cs, result);
+        let execute = Boolean::allocated_constant(cs, true);
+        let mut original_queue = StorageLogQueue::<F, PoseidonGoldilocks>::empty(cs);
+        let unsorted_input = test_input::generate_test_input_unsorted(cs);
+        for el in unsorted_input {
+            original_queue.push(cs, el, execute);
+        }
 
-//         previous_borrow = borrow;
-//     }
+        let mut intermediate_sorted_queue = CircuitQueue::empty(cs);
+        let sorted_input = test_input::generate_test_input_sorted(cs);
+        for el in sorted_input {
+            intermediate_sorted_queue.push(cs, el, execute);
+        }
 
-//     let final_borrow = previous_borrow;
-//     let eq = Boolean::multi_and(cs, &limbs_are_equal);
+        let mut sorted_queue = StorageLogQueue::empty(cs);
 
-//     (eq, final_borrow)
-// }
+        let is_start = Boolean::allocated_constant(cs, true);
+        let mut cycle_idx = UInt32::placeholder(cs);
+        let round_function = PoseidonGoldilocks;
+        let fs_challenges = crate::utils::produce_fs_challenges(
+            cs,
+            original_queue.into_state().tail,
+            intermediate_sorted_queue.into_state().tail,
+            &round_function,
+        );
+        let mut previous_packed_key = [UInt32::placeholder(cs); PACKED_KEY_LENGTH];
+        let mut previous_key = UInt256::placeholder(cs);
+        let mut previous_address = UInt160::placeholder(cs);
+        let mut previous_timestamp = UInt32::placeholder(cs);
+        let this_cell_has_explicit_read_and_rollback_depth_zero =
+            Boolean::allocated_constant(cs, false);
+        let this_cell_base_value = UInt256::placeholder(cs);
+        let this_cell_current_value = UInt256::placeholder(cs);
+        let this_cell_current_depth = UInt32::placeholder(cs);
+        let shard_id_to_process = UInt8::placeholder(cs);
+        let limit = 16;
+
+        let commitments = sort_and_deduplicate_storage_access_inner(
+            cs,
+            lhs,
+            rhs,
+            &mut original_queue,
+            &mut intermediate_sorted_queue,
+            &mut sorted_queue,
+            is_start,
+            cycle_idx,
+            fs_challenges,
+            previous_packed_key,
+            previous_key,
+            previous_address,
+            previous_timestamp,
+            this_cell_has_explicit_read_and_rollback_depth_zero,
+            this_cell_base_value,
+            this_cell_current_value,
+            this_cell_current_depth,
+            shard_id_to_process,
+            limit,
+        );
+
+        cs.print_gate_stats();
+
+        cs.pad_and_shrink();
+        let worker = Worker::new();
+        assert!(owned_cs.check_if_satisfied(&worker));
+    }
+
+    // fn configure_cs<
+    //     F: SmallField,
+    //     P: boojum::field::traits::field_like::PrimeFieldLikeVectorized<Base = F>,
+    //     CFG: boojum::config::CSConfig,
+    // >(
+    //     cs: CSReferenceImplementation<F, P, CFG, NoGates, EmptyToolbox>,
+    // ) -> CSReferenceImplementation<
+    //     F,
+    //     P,
+    //     CFG,
+    //     impl boojum::cs::toolboxes::gate_config::GateConfigurationHolder<F>,
+    //     impl boojum::cs::toolboxes::static_toolbox::StaticToolboxHolder,
+    // >
+    // where
+    //     P::Context: boojum::field::traits::field_like::TrivialContext,
+    // {
+    //     let cs = cs.allow_lookup(
+    //         boojum::cs::LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+    //             width: 3,
+    //             num_repetitions: 5,
+    //             share_table_id: true,
+    //         },
+    //     );
+
+    //     let cs = BooleanConstraintGate::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseSpecializedColumns {
+    //             num_repetitions: 1,
+    //             share_constants: false,
+    //         },
+    //     );
+    //     // let cs = U8x4FMAGate::configure_for_cs(cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 2, share_constants: false });
+
+    //     // let cs = cs.allow_lookup(
+    //     //     boojum::cs::LookupParameters::TableIdAsConstant { width: 3, share_table_id: true }
+    //     // );
+    //     // let cs = BooleanConstraintGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+    //     let cs = U8x4FMAGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+
+    //     let cs = ConstantsAllocatorGate::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = DotProductGate::<4>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = ZeroCheckGate::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //         false,
+    //     );
+    //     let cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = UIntXAddGate::<32>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = UIntXAddGate::<16>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = UIntXAddGate::<8>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs =
+    //         SelectionGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+    //     let cs = ParallelSelectionGate::<4>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs =
+    //         PublicInputGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+    //     let cs = ReductionGate::<_, 4>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = NopGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+    //     let mut cs_owned = cs.freeze();
+
+    //     use crate::tables::*;
+    //     use boojum::gadgets::tables::binop_table::*;
+    //     let table = create_binop_table();
+    //     cs_owned.add_lookup_table::<BinopTable, 3>(table);
+
+    //     let subpc_to_mask_table = create_subpc_bitmask_table::<F>();
+    //     cs_owned.add_lookup_table::<VMSubPCToBitmaskTable, 3>(subpc_to_mask_table);
+
+    //     let opcode_decoding_table = create_opcodes_decoding_and_pricing_table::<F>();
+    //     cs_owned.add_lookup_table::<VMOpcodeDecodingTable, 3>(opcode_decoding_table);
+
+    //     let conditions_resolution_table = create_conditionals_resolution_table::<F>();
+    //     cs_owned.add_lookup_table::<VMConditionalResolutionTable, 3>(conditions_resolution_table);
+
+    //     let integer_to_bitmask_table = create_integer_to_bitmask_table::<F>(
+    //         15u32.next_power_of_two().trailing_zeros() as usize,
+    //         REG_IDX_TO_BITMASK_TABLE_NAME,
+    //     );
+    //     cs_owned.add_lookup_table::<RegisterIndexToBitmaskTable, 3>(integer_to_bitmask_table);
+
+    //     let shifts_table = create_shift_to_num_converter_table::<F>();
+    //     cs_owned.add_lookup_table::<BitshiftTable, 3>(shifts_table);
+
+    //     let uma_unaligned_access_table =
+    //         create_integer_to_bitmask_table::<F>(5, UMA_SHIFT_TO_BITMASK_TABLE_NAME);
+    //     cs_owned.add_lookup_table::<UMAShiftToBitmaskTable, 3>(uma_unaligned_access_table);
+
+    //     let uma_ptr_read_cleanup_table = create_uma_ptr_read_bitmask_table::<F>();
+    //     cs_owned.add_lookup_table::<UMAPtrReadCleanupTable, 3>(uma_ptr_read_cleanup_table);
+
+    //     cs_owned
+    // }
+}
