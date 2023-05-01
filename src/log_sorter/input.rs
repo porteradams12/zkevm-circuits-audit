@@ -99,7 +99,7 @@ crate::fsm_input_output::ClosedFormInputWitness<
     EventsDeduplicatorOutputData<F>,
 >;
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct EventsDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: EventsDeduplicatorInputOutputWitness<F>,

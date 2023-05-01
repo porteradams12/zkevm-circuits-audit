@@ -126,7 +126,7 @@ use crate::code_unpacker_sha256::{DecommitQuery, DECOMMIT_QUERY_PACKED_WIDTH};
 use crate::code_unpacker_sha256::full_state_queue::FullStateCircuitQueueRawWitness;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct CodeDecommitterCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: CodeDecommitterCycleInputOutputWitness<F>,

@@ -103,7 +103,7 @@ pub type CodeDecommittmentsDeduplicatorInputOutputWitness<F> =
     >;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct CodeDecommittmentsDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: CodeDecommittmentsDeduplicatorInputOutputWitness<F>,

@@ -99,7 +99,7 @@ pub type StorageApplicationInputOutputWitness<F> = crate::fsm_input_output::Clos
 >;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct StorageApplicationCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: StorageApplicationInputOutputWitness<F>,

@@ -71,7 +71,7 @@ crate::fsm_input_output::ClosedFormInputWitness<F, VmLocalState<F>, VmInputData<
 use crate::main_vm::witness_oracle::WitnessOracle;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug(bound = ""))]
+#[derivative(Clone, Debug(bound = ""), Default)]
 #[serde(bound = "")]
 pub struct VmCircuitWitness<F: SmallField, W: WitnessOracle<F>> {
     pub closed_form_input: VmCircuitInputOutputWitness<F>,

@@ -88,7 +88,7 @@ pub type RamPermutationCycleInputOutputWitness<F> =
     crate::fsm_input_output::ClosedFormInputWitness<F, RamPermutationFSMInputOutput<F>, RamPermutationInputData<F>, ()>;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct RamPermutationCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: RamPermutationCycleInputOutputWitness<F>,

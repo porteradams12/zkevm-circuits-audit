@@ -104,6 +104,23 @@ where
 
 pub const CLOSED_FORM_COMMITTMENT_LENGTH: usize = 4;
 
+
+impl<
+    F: SmallField,
+    T: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
+    IN: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
+    OUT: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
+> std::default::Default for ClosedFormInputWitness<F, T, IN, OUT>
+where
+    <T as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
+    <IN as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
+    <OUT as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
+{
+    fn default() -> Self {
+        ClosedFormInput::<F, T, IN, OUT>::placeholder_witness()
+    }
+}
+
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Debug)]
 pub struct ClosedFormInputCompactForm<F: SmallField> {

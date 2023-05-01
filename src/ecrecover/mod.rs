@@ -736,6 +736,10 @@ mod test {
     use super::*;
 
     type F = GoldilocksField;
+    type P = GoldilocksField;
+
+    use boojum::config::DevCSConfig;
+
     use rand::XorShiftRng;
     use rand::SeedableRng;
     use rand::Rng;
@@ -808,11 +812,11 @@ mod test {
 
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::cs::CSGeometry;
-    use boojum::cs::implementations::reference_cs::CSDevelopmentAssembly;
-    use boojum::cs::traits::configurable_cs::ConfigurableCS;
     use boojum::cs::gates::*;
     use boojum::gadgets::tables::*;
     use boojum::cs::*;
+    use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
+    use boojum::cs::cs_builder::*;
 
     #[test]
     fn test_signature_for_address_verification() {
@@ -822,33 +826,45 @@ mod test {
             num_constant_columns: 8,
             max_allowed_constraint_degree: 4,
         };
+        let max_variables = 1 << 26;
+        let max_trace_len = 1 << 20;
 
-        let owned_cs = CSDevelopmentAssembly::<F, _, _>::new_for_geometry(
-            geometry,
-            1 << 26,
-            1 << 20
-        );
-        let owned_cs = owned_cs.allow_lookup(
-            LookupParameters::UseSpecializedColumnsWithTableIdAsConstant { 
-                width: 3, 
-                num_repetitions: 8, 
-                share_table_id: true 
-            }
-        );
-        let owned_cs = ConstantsAllocatorGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-        // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
-        let owned_cs = BooleanConstraintGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = UIntXAddGate::<32>::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = UIntXAddGate::<16>::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = SelectionGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = ZeroCheckGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns, false);
-        let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-        // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
-        let owned_cs = NopGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+        fn configure<F: SmallField, T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
+            builder: CsBuilder<T, F, GC, TB>
+        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
+            let builder = builder.allow_lookup(
+                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant { 
+                    width: 3, 
+                    num_repetitions: 8, 
+                    share_table_id: true 
+                }
+            );
+            let builder = ConstantsAllocatorGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ReductionGate::<F, 4>::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
+            let builder = BooleanConstraintGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = UIntXAddGate::<32>::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = UIntXAddGate::<16>::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = SelectionGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ZeroCheckGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns, false);
+            let builder = DotProductGate::<4>::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
+            let builder = NopGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+    
+            builder
+        }
 
-        let mut owned_cs = owned_cs.freeze();
+        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
+            geometry, 
+            max_variables, 
+            max_trace_len
+        );
+        let builder = new_cs_builder::<_, F>(builder_impl);
+
+        let builder = configure(builder);
+        let mut owned_cs = builder.build(());
+    
         
         // add tables
         let table = create_xor8_table();
