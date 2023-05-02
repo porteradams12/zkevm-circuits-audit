@@ -496,7 +496,9 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
     }
 }
 
-pub(crate) fn log_query_witness_from_values<F: SmallField>(values: [F; FLATTENED_VARIABLE_LENGTH]) -> <LogQuery<F> as CSAllocatable<F>>::Witness {
+pub(crate) fn log_query_witness_from_values<F: SmallField>(
+    values: [F; FLATTENED_VARIABLE_LENGTH],
+) -> <LogQuery<F> as CSAllocatable<F>>::Witness {
     let address: [u32; 5] = [
         WitnessCastable::cast_from_source(values[0]),
         WitnessCastable::cast_from_source(values[1]),
@@ -573,8 +575,22 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
     }
 
     // we should be able to allocate without knowing values yet
-    fn create_without_value<CS: ConstraintSystem<F>>(_cs: &mut CS) -> Self {
-        todo!()
+    fn create_without_value<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        use ethereum_types::{Address, U256};
+
+        Self {
+            address: UInt160::allocated_constant(cs, Address::default()),
+            key: UInt256::allocated_constant(cs, U256::default()),
+            read_value: UInt256::allocated_constant(cs, U256::default()),
+            written_value: UInt256::allocated_constant(cs, U256::default()),
+            rw_flag: Boolean::allocated_constant(cs, false),
+            aux_byte: UInt8::allocated_constant(cs, 0),
+            rollback: Boolean::allocated_constant(cs, false),
+            is_service: Boolean::allocated_constant(cs, false),
+            shard_id: UInt8::allocated_constant(cs, 0),
+            tx_number_in_block: UInt32::allocated_constant(cs, 0),
+            timestamp: UInt32::allocated_constant(cs, 0),
+        }
     }
 
     fn flatten_as_variables(&self) -> [Variable; Self::INTERNAL_STRUCT_LEN]

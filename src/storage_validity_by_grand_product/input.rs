@@ -2,8 +2,10 @@ use crate::base_structures::{
     log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
     vm_state::*,
 };
+use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
 use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use boojum::{
     gadgets::{
         boolean::Boolean,
@@ -22,8 +24,6 @@ use boojum::{
 };
 use cs_derive::*;
 use derivative::*;
-use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
 
 pub const PACKED_KEY_LENGTH: usize = 5 + 8;
 

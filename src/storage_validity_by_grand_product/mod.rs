@@ -988,7 +988,6 @@ mod tests {
     use boojum::implementations::poseidon_goldilocks::PoseidonGoldilocks;
     use boojum::worker::Worker;
 
-    type PoseidonGate = PoseidonFlattenedGate<GoldilocksField, 8, 12, 4, PoseidonGoldilocks>;
     type F = GoldilocksField;
 
     fn create_cs<
@@ -1011,10 +1010,6 @@ mod tests {
             },
         );
         let owned_cs = ConstantsAllocatorGate::configure_for_cs(
-            owned_cs,
-            GatePlacementStrategy::UseGeneralPurposeColumns,
-        );
-        let owned_cs = PoseidonGate::configure_for_cs(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
@@ -1049,6 +1044,10 @@ mod tests {
             false,
         );
         let owned_cs = DotProductGate::<4>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = MatrixMultiplicationGate::<F, 12, PoseidonGoldilocks>::configure_for_cs(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
@@ -1091,9 +1090,9 @@ mod tests {
         let mut owned_cs = create_cs(owned_cs);
         let cs = &mut owned_cs;
 
-        let mut lhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
+        let lhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
             DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
-        let mut rhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
+        let rhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
             DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
 
         let execute = Boolean::allocated_constant(cs, true);
@@ -1112,7 +1111,7 @@ mod tests {
         let mut sorted_queue = StorageLogQueue::empty(cs);
 
         let is_start = Boolean::allocated_constant(cs, true);
-        let mut cycle_idx = UInt32::placeholder(cs);
+        let cycle_idx = UInt32::placeholder(cs);
         let round_function = PoseidonGoldilocks;
         let fs_challenges = crate::utils::produce_fs_challenges(
             cs,
@@ -1120,10 +1119,10 @@ mod tests {
             intermediate_sorted_queue.into_state().tail,
             &round_function,
         );
-        let mut previous_packed_key = [UInt32::placeholder(cs); PACKED_KEY_LENGTH];
-        let mut previous_key = UInt256::placeholder(cs);
-        let mut previous_address = UInt160::placeholder(cs);
-        let mut previous_timestamp = UInt32::placeholder(cs);
+        let previous_packed_key = [UInt32::placeholder(cs); PACKED_KEY_LENGTH];
+        let previous_key = UInt256::placeholder(cs);
+        let previous_address = UInt160::placeholder(cs);
+        let previous_timestamp = UInt32::placeholder(cs);
         let this_cell_has_explicit_read_and_rollback_depth_zero =
             Boolean::allocated_constant(cs, false);
         let this_cell_base_value = UInt256::placeholder(cs);
