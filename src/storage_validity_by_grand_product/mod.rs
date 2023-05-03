@@ -1,6 +1,8 @@
 use super::*;
 
 pub mod input;
+#[cfg(test)]
+mod test_input;
 
 use crate::base_structures::log_query::log_query_witness_from_values;
 use crate::fsm_input_output::ClosedFormInputCompactForm;
@@ -9,6 +11,7 @@ use crate::base_structures::{
     log_query::{LogQuery, LogQueryWitness, LOG_QUERY_PACKED_WIDTH},
     vm_state::*,
 };
+use crate::main_vm::opcode_bitmask::TOTAL_OPCODE_MEANINGFULL_DESCRIPTION_BITS;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem, Variable};
@@ -81,10 +84,7 @@ impl<F: SmallField> TimestampedStorageLogRecord<F> {
                     original_encoding[EXTENDED_TIMESTAMP_ENCODING_ELEMENT],
                     F::ONE,
                 ),
-                (
-                    timestamp.get_variable(),
-                    F::from_u64_unchecked(1u64 << 8),
-                ),
+                (timestamp.get_variable(), F::from_u64_unchecked(1u64 << 8)),
             ],
         )
         .get_variable();
@@ -113,9 +113,11 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
 
     fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
         // NOTE(shamatar) Using CSAllocatableExt causes cyclic dependency here, so we use workaround
-        let mut record_values = [F::ZERO; crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH];
-        record_values
-            .copy_from_slice(&values[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH]);
+        let mut record_values =
+            [F::ZERO; crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH];
+        record_values.copy_from_slice(
+            &values[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH],
+        );
         let record = log_query_witness_from_values(record_values);
         let other_timestamp: u32 = WitnessCastable::cast_from_source(values[36]);
 
@@ -126,24 +128,59 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
     }
 
     // we should be able to allocate without knowing values yet
-    fn create_without_value<CS: ConstraintSystem<F>>(_cs: &mut CS) -> Self {
-        todo!()
+    fn create_without_value<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        Self {
+            record: LogQuery::<F> {
+                address: UInt160::allocate_without_value(cs),
+                key: UInt256::allocate_without_value(cs),
+                read_value: UInt256::allocate_without_value(cs),
+                written_value: UInt256::allocate_without_value(cs),
+                rw_flag: Boolean::allocate_without_value(cs),
+                aux_byte: UInt8::allocate_without_value(cs),
+                rollback: Boolean::allocate_without_value(cs),
+                is_service: Boolean::allocate_without_value(cs),
+                shard_id: UInt8::allocate_without_value(cs),
+                tx_number_in_block: UInt32::allocate_without_value(cs),
+                timestamp: UInt32::allocate_without_value(cs),
+            },
+            timestamp: UInt32::allocate_without_value(cs),
+        }
     }
 
-    fn flatten_as_variables(&self) -> [Variable; 37] where
+    fn flatten_as_variables(&self) -> [Variable; 37]
+    where
         [(); Self::INTERNAL_STRUCT_LEN]:,
     {
         let mut result = [Variable::placeholder(); 37];
         let record_variables = self.record.flatten_as_variables_impl();
-        result[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH].copy_from_slice(&record_variables);
-        result[crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH] = self.timestamp.get_variable();
+        result[..crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH]
+            .copy_from_slice(&record_variables);
+        result[crate::base_structures::log_query::FLATTENED_VARIABLE_LENGTH] =
+            self.timestamp.get_variable();
         assert_no_placeholder_variables(&result);
 
         result
     }
 
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
-        todo!();
+    fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, '_, F>) {
+        let src = WitnessCastable::cast_into_source(witness.record.address);
+        dst.extend(src);
+        let src = WitnessCastable::cast_into_source(witness.record.key);
+        dst.extend(src);
+        let src = WitnessCastable::cast_into_source(witness.record.read_value);
+        dst.extend(src);
+        let src = WitnessCastable::cast_into_source(witness.record.written_value);
+        dst.extend(src);
+        dst.push(WitnessCastable::cast_into_source(witness.record.rw_flag));
+        dst.push(WitnessCastable::cast_into_source(witness.record.aux_byte));
+        dst.push(WitnessCastable::cast_into_source(witness.record.rollback));
+        dst.push(WitnessCastable::cast_into_source(witness.record.is_service));
+        dst.push(WitnessCastable::cast_into_source(witness.record.shard_id));
+        dst.push(WitnessCastable::cast_into_source(
+            witness.record.tx_number_in_block,
+        ));
+        dst.push(WitnessCastable::cast_into_source(witness.record.timestamp));
+        dst.push(WitnessCastable::cast_into_source(witness.timestamp));
     }
 }
 
@@ -330,33 +367,42 @@ where
     );
 
     // get challenges for permutation argument
-    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
-        cs, 
-        structured_input
-            .observable_input
-            .unsorted_log_queue_state
-            .tail, 
+    let challenges = crate::utils::produce_fs_challenges::<
+        F,
+        CS,
+        R,
+        QUEUE_STATE_WIDTH,
+        { TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1 },
+        DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
+    >(
+        cs,
         structured_input
             .observable_input
             .intermediate_sorted_queue_state
             .tail,
-        round_function
+        structured_input
+            .observable_input
+            .unsorted_log_queue_state
+            .tail,
+        round_function,
     );
 
     let one = Num::allocated_constant(cs, F::ONE);
-    let initial_lhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
-        &structured_input.hidden_fsm_input.lhs_accumulator,
-    );
+    let initial_lhs =
+        <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            &structured_input.hidden_fsm_input.lhs_accumulator,
+        );
 
-    let initial_rhs = <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
-        &structured_input.hidden_fsm_input.rhs_accumulator,
-    );
+    let initial_rhs =
+        <[Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS]>::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &[one; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+            &structured_input.hidden_fsm_input.rhs_accumulator,
+        );
 
     let zero_u32: UInt32<F> = UInt32::zero(cs);
 
@@ -367,7 +413,6 @@ where
         &[zero_u32; PACKED_KEY_LENGTH],
         &structured_input.hidden_fsm_input.previous_packed_key,
     );
-
 
     let cycle_idx = UInt32::conditionally_select(
         cs,
@@ -411,7 +456,6 @@ where
         structured_input.hidden_fsm_input.this_cell_current_value,
         structured_input.hidden_fsm_input.this_cell_current_depth,
         shard_id,
-        round_function,
         limit,
     );
 
@@ -517,7 +561,8 @@ pub fn sort_and_deduplicate_storage_access_inner<
     sorted_queue: &mut StorageLogQueue<F, R>,
     is_start: Boolean<F>,
     mut cycle_idx: UInt32<F>,
-    fs_challenges: [[Num<F>; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    fs_challenges: [[Num<F>; TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1];
+        DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut previous_packed_key: [UInt32<F>; PACKED_KEY_LENGTH],
     mut previous_key: UInt256<F>,
     mut previous_address: UInt160<F>,
@@ -527,7 +572,6 @@ pub fn sort_and_deduplicate_storage_access_inner<
     mut this_cell_current_value: UInt256<F>,
     mut this_cell_current_depth: UInt32<F>,
     shard_id_to_process: UInt8<F>,
-    _round_function: &R,
     limit: usize,
 ) -> (
     [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
@@ -589,11 +633,14 @@ where
                 &original_timestamp,
             );
 
-        let shard_id_is_valid = UInt8::equals(cs, &shard_id_to_process, &sorted_item.record.shard_id);
+        let shard_id_is_valid =
+            UInt8::equals(cs, &shard_id_to_process, &sorted_item.record.shard_id);
         shard_id_is_valid.conditionally_enforce_true(cs, should_pop);
 
         assert_eq!(extended_original_encoding.len(), sorted_encoding.len());
-        assert_eq!(extended_original_encoding.len(), fs_challenges.len() - 1);
+        for challenges in fs_challenges {
+            assert_eq!(extended_original_encoding.len(), challenges.len() - 1);
+        }
 
         // accumulate into product
         let extended_original_encoding = extended_original_encoding
@@ -605,8 +652,8 @@ where
             .map(|v| Num::from_variable(*v))
             .collect::<Vec<Num<F>>>();
 
-        for (((lhs_dst, rhs_dst), challenges), additive_part) in 
-            lhs.iter_mut()
+        for (((lhs_dst, rhs_dst), challenges), additive_part) in lhs
+            .iter_mut()
             .zip(rhs.iter_mut())
             .zip(fs_challenges.iter())
             .zip(additive_parts.iter())
@@ -642,17 +689,14 @@ where
         let TimestampedStorageLogRecord { record, timestamp } = sorted_item;
 
         // now resolve a logic about sorting itself
-        let packed_key = concatenate_key(
-            cs,
-            (record.address.clone(), record.key),
-        );
+        let packed_key = concatenate_key(cs, (record.address.clone(), record.key));
 
         // ensure sorting. Check that previous key < this key
         let (keys_are_equal, previous_key_is_greater) =
             unpacked_long_comparison(cs, &previous_packed_key, &packed_key);
 
         let not_item_is_trivial = item_is_trivial.negated(cs);
-        previous_key_is_greater.conditionally_enforce_false(cs, not_item_is_trivial);     
+        previous_key_is_greater.conditionally_enforce_false(cs, not_item_is_trivial);
 
         // if keys are the same then timestamps are sorted
         let (_, previous_timestamp_is_less, _) = previous_timestamp.overflowing_sub(cs, timestamp);
@@ -666,11 +710,10 @@ where
 
         // if new cell
         {
+            let not_keys_are_equal = keys_are_equal.negated(cs);
             if _cycle == 0 {
                 // it must always be true if we start
-                keys_are_equal
-                    .negated(cs)
-                    .conditionally_enforce_true(cs, is_start);
+                not_keys_are_equal.conditionally_enforce_true(cs, is_start);
             }
             // finish with the old one
             // if somewhere along the way we did encounter a read at rollback depth zero (not important if there were such),
@@ -710,7 +753,6 @@ where
 
             // if we did only writes and rollbacks then we don't need to update
             let should_update = issue_protective_read.or(cs, should_write);
-            let not_keys_are_equal = keys_are_equal.negated(cs);
             let not_keys_are_equal_and_should_update = not_keys_are_equal.and(cs, should_update);
             let should_push = previous_item_is_trivial
                 .negated(cs)
@@ -777,26 +819,26 @@ where
             let write_rollback = non_trivial_write_of_same_cell.and(cs, record.rollback);
 
             // update rollback depth the is a result of this action
-            let one = UInt32::allocated_constant(cs, 1);
-            let (incremented_depth, _) = this_cell_current_depth.add_no_overflow(cs, one);
-            this_cell_current_depth = UInt32::conditionally_select(
-                cs,
-                write_no_rollback,
-                &incremented_depth,
-                &this_cell_current_depth,
-            );
-            let (decremented_depth, _) = this_cell_current_depth.sub_no_overflow(cs, one);
-            this_cell_current_depth = UInt32::conditionally_select(
-                cs,
-                write_rollback,
-                &this_cell_current_depth,
-                &decremented_depth,
-            );
+            unsafe {
+                let incremented_depth = this_cell_current_depth.increment_unchecked(cs);
+                this_cell_current_depth = UInt32::conditionally_select(
+                    cs,
+                    write_no_rollback,
+                    &incremented_depth,
+                    &this_cell_current_depth,
+                );
+                let decremented_depth = this_cell_current_depth.decrement_unchecked(cs);
+                this_cell_current_depth = UInt32::conditionally_select(
+                    cs,
+                    write_rollback,
+                    &decremented_depth,
+                    &this_cell_current_depth,
+                );
+            }
 
             // check consistency
             let read_is_equal_to_current =
                 UInt256::equals(cs, &this_cell_current_value, &record.read_value);
-
             read_is_equal_to_current.conditionally_enforce_true(cs, non_trivial_read_of_same_cell);
 
             // decide to update
@@ -907,7 +949,6 @@ where
     )
 }
 
-
 fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
     _cs: &mut CS,
     key_tuple: (UInt160<F>, UInt256<F>),
@@ -923,7 +964,6 @@ fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
         key.inner[5],
         key.inner[6],
         key.inner[7],
-
         address.inner[0],
         address.inner[1],
         address.inner[2],
@@ -940,7 +980,6 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
     a: &[UInt32<F>; N],
     b: &[UInt32<F>; N],
 ) -> (Boolean<F>, Boolean<F>) {
-
     let boolean_false = Boolean::allocated_constant(cs, false);
     let mut equals = [boolean_false; N];
     let mut borrow = boolean_false;
@@ -955,4 +994,305 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
     let a_is_greater = borrow;
 
     (equal, a_is_greater)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
+    use boojum::cs::implementations::reference_cs::{
+        CSDevelopmentAssembly, CSReferenceImplementation,
+    };
+    use boojum::cs::toolboxes::gate_config::{GatePlacementStrategy, NoGates};
+    use boojum::cs::traits::configurable_cs::ConfigurableCS;
+    use boojum::cs::CSGeometry;
+    use boojum::cs::EmptyToolbox;
+    use boojum::cs::*;
+    use boojum::field::goldilocks::GoldilocksField;
+    use boojum::gadgets::tables::*;
+    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::worker::Worker;
+    use ethereum_types::{Address, U256};
+
+    type F = GoldilocksField;
+
+    fn create_cs<
+        P: boojum::field::traits::field_like::PrimeFieldLikeVectorized<Base = F>,
+        CFG: boojum::config::CSConfig,
+    >(
+        owned_cs: CSReferenceImplementation<F, P, CFG, NoGates, EmptyToolbox>,
+    ) -> CSReferenceImplementation<
+        F,
+        P,
+        CFG,
+        impl boojum::cs::toolboxes::gate_config::GateConfigurationHolder<F>,
+        impl boojum::cs::toolboxes::static_toolbox::StaticToolboxHolder,
+    > {
+        let owned_cs = owned_cs.allow_lookup(
+            LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                width: 3,
+                num_repetitions: 8,
+                share_table_id: true,
+            },
+        );
+        let owned_cs = ConstantsAllocatorGate::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = ReductionGate::<F, 4>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = BooleanConstraintGate::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = UIntXAddGate::<32>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = UIntXAddGate::<16>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = SelectionGate::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs = ZeroCheckGate::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+            false,
+        );
+        let owned_cs = DotProductGate::<4>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
+        let owned_cs =
+            MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_for_cs(
+                owned_cs,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+        let owned_cs =
+            NopGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+
+        let mut owned_cs = owned_cs.freeze();
+
+        // add tables
+        let table = create_xor8_table();
+        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+
+        owned_cs
+    }
+
+    #[test]
+    fn test_storage_validity_circuit() {
+        let geometry = CSGeometry {
+            num_columns_under_copy_permutation: 100,
+            num_witness_columns: 0,
+            num_constant_columns: 8,
+            max_allowed_constraint_degree: 4,
+        };
+
+        let owned_cs =
+            CSDevelopmentAssembly::<F, _, _>::new_for_geometry(geometry, 1 << 26, 1 << 20);
+        let mut owned_cs = create_cs(owned_cs);
+        let cs = &mut owned_cs;
+
+        let lhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
+            DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
+        let rhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
+            DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
+
+        let execute = Boolean::allocated_constant(cs, true);
+        let mut original_queue = StorageLogQueue::<F, Poseidon2Goldilocks>::empty(cs);
+        let unsorted_input = test_input::generate_test_input_unsorted(cs);
+        for el in unsorted_input {
+            original_queue.push(cs, el, execute);
+        }
+
+        let mut intermediate_sorted_queue = CircuitQueue::empty(cs);
+        let sorted_input = test_input::generate_test_input_sorted(cs);
+        for el in sorted_input {
+            intermediate_sorted_queue.push(cs, el, execute);
+        }
+
+        let mut sorted_queue = StorageLogQueue::empty(cs);
+
+        let is_start = Boolean::allocated_constant(cs, true);
+        let cycle_idx = UInt32::allocated_constant(cs, 0);
+        let round_function = Poseidon2Goldilocks;
+        let fs_challenges = crate::utils::produce_fs_challenges::<
+            F,
+            _,
+            Poseidon2Goldilocks,
+            QUEUE_STATE_WIDTH,
+            { TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1 },
+            DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
+        >(
+            cs,
+            original_queue.into_state().tail,
+            intermediate_sorted_queue.into_state().tail,
+            &round_function,
+        );
+        let previous_packed_key = [UInt32::allocated_constant(cs, 0); PACKED_KEY_LENGTH];
+        let previous_key = UInt256::allocated_constant(cs, U256::default());
+        let previous_address = UInt160::allocated_constant(cs, Address::default());
+        let previous_timestamp = UInt32::allocated_constant(cs, 0);
+        let this_cell_has_explicit_read_and_rollback_depth_zero =
+            Boolean::allocated_constant(cs, false);
+        let this_cell_base_value = UInt256::allocated_constant(cs, U256::default());
+        let this_cell_current_value = UInt256::allocated_constant(cs, U256::default());
+        let this_cell_current_depth = UInt32::allocated_constant(cs, 0);
+        let shard_id_to_process = UInt8::allocated_constant(cs, 0);
+        let limit = 16;
+
+        let commitments = sort_and_deduplicate_storage_access_inner(
+            cs,
+            lhs,
+            rhs,
+            &mut original_queue,
+            &mut intermediate_sorted_queue,
+            &mut sorted_queue,
+            is_start,
+            cycle_idx,
+            fs_challenges,
+            previous_packed_key,
+            previous_key,
+            previous_address,
+            previous_timestamp,
+            this_cell_has_explicit_read_and_rollback_depth_zero,
+            this_cell_base_value,
+            this_cell_current_value,
+            this_cell_current_depth,
+            shard_id_to_process,
+            limit,
+        );
+
+        cs.print_gate_stats();
+
+        cs.pad_and_shrink();
+        let worker = Worker::new();
+        assert!(owned_cs.check_if_satisfied(&worker));
+    }
+
+    // fn configure_cs<
+    //     F: SmallField,
+    //     P: boojum::field::traits::field_like::PrimeFieldLikeVectorized<Base = F>,
+    //     CFG: boojum::config::CSConfig,
+    // >(
+    //     cs: CSReferenceImplementation<F, P, CFG, NoGates, EmptyToolbox>,
+    // ) -> CSReferenceImplementation<
+    //     F,
+    //     P,
+    //     CFG,
+    //     impl boojum::cs::toolboxes::gate_config::GateConfigurationHolder<F>,
+    //     impl boojum::cs::toolboxes::static_toolbox::StaticToolboxHolder,
+    // >
+    // where
+    //     P::Context: boojum::field::traits::field_like::TrivialContext,
+    // {
+    //     let cs = cs.allow_lookup(
+    //         boojum::cs::LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+    //             width: 3,
+    //             num_repetitions: 5,
+    //             share_table_id: true,
+    //         },
+    //     );
+
+    //     let cs = BooleanConstraintGate::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseSpecializedColumns {
+    //             num_repetitions: 1,
+    //             share_constants: false,
+    //         },
+    //     );
+    //     // let cs = U8x4FMAGate::configure_for_cs(cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 2, share_constants: false });
+
+    //     // let cs = cs.allow_lookup(
+    //     //     boojum::cs::LookupParameters::TableIdAsConstant { width: 3, share_table_id: true }
+    //     // );
+    //     // let cs = BooleanConstraintGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+    //     let cs = U8x4FMAGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+
+    //     let cs = ConstantsAllocatorGate::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = DotProductGate::<4>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = ZeroCheckGate::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //         false,
+    //     );
+    //     let cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = UIntXAddGate::<32>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = UIntXAddGate::<16>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = UIntXAddGate::<8>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs =
+    //         SelectionGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+    //     let cs = ParallelSelectionGate::<4>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs =
+    //         PublicInputGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+    //     let cs = ReductionGate::<_, 4>::configure_for_cs(
+    //         cs,
+    //         GatePlacementStrategy::UseGeneralPurposeColumns,
+    //     );
+    //     let cs = NopGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+    //     let mut cs_owned = cs.freeze();
+
+    //     use crate::tables::*;
+    //     use boojum::gadgets::tables::binop_table::*;
+    //     let table = create_binop_table();
+    //     cs_owned.add_lookup_table::<BinopTable, 3>(table);
+
+    //     let subpc_to_mask_table = create_subpc_bitmask_table::<F>();
+    //     cs_owned.add_lookup_table::<VMSubPCToBitmaskTable, 3>(subpc_to_mask_table);
+
+    //     let opcode_decoding_table = create_opcodes_decoding_and_pricing_table::<F>();
+    //     cs_owned.add_lookup_table::<VMOpcodeDecodingTable, 3>(opcode_decoding_table);
+
+    //     let conditions_resolution_table = create_conditionals_resolution_table::<F>();
+    //     cs_owned.add_lookup_table::<VMConditionalResolutionTable, 3>(conditions_resolution_table);
+
+    //     let integer_to_bitmask_table = create_integer_to_bitmask_table::<F>(
+    //         15u32.next_power_of_two().trailing_zeros() as usize,
+    //         REG_IDX_TO_BITMASK_TABLE_NAME,
+    //     );
+    //     cs_owned.add_lookup_table::<RegisterIndexToBitmaskTable, 3>(integer_to_bitmask_table);
+
+    //     let shifts_table = create_shift_to_num_converter_table::<F>();
+    //     cs_owned.add_lookup_table::<BitshiftTable, 3>(shifts_table);
+
+    //     let uma_unaligned_access_table =
+    //         create_integer_to_bitmask_table::<F>(5, UMA_SHIFT_TO_BITMASK_TABLE_NAME);
+    //     cs_owned.add_lookup_table::<UMAShiftToBitmaskTable, 3>(uma_unaligned_access_table);
+
+    //     let uma_ptr_read_cleanup_table = create_uma_ptr_read_bitmask_table::<F>();
+    //     cs_owned.add_lookup_table::<UMAPtrReadCleanupTable, 3>(uma_ptr_read_cleanup_table);
+
+    //     cs_owned
+    // }
 }
