@@ -619,23 +619,18 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
     }
 
     fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, '_, F>) {
-        let src = WitnessCastable::cast_into_source(witness.address);
-        dst.extend(src);
-        let src = WitnessCastable::cast_into_source(witness.key);
-        dst.extend(src);
-        let src = WitnessCastable::cast_into_source(witness.read_value);
-        dst.extend(src);
-        let src = WitnessCastable::cast_into_source(witness.written_value);
-        dst.extend(src);
-        dst.push(WitnessCastable::cast_into_source(witness.rw_flag));
-        dst.push(WitnessCastable::cast_into_source(witness.aux_byte));
-        dst.push(WitnessCastable::cast_into_source(witness.rollback));
-        dst.push(WitnessCastable::cast_into_source(witness.is_service));
-        dst.push(WitnessCastable::cast_into_source(witness.shard_id));
-        dst.push(WitnessCastable::cast_into_source(
-            witness.tx_number_in_block,
-        ));
-        dst.push(WitnessCastable::cast_into_source(witness.timestamp));
+        // NOTE: must be same sequence as in `flatten_as_variables`
+        UInt160::set_internal_variables_values(witness.address, dst);
+        UInt256::set_internal_variables_values(witness.key, dst);
+        UInt256::set_internal_variables_values(witness.read_value, dst);
+        UInt256::set_internal_variables_values(witness.written_value, dst);
+        UInt8::set_internal_variables_values(witness.aux_byte, dst);
+        Boolean::set_internal_variables_values(witness.rw_flag, dst);
+        Boolean::set_internal_variables_values(witness.rollback, dst);
+        Boolean::set_internal_variables_values(witness.is_service, dst);
+        UInt8::set_internal_variables_values(witness.shard_id, dst);
+        UInt32::set_internal_variables_values(witness.tx_number_in_block, dst);
+        UInt32::set_internal_variables_values(witness.timestamp, dst);
     }
 }
 
