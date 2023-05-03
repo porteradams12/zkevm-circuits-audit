@@ -1,7 +1,7 @@
 use super::*;
 use self::ethereum_types::U256;
 use boojum::cs::gates::fma_gate_without_constant::*;
-use boojum::gadgets::u256::UInt256;
+use boojum::gadgets::u256::{UInt256, decompose_u256_as_u32x8};
 use crate::base_structures::vm_state::ArithmeticFlagsPort;
 use crate::base_structures::register::VMRegister;
 use arrayvec::ArrayVec;
@@ -83,27 +83,19 @@ pub fn allocate_div_result_unchecked<F: SmallField, CS: ConstraintSystem<F>>(
             let a = allocate_u256_from_limbs(&inputs[0..8]);
             let b = allocate_u256_from_limbs(&inputs[8..16]);
 
-            let (mut quotient, mut remainder) = if b.is_zero() {
+            let (quotient, remainder) = if b.is_zero() {
                 (U256::zero(), U256::zero())
             } else {
                 a.div_mod(b)
             };
             
             let mut outputs = [F::ZERO; 16];
-            let mut index = 0;
-            for _ in 0..8 {
-                outputs[index] = F::from_u64_unchecked(quotient.low_u32() as u64);
-                quotient >>= 32;
-                index += 1;
+            for (dst, src) in outputs[..8].iter_mut().zip(decompose_u256_as_u32x8(quotient).into_iter()) {
+                *dst = F::from_u64_unchecked(src as u64);
             }
-            assert!(quotient.is_zero());
-
-            for _ in 0..8 {
-                outputs[index] = F::from_u64_unchecked(remainder.low_u32() as u64);
-                remainder >>= 32;
-                index += 1;
+            for (dst, src) in outputs[8..].iter_mut().zip(decompose_u256_as_u32x8(remainder).into_iter()) {
+                *dst = F::from_u64_unchecked(src as u64);
             }
-            assert!(remainder.is_zero());
 
             outputs
         };
@@ -188,6 +180,15 @@ pub(crate) fn apply_mul_div<
     let (mul_low_unchecked, mul_high_unchecked) = allocate_mul_result_unchecked(cs, src0_view, src1_view);
     let (quotient_unchecked, remainder_unchecked) = allocate_div_result_unchecked(cs, src0_view, src1_view);
 
+    // if crate::config::CIRCUIT_VERSOBE {
+    //     if (should_apply_mul.witness_hook(&*cs))().unwrap_or(false) || (should_apply_div.witness_hook(&*cs))().unwrap_or(false) {
+    //         dbg!(mul_low_unchecked.witness_hook(&*cs)().unwrap());
+    //         dbg!(mul_high_unchecked.witness_hook(&*cs)().unwrap());
+    //         dbg!(quotient_unchecked.witness_hook(&*cs)().unwrap());
+    //         dbg!(remainder_unchecked.witness_hook(&*cs)().unwrap());
+    //     }
+    // }
+
     let to_enforce_0 = UInt32::parallel_select(
         cs, should_apply_mul, &mul_low_unchecked, &quotient_unchecked
     );
@@ -197,15 +198,15 @@ pub(crate) fn apply_mul_div<
     );
     let result_1 = to_enforce_1.map(|el| UInt32::from_variable_checked(cs, el.get_variable()));
 
-    // if we mull: a * b = mul_low + (mul_high << 256) => rem = 0, a = a, b = b, mul_low = mul_low, mul_high = mul_high
-    // if we divide: a  = b * q + rem, rem = rem, a = quotient, b = b, mul_low = a, mul_high = 0
+    // if we mull: src0 * src1 = mul_low + (mul_high << 256) => rem = 0, a = src0, b = src1, mul_low = mul_low, mul_high = mul_high
+    // if we divide: src0 = q * src1 + rem =>                   rem = rem, a = quotient, b = src1, mul_low = src0, mul_high = 0
     let uint256_zero = UInt256::zero(cs);
 
     let rem_to_enforce = UInt32::parallel_select(
         cs, should_apply_mul, &uint256_zero.inner, &remainder_unchecked,
     );
     let a_to_enforce = UInt32::parallel_select(
-        cs, should_apply_mul, src0_view, &remainder_unchecked,
+        cs, should_apply_mul, src0_view, &quotient_unchecked,
     );
     let b_to_enforce = src1_view.clone();
     let mul_low_to_enforce = UInt32::parallel_select(
@@ -242,16 +243,6 @@ pub(crate) fn apply_mul_div<
     let remainder_is_zero = all_limbs_are_zero(cs, &remainder_unchecked);
 
     // check that remainder is smaller than divisor
-    // let (subtraction_result_unchecked, borrow) = allocate_subtraction_result_unchecked(
-    //     cs, src1_view, &remainder_unchecked
-    // );
-
-    // let addition_relation = AddSubRelation {
-    //     a: subtraction_result_unchecked,
-    //     b: remainder_unchecked,
-    //     c: *src1_view,
-    //     of: borrow
-    // };
 
     // do remainder - divisor
     let (subtraction_result_unchecked, remainder_is_less_than_divisor) = allocate_subtraction_result_unchecked(
@@ -311,6 +302,13 @@ pub(crate) fn apply_mul_div<
         is_pointer: Boolean::allocated_constant(cs, false),
         value: UInt256 {inner: result_1}
     };
+
+    // if crate::config::CIRCUIT_VERSOBE {
+    //     if (should_apply_mul.witness_hook(&*cs))().unwrap_or(false) || (should_apply_div.witness_hook(&*cs))().unwrap_or(false) {
+    //         dbg!(result_0.witness_hook(&*cs)().unwrap());
+    //         dbg!(result_1.witness_hook(&*cs)().unwrap());
+    //     }
+    // }
 
     let can_write_into_memory = MUL_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION);
     debug_assert_eq!(

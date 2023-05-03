@@ -1,5 +1,6 @@
 use super::*;
 use boojum::cs::gates::{ConstantAllocatableCS, ReductionByPowersGate, ReductionGate};
+use boojum::gadgets::traits::castable::WitnessCastable;
 use cs_derive::*;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::gadgets::boolean::Boolean;
@@ -65,6 +66,15 @@ pub fn perform_initial_decoding<F: SmallField, CS: ConstraintSystem<F>>(
 
     // set ergs cost to 0 if we are skipping cycle
     let masked_ergs_cost = initial_decoding.ergs_cost.mask_negated(cs, did_skip_cycle);
+
+    if crate::config::CIRCUIT_VERSOBE {
+        println!(
+            "Have {} ergs left, opcode cost is {}",
+            ergs_left.witness_hook(&*cs)().unwrap(),
+            masked_ergs_cost.witness_hook(&*cs)().unwrap(),
+        );
+    }
+
     let (ergs_left, out_of_ergs_exception, _) = ergs_left.overflowing_sub(cs, masked_ergs_cost);
     let ergs_left = ergs_left.mask_negated(cs, out_of_ergs_exception); // it's 0 if we underflow
 
@@ -94,6 +104,18 @@ pub fn perform_initial_decoding<F: SmallField, CS: ConstraintSystem<F>>(
 
     // if we do have an exception then we have mask properties into PANIC
     let mask_into_panic = any_exception;
+    if crate::config::CIRCUIT_VERSOBE {
+        if mask_into_panic.witness_hook(&*cs)().unwrap() {
+            println!("Masking into PANIC in decoding phase");
+            dbg!([
+                explicit_panic,
+                out_of_ergs_exception,
+                kernel_mode_exception,
+                write_in_static_exception,
+                callstack_is_full,
+            ].witness_hook(&*cs)().unwrap());
+        }
+    }
     let panic_encoding = *zkevm_opcode_defs::PANIC_BITSPREAD_U64;
 
     // mask out aux bits (those are 0, but do it just in case)
@@ -113,6 +135,11 @@ pub fn perform_initial_decoding<F: SmallField, CS: ConstraintSystem<F>>(
 
     // then if we didn't mask into panic and condition was false then mask into NOP
     let mask_into_nop = Boolean::multi_and(cs, &[no_panic, condition_is_not_fulfilled]);
+    if crate::config::CIRCUIT_VERSOBE {
+        if mask_into_nop.witness_hook(&*cs)().unwrap() {
+            println!("Masking into NOP in decoding phase");
+        }
+    }
 
     let nop_encoding = *zkevm_opcode_defs::NOP_BITSPREAD_U64;
     // mask out aux bits (those are 0, but do it just in case)
@@ -145,6 +172,14 @@ pub fn perform_initial_decoding<F: SmallField, CS: ConstraintSystem<F>>(
 
     let [src0_encoding, src1_encoding] = split_register_encoding_byte(cs, src_regs_encoding);
     let [dst0_encoding, dst1_encoding] = split_register_encoding_byte(cs, dst_regs_encoding);
+
+    if crate::config::CIRCUIT_VERSOBE {
+        dbg!(&src0_encoding.witness_hook(&*cs)().unwrap());
+        dbg!(&src1_encoding.witness_hook(&*cs)().unwrap());
+
+        dbg!(&dst0_encoding.witness_hook(&*cs)().unwrap());
+        dbg!(&dst1_encoding.witness_hook(&*cs)().unwrap());
+    }
 
     // and enforce their bit length by table access, and simultaneously get
     // bitmasks for selection
@@ -395,15 +430,24 @@ pub fn partially_decode_from_integer_and_resolve_condition<
         let value_fn = move |inputs: [F; 1]| {
             debug_assert_eq!(VARIANT_AND_CONDITION_ENCODING_BITS, 16);
 
-            let variant_and_condition =
-                inputs[0].as_u64_reduced() & VARIANT_AND_CONDITION_ENCODING_MASK;
+            let variant_and_condition = <u16 as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
+            let variant_and_condition = variant_and_condition as u64;
+            let variant_and_condition = variant_and_condition & VARIANT_AND_CONDITION_ENCODING_MASK;
             
             let variant = variant_and_condition & VARIANT_ENCODING_MASK;
+
             let unused_bits =
                 (variant_and_condition >> OPCODES_TABLE_WIDTH) & bit_width_to_bitmask(UNUSED_GAP);
             let unused_bit_0 = unused_bits & 1 > 0;
             let unused_bit_1 = (unused_bits >> 1) & 1 > 0;
             let condition = variant_and_condition >> CONDITIONAL_BITS_SHIFT;
+
+            if crate::config::CIRCUIT_VERSOBE {
+                let opcode = zkevm_opcode_defs::OPCODES_TABLE[variant as usize];
+                dbg!(opcode);
+                let condition = zkevm_opcode_defs::condition::Condition::materialize_variant(condition as usize);
+                dbg!(condition);
+            }
 
             [
                 F::from_u64_unchecked(variant),
@@ -449,12 +493,6 @@ pub fn partially_decode_from_integer_and_resolve_condition<
     let table_id = cs
         .get_table_id_for_marker::<VMOpcodeDecodingTable>()
         .expect("table must exist");
-
-    // if let Some(variant) = (Num::from_variable(variant_var).witness_hook(cs))() {
-    //     let idx = variant.as_u64() as usize;
-    //     let opcode = zkevm_opcode_defs::OPCODES_TABLE[idx];
-    //     dbg!(&opcode);
-    // }
 
     // bit check variant and spread it
     let values = cs.perform_lookup::<1, 2>(table_id, &[variant_var]);

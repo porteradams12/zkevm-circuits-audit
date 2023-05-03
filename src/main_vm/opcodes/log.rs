@@ -48,12 +48,6 @@ pub(crate) fn apply_log<
         .properties_bits
         .boolean_for_opcode(STORAGE_READ_OPCODE);
 
-    if crate::config::CIRCUIT_VERSOBE {
-        if (should_apply.witness_hook(&*cs))().unwrap_or(false) {
-            println!("Applying LOG");
-        }
-    }
-
     let is_storage_read = {
         common_opcode_state
             .decoded_opcode
@@ -84,6 +78,27 @@ pub(crate) fn apply_log<
             .properties_bits
             .boolean_for_variant(PRECOMPILE_CALL_OPCODE)
     };
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap_or(false) {
+            println!("Applying LOG");
+            if is_storage_read.witness_hook(&*cs)().unwrap_or(false) {
+                println!("SLOAD");
+            }
+            if is_storage_write.witness_hook(&*cs)().unwrap_or(false) {
+                println!("SSTORE");
+            }
+            if is_event.witness_hook(&*cs)().unwrap_or(false) {
+                println!("EVENT");
+            }
+            if is_l1_message.witness_hook(&*cs)().unwrap_or(false) {
+                println!("L2 to L1 message");
+            }
+            if is_precompile.witness_hook(&*cs)().unwrap_or(false) {
+                println!("PRECOMPILECALL");
+            }
+        }
+    }
 
     let address = draft_vm_state.callstack.current_context.saved_context.this;
 
@@ -411,8 +426,15 @@ pub(crate) fn apply_log<
         &old_revert_queue_length,
     );
 
-    let can_update_dst0 = Boolean::multi_and(cs, &[is_storage_read, is_precompile]);
+    let can_update_dst0 = Boolean::multi_or(cs, &[is_storage_read, is_precompile]);
     let should_update_dst0 = Boolean::multi_and(cs, &[can_update_dst0, should_apply]);
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap() {
+            dbg!(should_update_dst0.witness_hook(&*cs)().unwrap());
+            dbg!(dst0.witness_hook(&*cs)().unwrap());
+        }
+    }
 
     let can_write_into_memory =
         STORAGE_READ_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION);
@@ -467,6 +489,7 @@ fn construct_hash_relations_for_log_and_new_queue_states<
     [Num<F>; 4],
     ArrayVec<
         (
+            Boolean<F>,
             [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
             [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
         ),
@@ -625,21 +648,25 @@ fn construct_hash_relations_for_log_and_new_queue_states<
 
     let mut relations = ArrayVec::new();
     relations.push((
+        *should_execute_either,
         round_0_initial.map(|el| Num::from_variable(el)),
         round_0_final.map(|el| Num::from_variable(el)),
     ));
 
     relations.push((
+        *should_execute_either,
         round_1_initial.map(|el| Num::from_variable(el)),
         round_1_final.map(|el| Num::from_variable(el)),
     ));
 
     relations.push((
+        *should_execute_either,
         round_2_initial_forward.map(|el| Num::from_variable(el)),
         forward_round_2_final.map(|el| Num::from_variable(el)),
     ));
 
     relations.push((
+        *should_execute_rollback,
         round_2_initial_rollback.map(|el| Num::from_variable(el)),
         rollback_round_2_final.map(|el| Num::from_variable(el)),
     ));

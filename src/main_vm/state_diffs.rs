@@ -73,6 +73,7 @@ pub struct StateDiffsAccumulator<F: SmallField> {
         Boolean<F>,
         ArrayVec<
             (
+                Boolean<F>,
                 [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
                 [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
             ),

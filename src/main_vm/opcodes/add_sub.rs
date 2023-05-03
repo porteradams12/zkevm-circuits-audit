@@ -2,7 +2,7 @@ use arrayvec::ArrayVec;
 
 use boojum::{
     cs::gates::{ConstantAllocatableCS, UIntXAddGate},
-    gadgets::u256::UInt256,
+    gadgets::{u256::UInt256, traits::castable::WitnessCastable},
 };
 use crate::base_structures::{register::VMRegister, vm_state::ArithmeticFlagsPort};
 
@@ -170,11 +170,13 @@ pub fn allocate_addition_result_unchecked<F: SmallField, CS: ConstraintSystem<F>
             let mut of = false;
             let mut result = [F::ZERO; 9];
             for (idx, (a, b)) in inputs[..8].iter().zip(inputs[8..].iter()).enumerate() {
+                let a = <u32 as WitnessCastable<F, F>>::cast_from_source(*a);
+                let b = <u32 as WitnessCastable<F, F>>::cast_from_source(*b);
                 let (c, new_of_0) =
-                    (a.as_u64_reduced() as u32).overflowing_add(b.as_u64_reduced() as u32);
+                    a.overflowing_add(b);
                 let (c, new_of_1) = c.overflowing_add(of as u32);
 
-                of = new_of_0 | new_of_1;
+                of = new_of_0 || new_of_1;
 
                 result[idx] = F::from_u64_unchecked(c as u64);
             }
@@ -227,11 +229,13 @@ pub fn allocate_subtraction_result_unchecked<F: SmallField, CS: ConstraintSystem
             let mut uf = false;
             let mut result = [F::ZERO; 9];
             for (idx, (a, b)) in inputs[..8].iter().zip(inputs[8..].iter()).enumerate() {
+                let a = <u32 as WitnessCastable<F, F>>::cast_from_source(*a);
+                let b = <u32 as WitnessCastable<F, F>>::cast_from_source(*b);
                 let (c, new_uf_0) =
-                    (a.as_u64_reduced() as u32).overflowing_sub(b.as_u64_reduced() as u32);
+                    (a).overflowing_sub(b);
                 let (c, new_uf_1) = c.overflowing_sub(uf as u32);
 
-                uf = new_uf_0 | new_uf_1;
+                uf = new_uf_0 || new_uf_1;
 
                 result[idx] = F::from_u64_unchecked(c as u64);
             }

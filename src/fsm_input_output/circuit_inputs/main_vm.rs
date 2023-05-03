@@ -4,18 +4,6 @@ use boojum::serde_utils::BigArraySerde;
 use crate::base_structures::vm_state::*;
 use boojum::gadgets::queue::*;
 
-fn assert_hookable<F: SmallField, H: WitnessHookable<F>>(
-    _t: Option<H>
-) {
-
-}
-
-fn tmp<F: SmallField>() {
-    assert_hookable::<F, VmInputData<F>>(None);
-    assert_hookable::<F, VmOutputData<F>>(None);
-    assert_hookable::<F, VmLocalState<F>>(None);
-}
-
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Debug)]
 pub struct VmInputData<F: SmallField> {
@@ -43,6 +31,7 @@ impl<F: SmallField> CSPlaceholder<F> for VmInputData<F> {
     Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable
 )]
 #[derivative(Clone, Debug)]
+#[DerivePrettyComparison("true")]
 pub struct VmOutputData<F: SmallField> {
     pub log_queue_final_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub memory_queue_final_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,

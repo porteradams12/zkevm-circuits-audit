@@ -91,11 +91,11 @@ where
         if let Some(circuit_result) = (self.witness_hook(&*cs))() {
             let comparison_lines = <T as PrettyComparison<F>>::find_diffs(&circuit_result.hidden_fsm_output, &expected.hidden_fsm_output);
             if comparison_lines.is_empty() == false {
-                panic!("Difference in FSM:\n{}", comparison_lines.join("\n"));
+                panic!("Difference in FSM. Left is circuit, right is expected:\n{}", comparison_lines.join("\n"));
             }
             let comparison_lines = <OUT as PrettyComparison<F>>::find_diffs(&circuit_result.observable_output, &expected.observable_output);
             if comparison_lines.is_empty() == false {
-                panic!("Difference in observable output:\n{}", comparison_lines.join("\n"));
+                panic!("Difference in observable output. Left is circuit, right is expected:\n{}", comparison_lines.join("\n"));
             }
             assert_eq!(&circuit_result, expected);
         }

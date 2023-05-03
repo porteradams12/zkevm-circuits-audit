@@ -6,7 +6,6 @@ use super::state_diffs::{StateDiffsAccumulator, MAX_ADD_SUB_RELATIONS_PER_CYCLE,
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::CSGeometry;
-use boojum::field::goldilocks::GoldilocksField;
 use boojum::gadgets::poseidon::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use boojum::gadgets::traits::selectable::MultiSelectable;
@@ -44,16 +43,26 @@ where
 {
     // first we create a pre-state
 
-    // if let Some(initial_state) = (current_state.witness_hook(&*cs))() {
-    //     dbg!(&initial_state);
-    // }
+    if crate::config::CIRCUIT_VERSOBE {
+        println!("------------------------------------------------------------");
+        println!("Start of new cycle");
+        // synchronization point
+        let _current_state = current_state.witness_hook(&*cs)().unwrap();
+        // dbg!(_current_state);
+        dbg!(_current_state.pending_exception);
+        dbg!(_current_state.callstack.current_context.saved_context.pc);
+        dbg!(_current_state.flags);
+    }
 
     let (draft_next_state, common_opcode_state, opcode_carry_parts) =
         create_prestate(cs, current_state, witness_oracle, round_function);
 
-    // if let Some(wit) = (common_opcode_state.witness_hook(&*cs))() {
-    //     dbg!(&wit);
-    // }
+    if crate::config::CIRCUIT_VERSOBE {
+        // synchronization point
+        let _common_opcode_state = common_opcode_state.witness_hook(&*cs)().unwrap();
+        dbg!(_common_opcode_state.src0);
+        dbg!(_common_opcode_state.src1);
+    }
 
     // then we apply each opcode and accumulate state diffs
 
@@ -191,6 +200,11 @@ where
     let dst0_is_ptr = dst0_is_ptr_candidates_iter.next().expect("is some").1;
     let dst0_value = dst0_value_candidates_iter.next().expect("is some").1;
 
+    // Note on multiselect - here we only select candidates, and only between dst0 and dst1 separately.
+    // Each of the selection procedures is either bitmasked by opcode that is used, or will give "default"
+    // baseline that we will accept or not accept later on in the application phase. But we need to know a value
+    // here because we may write it into memory (same - if we do not write nothing happens)
+
     let dst0_is_ptr = Boolean::multiselect(
         cs,
         &dst0_is_ptr,
@@ -205,13 +219,13 @@ where
     );
 
     let mut dst1_is_ptr_candidates_iter = diffs_accumulator
-        .dst_0_values
+        .dst_1_values
         .iter()
-        .map(|el| (el.1, el.2.is_pointer));
+        .map(|el| (el.0, el.1.is_pointer));
     let mut dst1_value_candidates_iter = diffs_accumulator
-        .dst_0_values
+        .dst_1_values
         .iter()
-        .map(|el| (el.1, el.2.value));
+        .map(|el| (el.0, el.1.value));
     let num_candidates_len = dst1_is_ptr_candidates_iter.len();
 
     let dst1_is_ptr = dst1_is_ptr_candidates_iter.next().expect("is some").1;
@@ -292,6 +306,22 @@ where
     let dst0_update_register =
         Boolean::multi_or(cs, &[can_update_dst0_as_register_only, t]);
 
+    if crate::config::CIRCUIT_VERSOBE {
+        dbg!(dst0_value.witness_hook(&*cs)().unwrap());
+        dbg!(dst1_value.witness_hook(&*cs)().unwrap());
+    }
+
+    // We should update registers, and the only "exotic" case is if someone tries to put
+    // dst0 and dst1 in the same location.
+
+    // Note that "register" is a "wide" structure, so it doesn't benefit too much from
+    // multiselect, and we can just do a sequence, that
+    // we update each register as being:
+    // - dst0 in some operation
+    // - dst1 in some operation
+    // - special update in some operation
+
+    // outer cycle is over ALL REGISTERS
     for (idx, (flag_dst0, flag_dst1)) in common_opcode_state.decoded_opcode.dst_regs_selectors[0]
         .iter()
         .zip(common_opcode_state.decoded_opcode.dst_regs_selectors[1].iter())
@@ -304,32 +334,31 @@ where
         let write_as_dst1 = *flag_dst1;
 
         // unfortunately we can not use iter chaining here due to syntax constraint
-        let mut apply_ptr_update = ArrayVec::<Boolean<F>, 32>::new();
-        let mut apply_value_update = ArrayVec::<Boolean<F>, 32>::new();
-        let mut it_is_ptr = ArrayVec::<(Boolean<F>, Boolean<F>), 32>::new();
-        let mut it_value = ArrayVec::<(Boolean<F>, UInt256<F>), 32>::new();
+        let mut apply_ptr_update_as_dst0 = ArrayVec::<Boolean<F>, 32>::new();
+        let mut apply_ptr_update_as_dst1 = ArrayVec::<Boolean<F>, 32>::new();
+        let mut it_is_ptr_as_dst0 = ArrayVec::<(Boolean<F>, Boolean<F>), 32>::new();
+        let mut it_is_ptr_as_dst1 = ArrayVec::<(Boolean<F>, Boolean<F>), 32>::new();
+        let mut it_value_as_dst0 = ArrayVec::<(Boolean<F>, UInt256<F>), 32>::new();
+        let mut it_value_as_dst1 = ArrayVec::<(Boolean<F>, UInt256<F>), 32>::new();
 
-        apply_ptr_update.push(write_as_dst0);
-        apply_ptr_update.push(write_as_dst1);
+        apply_ptr_update_as_dst0.push(write_as_dst0);
+        apply_ptr_update_as_dst1.push(write_as_dst1);
 
-        apply_value_update.push(write_as_dst0);
-        apply_value_update.push(write_as_dst1);
+        it_is_ptr_as_dst0.push((write_as_dst0, dst0_is_ptr));
+        it_value_as_dst0.push((write_as_dst0, dst0_value));
 
-        it_is_ptr.push((write_as_dst0, dst0_is_ptr));
-        it_value.push((write_as_dst0, dst0_value));
+        it_is_ptr_as_dst1.push((write_as_dst1, dst1_is_ptr));
+        it_value_as_dst1.push((write_as_dst1, dst1_value));
 
-        it_is_ptr.push((write_as_dst1, dst1_is_ptr));
-        it_value.push((write_as_dst1, dst1_value));
-
-        // then chain all specific register updates
+        // then chain all specific register updates. Opcodes that produce specific updates do not make non-specific register updates,
+        // so we just place them along with dst0
         for specific_update in diffs_accumulator.specific_registers_updates[idx].drain(..) {
-            apply_ptr_update.push(specific_update.0);
-            apply_value_update.push(specific_update.0);
-            it_is_ptr.push((specific_update.0, specific_update.1.is_pointer));
-            it_value.push((specific_update.0, specific_update.1.value));
+            apply_ptr_update_as_dst0.push(specific_update.0);
+            it_is_ptr_as_dst0.push((specific_update.0, specific_update.1.is_pointer));
+            it_value_as_dst0.push((specific_update.0, specific_update.1.value));
         }
 
-        // chain removal of pointer markers at once
+        // chain removal of pointer markers at once. Same, can be placed into dst0
         let mut tmp = ArrayVec::<Boolean<F>, 16>::new();
         for remove_ptr_request in diffs_accumulator.remove_ptr_on_specific_registers[idx].drain(..)
         {
@@ -338,11 +367,11 @@ where
 
         if tmp.is_empty() == false {
             let remove_ptr_marker = Boolean::multi_or(cs, &tmp);
-            apply_ptr_update.push(remove_ptr_marker);
-            it_is_ptr.push((remove_ptr_marker, boolean_false));
+            apply_ptr_update_as_dst0.push(remove_ptr_marker);
+            it_is_ptr_as_dst0.push((remove_ptr_marker, boolean_false));
         }
 
-        // chain zeroing at once
+        // chain zeroing at once. Same, can be placed into dst0
         let mut tmp = ArrayVec::<Boolean<F>, 16>::new();
         for zeroing_requests in diffs_accumulator.specific_registers_zeroing[idx].drain(..) {
             tmp.push(zeroing_requests);
@@ -350,37 +379,55 @@ where
 
         if tmp.is_empty() == false {
             let zero_out_reg = Boolean::multi_or(cs, &tmp);
-            apply_value_update.push(zero_out_reg);
-            it_value.push((zero_out_reg, zero_u256));
+            it_value_as_dst0.push((zero_out_reg, zero_u256));
         }
 
-        let any_ptr_update = Boolean::multi_or(cs, &apply_ptr_update);
-        let any_value_update = Boolean::multi_or(cs, &apply_value_update);
+        let any_ptr_update_as_dst0 = Boolean::multi_or(cs, &apply_ptr_update_as_dst0);
+        let any_ptr_update_as_dst1 = Boolean::multi_or(cs, &apply_ptr_update_as_dst1);
 
-        let keep_is_ptr = any_ptr_update.negated(cs);
-        let keep_value = any_value_update.negated(cs);
-
-        // add current reg values
-        it_is_ptr.push((keep_is_ptr, new_state.registers[idx].is_pointer));
-        it_value.push((keep_value, new_state.registers[idx].value));
-
-        let num_candidates = it_is_ptr.len();
+        // boolean flags benefit from multiselect, and multiselect over them is over empty set or bitmask, where empty
+        // case is handles by extra explicit select
         let is_ptr_baseline = boolean_false;
-        new_state.registers[idx].is_pointer = Boolean::multiselect(
+        // as dst0
+        let num_candidates = it_is_ptr_as_dst0.len();
+        let is_ptr_as_dst0 = Boolean::multiselect(
             cs,
             &is_ptr_baseline,
-            it_is_ptr.into_iter(),
+            it_is_ptr_as_dst0.into_iter(),
             num_candidates,
         );
-
-        let num_candidates = it_value.len();
-        let value_baseline = zero_u256;
-        new_state.registers[idx].value = UInt256::multiselect(
+        new_state.registers[idx].is_pointer = Boolean::conditionally_select(
             cs,
-            &value_baseline,
-            it_value.into_iter(),
+            any_ptr_update_as_dst0,
+            &is_ptr_as_dst0,
+            &new_state.registers[idx].is_pointer,
+        );
+        // now as dst1
+        let num_candidates = it_is_ptr_as_dst1.len();
+        let is_ptr_as_dst1 = Boolean::multiselect(
+            cs,
+            &is_ptr_baseline,
+            it_is_ptr_as_dst1.into_iter(),
             num_candidates,
         );
+        new_state.registers[idx].is_pointer = Boolean::conditionally_select(
+            cs,
+            any_ptr_update_as_dst1,
+            &is_ptr_as_dst1,
+            &new_state.registers[idx].is_pointer,
+        );
+        
+        // for registers we just use parallel select, that has the same efficiency as multiselect,
+        // because internally it's [UInt32<F>; 8]
+
+        for (flag, value) in it_value_as_dst0.into_iter().chain(it_value_as_dst1.into_iter()) {
+            new_state.registers[idx].value = UInt256::conditionally_select(
+                cs,
+                flag,
+                &value,
+                &new_state.registers[idx].value,
+            );
+        }
     }
 
     // apply smaller changes to VM state, such as ergs left, etc
@@ -548,6 +595,10 @@ where
         );
     }
 
+    // other state parts
+    let new_pending_exception = Boolean::multi_or(cs, &diffs_accumulator.pending_exceptions);
+    new_state.pending_exception = new_pending_exception;
+
     // add/sub relations
 
     let cap = diffs_accumulator.add_sub_relations.len();
@@ -612,19 +663,17 @@ where
         should_enforce: perform_dst0_memory_write_update,
     };
 
-    let boolean_true = Boolean::allocated_constant(cs, true);
-
     let mut first_sponge_candidate = src0_read_state_pending_sponge;
     for (can_use_sponge_for_src0, can_use_sponge_for_dst0, opcode_applies, sponge_data) in diffs_accumulator.sponge_candidates_to_run.iter_mut() {
         assert!(*can_use_sponge_for_src0 == false);
         assert!(*can_use_sponge_for_dst0 == false);
 
-        if let Some((initial_state, final_state)) = sponge_data.pop() {
+        if let Some((should_enforce, initial_state, final_state)) = sponge_data.pop() {
             // we can conditionally select
             let formal_sponge = PendingSponge {
                 initial_state: initial_state,
                 final_state: final_state,
-                should_enforce: boolean_true,
+                should_enforce: should_enforce,
             };
 
             first_sponge_candidate = Selectable::conditionally_select(
@@ -641,12 +690,12 @@ where
         assert!(*can_use_sponge_for_src0 == false);
         assert!(*can_use_sponge_for_dst0 == false);
 
-        if let Some((initial_state, final_state)) = sponge_data.pop() {
+        if let Some((should_enforce, initial_state, final_state)) = sponge_data.pop() {
             // we can conditionally select
             let formal_sponge = PendingSponge {
                 initial_state: initial_state,
                 final_state: final_state,
-                should_enforce: boolean_true,
+                should_enforce: should_enforce,
             };
 
             second_sponge_candidate = Selectable::conditionally_select(
@@ -666,13 +715,13 @@ where
     for _ in 2..MAX_SPONGES_PER_CYCLE {
         let mut selected = None;
         for (_, _, opcode_applies, sponge_data) in diffs_accumulator.sponge_candidates_to_run.iter_mut() {    
-            if let Some((initial_state, final_state)) = sponge_data.pop() {
+            if let Some((should_enforce, initial_state, final_state)) = sponge_data.pop() {
                 if let Some(selected) = selected.as_mut() {
                     // we can conditionally select
                     let formal_sponge = PendingSponge {
                         initial_state: initial_state,
                         final_state: final_state,
-                        should_enforce: boolean_true,
+                        should_enforce: should_enforce,
                     };
 
                     *selected = Selectable::conditionally_select(
@@ -682,10 +731,11 @@ where
                         &*selected,
                     );
                 } else {
+                    let should_enforce = Boolean::multi_and(cs, &[should_enforce, *opcode_applies]);
                     let formal_sponge = PendingSponge {
                         initial_state: initial_state,
                         final_state: final_state,
-                        should_enforce: *opcode_applies,
+                        should_enforce: should_enforce,
                     };
                     selected = Some(formal_sponge);
                 }
@@ -702,6 +752,9 @@ where
     }
     assert_eq!(selected_sponges_to_enforce.len(), MAX_SPONGES_PER_CYCLE);
 
+    // dbg!(new_state.memory_queue_state.witness_hook(&*cs)().unwrap());
+    // dbg!(new_state.memory_queue_length.witness_hook(&*cs)().unwrap());
+
     // actually enforce_sponges
 
     enforce_sponges(
@@ -709,6 +762,14 @@ where
         &selected_sponges_to_enforce,
         round_function
     );
+
+    if crate::config::CIRCUIT_VERSOBE {
+        // synchronization point
+        let _wit = new_state.witness_hook(&*cs)().unwrap();
+        // dbg!(_wit.memory_queue_state);
+        // dbg!(_wit.memory_queue_length);
+        println!("End of cycle");
+    }
 
     new_state
 }
@@ -741,8 +802,15 @@ fn may_be_write_memory<
 where
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
-    let MemoryLocation { page, index } = location;
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_write_dst0.witness_hook(&*cs)().unwrap() {
+            println!("Will write DST0 to memory");
+            dbg!(location.witness_hook(&*cs)().unwrap());
+            dbg!(dst0_value.witness_hook(&*cs)().unwrap());
+        }
+    }
 
+    let MemoryLocation { page, index } = location;
     let boolean_true = Boolean::allocated_constant(cs, true);
 
     let query = MemoryQuery {
@@ -775,8 +843,25 @@ where
         cs,
         packed_query,
         current_memory_sponge_tail.map(|el| el.get_variable()),
-        boolean_true,
+        *should_write_dst0,
     );
+
+    // create absorbed initial state
+
+    let initial_state = [
+        Num::from_variable(packed_query[0]),
+        Num::from_variable(packed_query[1]),
+        Num::from_variable(packed_query[2]),
+        Num::from_variable(packed_query[3]),
+        Num::from_variable(packed_query[4]),
+        Num::from_variable(packed_query[5]),
+        Num::from_variable(packed_query[6]),
+        Num::from_variable(packed_query[7]),
+        current_memory_sponge_tail[8],
+        current_memory_sponge_tail[9],
+        current_memory_sponge_tail[10],
+        current_memory_sponge_tail[11],
+    ];
 
     let simulated_final_state = simulated_values.map(|el| Num::from_variable(el));
 
@@ -824,7 +909,7 @@ where
     );
 
     (
-        (*current_memory_sponge_tail, simulated_final_state),
+        (initial_state, simulated_final_state),
         final_state,
         new_length,
     )
@@ -856,262 +941,3 @@ pub const fn reference_vm_geometry() -> CSGeometry {
         max_allowed_constraint_degree: 8,
     }
 }
-
-// use boojum::cs::traits::cs::GatesConfigulation;
-// pub fn gates_setup(geometry: &CSGeometry) -> impl GatesConfigulation<GoldilocksField> {
-//     type F = GoldilocksField;
-
-//     use boojum::cs::empty_gates_set;
-//     use boojum::cs::gates::*;
-//     use crate::implementations::poseidon_goldilocks::PoseidonGoldilocks;
-
-//     type PoseidonGate = PoseidonFlattenedGate<F, 8, 12, 4, PoseidonGoldilocks>;
-
-//     let gates = empty_gates_set().allow_gate::<ConstantsAllocatorGate<F>>(());
-//     let gates = PoseidonGate::compute_strategy_and_add_into_gates_set(gates, geometry);
-//     let gates = gates.allow_gate::<DotProductGate<4>>(());
-//     let gates = gates.allow_gate::<BooleanConstraintGate>(());
-//     let gates = gates.allow_gate::<QuadraticCombinationGate<4>>(());
-//     let gates = gates.allow_gate::<ZeroCheckGate>(false);
-//     let gates = gates.allow_gate::<FmaGateInBaseFieldWithoutConstant<F>>(());
-//     let gates = gates.allow_gate::<UIntXAddGate<32>>(());
-//     let gates = gates.allow_gate::<UIntXAddGate<16>>(());
-//     let gates = gates.allow_gate::<UIntXAddGate<8>>(());
-//     let gates = gates.allow_gate::<ReductionByPowersGate<F, 4>>(());
-//     let gates = gates.allow_gate::<SelectionGate>(());
-//     let gates = gates.allow_gate::<ParallelSelectionGate<4>>(());
-//     let gates = gates.allow_gate::<ReductionGate<F, 4>>(());
-//     let gates = gates.allow_gate::<U8x4FMAGate>(());
-
-//     gates
-// }
-
-// use boojum::cs::implementations::cs::CSDevelopmentAssembly;
-
-// pub fn testing_cs<G: GatesConfigulation<GoldilocksField>>(
-//     geometry: CSGeometry,
-//     max_trace_length: usize, 
-//     gates: G,
-// ) -> CSDevelopmentAssembly<GoldilocksField, G> {
-//     use boojum::cs::create_test_cs_with_lookup_ext;
-//     use crate::tables::bitshift::create_shift_to_num_converter_table;
-//     use crate::tables::conditional::create_conditionals_resolution_table;
-//     use crate::tables::integer_to_boolean_mask::REG_IDX_TO_BITMASK_TABLE_NAME;
-//     use crate::tables::integer_to_boolean_mask::UMA_SHIFT_TO_BITMASK_TABLE_NAME;
-//     use crate::tables::integer_to_boolean_mask::{
-//         create_integer_to_bitmask_table, create_subpc_bitmask_table,
-//     };
-//     use crate::tables::uma_ptr_read_cleanup::create_uma_ptr_read_bitmask_table;
-//     use crate::tables::opcodes_decoding::create_opcodes_decoding_and_pricing_table;
-//     type F = GoldilocksField;
-//     use crate::base_structures::vm_state::REGISTERS_COUNT;
-
-//     let mut cs_owned = create_test_cs_with_lookup_ext(geometry, max_trace_length * 100, max_trace_length, gates);
-
-//     let subpc_to_mask_table = create_subpc_bitmask_table::<F>();
-//     cs_owned.add_lookup_table(subpc_to_mask_table);
-
-//     let opcode_decoding_table = create_opcodes_decoding_and_pricing_table::<F>();
-//     cs_owned.add_lookup_table(opcode_decoding_table);
-
-//     let conditions_resolution_table = create_conditionals_resolution_table::<F>();
-//     cs_owned.add_lookup_table(conditions_resolution_table);
-
-//     let integer_to_bitmask_table = create_integer_to_bitmask_table::<F>(
-//         REGISTERS_COUNT.next_power_of_two().trailing_zeros() as usize,
-//         REG_IDX_TO_BITMASK_TABLE_NAME,
-//     );
-//     cs_owned.add_lookup_table(integer_to_bitmask_table);
-
-//     let shifts_table = create_shift_to_num_converter_table::<F>();
-//     cs_owned.add_lookup_table(shifts_table);
-
-//     let uma_unaligned_access_table = create_integer_to_bitmask_table::<F>(
-//         5,
-//         UMA_SHIFT_TO_BITMASK_TABLE_NAME
-//     );
-//     cs_owned.add_lookup_table(uma_unaligned_access_table);
-
-//     let uma_ptr_read_cleanup_table = create_uma_ptr_read_bitmask_table::<F>();
-//     cs_owned.add_lookup_table(uma_ptr_read_cleanup_table);
-
-//     cs_owned
-// }
-
-// use boojum::cs::implementations::cs::CSBasicProvingAssembly;
-
-// pub fn basic_proving_cs<G: GatesConfigulation<GoldilocksField>>(
-//     geometry: CSGeometry,
-//     max_trace_length: usize, 
-//     gates: G,
-// ) -> CSBasicProvingAssembly<GoldilocksField, G> {
-//     use crate::tables::bitshift::create_shift_to_num_converter_table;
-//     use crate::tables::conditional::create_conditionals_resolution_table;
-//     use crate::tables::integer_to_boolean_mask::REG_IDX_TO_BITMASK_TABLE_NAME;
-//     use crate::tables::integer_to_boolean_mask::UMA_SHIFT_TO_BITMASK_TABLE_NAME;
-//     use crate::tables::integer_to_boolean_mask::{
-//         create_integer_to_bitmask_table, create_subpc_bitmask_table,
-//     };
-//     use crate::tables::uma_ptr_read_cleanup::create_uma_ptr_read_bitmask_table;
-//     use crate::tables::opcodes_decoding::create_opcodes_decoding_and_pricing_table;
-//     type F = GoldilocksField;
-//     use crate::base_structures::vm_state::REGISTERS_COUNT;
-
-//     use boojum::cs::LookupParameters;
-
-//     let mut cs_owned = CSBasicProvingAssembly::<GoldilocksField, G>::new_for_geometry(
-//         geometry,
-//         max_trace_length * 100,
-//         max_trace_length,
-//         LookupParameters::TableIdAsConstant { width: 3 },
-//         gates,
-//     );
-
-//     use boojum::cs::gates::ConstantsAllocatorGate;
-//     assert!(cs_owned.gate_is_allowed::<ConstantsAllocatorGate<GoldilocksField>>());
-
-//     use boojum::cs::tables::binop_table::create_binop_table;
-//     let binop_table = create_binop_table();
-//     cs_owned.add_lookup_table(binop_table);
-
-//     let subpc_to_mask_table = create_subpc_bitmask_table::<F>();
-//     cs_owned.add_lookup_table(subpc_to_mask_table);
-
-//     let opcode_decoding_table = create_opcodes_decoding_and_pricing_table::<F>();
-//     cs_owned.add_lookup_table(opcode_decoding_table);
-
-//     let conditions_resolution_table = create_conditionals_resolution_table::<F>();
-//     cs_owned.add_lookup_table(conditions_resolution_table);
-
-//     let integer_to_bitmask_table = create_integer_to_bitmask_table::<F>(
-//         REGISTERS_COUNT.next_power_of_two().trailing_zeros() as usize,
-//         REG_IDX_TO_BITMASK_TABLE_NAME,
-//     );
-//     cs_owned.add_lookup_table(integer_to_bitmask_table);
-
-//     let shifts_table = create_shift_to_num_converter_table::<F>();
-//     cs_owned.add_lookup_table(shifts_table);
-
-//     let uma_unaligned_access_table = create_integer_to_bitmask_table::<F>(
-//         5,
-//         UMA_SHIFT_TO_BITMASK_TABLE_NAME
-//     );
-//     cs_owned.add_lookup_table(uma_unaligned_access_table);
-
-//     let uma_ptr_read_cleanup_table = create_uma_ptr_read_bitmask_table::<F>();
-//     cs_owned.add_lookup_table(uma_ptr_read_cleanup_table);
-
-//     cs_owned
-// }
-
-// #[cfg(test)]
-// mod test {
-//     use std::sync::RwLock;
-
-//     use super::*;
-//     use crate::algebraic_props::round_function;
-//     use boojum::cs::empty_gates_set;
-//     use boojum::cs::gates::*;
-//     use boojum::cs::{create_setup_cs_with_lookup_ext, CSGeometry};
-//     use boojum::field::goldilocks::GoldilocksField;
-//     use crate::implementations::poseidon_goldilocks::PoseidonGoldilocks;
-//     use crate::main_vm::witness_oracle::DummyOracle;
-//     use crate::tables::bitshift::create_shift_to_num_converter_table;
-//     use crate::tables::conditional::create_conditionals_resolution_table;
-//     use crate::tables::integer_to_boolean_mask::REG_IDX_TO_BITMASK_TABLE_NAME;
-//     use crate::tables::integer_to_boolean_mask::UMA_SHIFT_TO_BITMASK_TABLE_NAME;
-//     use crate::tables::integer_to_boolean_mask::{
-//         create_integer_to_bitmask_table, create_subpc_bitmask_table,
-//     };
-//     use crate::tables::uma_ptr_read_cleanup::create_uma_ptr_read_bitmask_table;
-//     use crate::tables::opcodes_decoding::create_opcodes_decoding_and_pricing_table;
-//     type F = GoldilocksField;
-//     use crate::base_structures::vm_state::REGISTERS_COUNT;
-
-//     #[test]
-//     fn try_synthesize_setup() {
-//         let geometry = CSGeometry {
-//             num_columns_under_copy_permutation: 140,
-//             num_witness_columns: 0,
-//             num_constant_columns: 8,
-//             max_allowed_constraint_degree: 8,
-//         };
-
-//         type PoseidonGate = PoseidonFlattenedGate<F, 8, 12, 4, PoseidonGoldilocks>;
-
-//         let gates = empty_gates_set().allow_gate::<ConstantsAllocatorGate<F>>(());
-//         let gates = PoseidonGate::compute_strategy_and_add_into_gates_set(gates, &geometry);
-//         let gates = gates.allow_gate::<DotProductGate<4>>(());
-//         let gates = gates.allow_gate::<BooleanConstraintGate>(());
-//         let gates = gates.allow_gate::<QuadraticCombinationGate<4>>(());
-//         let gates = gates.allow_gate::<ZeroCheckGate>(false);
-//         let gates = gates.allow_gate::<FmaGateInBaseFieldWithoutConstant<F>>(());
-//         let gates = gates.allow_gate::<UIntXAddGate<32>>(());
-//         let gates = gates.allow_gate::<UIntXAddGate<16>>(());
-//         let gates = gates.allow_gate::<UIntXAddGate<8>>(());
-//         let gates = gates.allow_gate::<ReductionByPowersGate<F, 4>>(());
-//         let gates = gates.allow_gate::<SelectionGate>(());
-//         let gates = gates.allow_gate::<ParallelSelectionGate<4>>(());
-//         let gates = gates.allow_gate::<ReductionGate<F, 4>>(());
-//         let gates = gates.allow_gate::<U8x4FMAGate>(());
-
-//         let mut cs_owned = create_setup_cs_with_lookup_ext(geometry, 1 << 20, 1 << 17, gates);
-
-//         let subpc_to_mask_table = create_subpc_bitmask_table::<F>();
-//         cs_owned.add_lookup_table(subpc_to_mask_table);
-
-//         let opcode_decoding_table = create_opcodes_decoding_and_pricing_table::<F>();
-//         cs_owned.add_lookup_table(opcode_decoding_table);
-
-//         let conditions_resolution_table = create_conditionals_resolution_table::<F>();
-//         cs_owned.add_lookup_table(conditions_resolution_table);
-
-//         let integer_to_bitmask_table = create_integer_to_bitmask_table::<F>(
-//             REGISTERS_COUNT.next_power_of_two().trailing_zeros() as usize,
-//             REG_IDX_TO_BITMASK_TABLE_NAME,
-//         );
-//         cs_owned.add_lookup_table(integer_to_bitmask_table);
-
-//         let shifts_table = create_shift_to_num_converter_table::<F>();
-//         cs_owned.add_lookup_table(shifts_table);
-
-//         let uma_unaligned_access_table = create_integer_to_bitmask_table::<F>(
-//             5,
-//             UMA_SHIFT_TO_BITMASK_TABLE_NAME
-//         );
-//         cs_owned.add_lookup_table(uma_unaligned_access_table);
-
-//         let uma_ptr_read_cleanup_table = create_uma_ptr_read_bitmask_table::<F>();
-//         cs_owned.add_lookup_table(uma_ptr_read_cleanup_table);
-
-//         let cs = &mut cs_owned;
-
-//         let mut state = VmLocalState::uninitialized(cs);
-//         let witness_oracle = DummyOracle::default();
-//         let witness_oracle = SynchronizedWitnessOracle {
-//             inner: std::sync::Arc::new(RwLock::new(witness_oracle)),
-//             _marker: std::marker::PhantomData,
-//         };
-
-//         let global_context = GlobalContext {
-//             default_aa_code_hash: UInt256::zero(cs),
-//             zkporter_is_available: Boolean::allocated_constant(cs, false),
-//         };
-
-//         let round_function = PoseidonGoldilocks;
-
-//         let now = std::time::Instant::now();
-
-//         for _ in 0..128 {
-//             state = vm_cycle(cs, state, &witness_oracle, &global_context, &round_function);
-//         }
-
-//         dbg!(now.elapsed());
-
-//         dbg!(cs.next_available_row);
-//         // dbg!(&cs.gates_ordered_eval_functions_set);
-//         cs.print_gate_stats();
-
-//         let _ = cs.compute_selectors_and_constants_placement();
-//     }
-// }
