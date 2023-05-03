@@ -1,5 +1,6 @@
 use super::TimestampedStorageLogRecord;
 use crate::base_structures::log_query::LogQuery;
+use boojum::cs::gates::{assert_no_placeholder_variables, assert_no_placeholders};
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::field::goldilocks::GoldilocksField;
 use boojum::gadgets::{boolean::Boolean, u160::*, u256::*, u32::*, u8::*};
@@ -613,7 +614,7 @@ pub fn generate_test_input_sorted<CS: ConstraintSystem<F>>(
         timestamp: UInt32::allocated_constant(cs, 38),
         record: LogQuery::<F> {
             address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32769)),
-            key: UInt256::allocated_constant(cs, U256::from_dec_str("12").unwrap()),
+            key: UInt256::allocated_constant(cs, U256::from_dec_str("13").unwrap()),
             read_value: UInt256::allocated_constant(cs, U256::from_dec_str("1").unwrap()),
             written_value: UInt256::allocated_constant(cs, U256::from_dec_str("1").unwrap()),
             rw_flag: bool_false,

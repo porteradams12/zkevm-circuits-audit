@@ -7,7 +7,7 @@ use boojum::gadgets::u32::UInt32;
 
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::traits::cs::DstBuffer;
-use boojum::cs::Variable;
+use boojum::cs::{Variable, Witness};
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
 use boojum::gadgets::traits::castable::WitnessCastable;
@@ -576,20 +576,18 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
 
     // we should be able to allocate without knowing values yet
     fn create_without_value<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
-        use ethereum_types::{Address, U256};
-
         Self {
-            address: UInt160::allocated_constant(cs, Address::default()),
-            key: UInt256::allocated_constant(cs, U256::default()),
-            read_value: UInt256::allocated_constant(cs, U256::default()),
-            written_value: UInt256::allocated_constant(cs, U256::default()),
-            rw_flag: Boolean::allocated_constant(cs, false),
-            aux_byte: UInt8::allocated_constant(cs, 0),
-            rollback: Boolean::allocated_constant(cs, false),
-            is_service: Boolean::allocated_constant(cs, false),
-            shard_id: UInt8::allocated_constant(cs, 0),
-            tx_number_in_block: UInt32::allocated_constant(cs, 0),
-            timestamp: UInt32::allocated_constant(cs, 0),
+            address: UInt160::allocate_without_value(cs),
+            key: UInt256::allocate_without_value(cs),
+            read_value: UInt256::allocate_without_value(cs),
+            written_value: UInt256::allocate_without_value(cs),
+            rw_flag: Boolean::allocate_without_value(cs),
+            aux_byte: UInt8::allocate_without_value(cs),
+            rollback: Boolean::allocate_without_value(cs),
+            is_service: Boolean::allocate_without_value(cs),
+            shard_id: UInt8::allocate_without_value(cs),
+            tx_number_in_block: UInt32::allocate_without_value(cs),
+            timestamp: UInt32::allocate_without_value(cs),
         }
     }
 
@@ -600,8 +598,24 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
         self.flatten_as_variables_impl()
     }
 
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
-        todo!();
+    fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, '_, F>) {
+        let src = WitnessCastable::cast_into_source(witness.address);
+        dst.extend(src);
+        let src = WitnessCastable::cast_into_source(witness.key);
+        dst.extend(src);
+        let src = WitnessCastable::cast_into_source(witness.read_value);
+        dst.extend(src);
+        let src = WitnessCastable::cast_into_source(witness.written_value);
+        dst.extend(src);
+        dst.push(WitnessCastable::cast_into_source(witness.rw_flag));
+        dst.push(WitnessCastable::cast_into_source(witness.aux_byte));
+        dst.push(WitnessCastable::cast_into_source(witness.rollback));
+        dst.push(WitnessCastable::cast_into_source(witness.is_service));
+        dst.push(WitnessCastable::cast_into_source(witness.shard_id));
+        dst.push(WitnessCastable::cast_into_source(
+            witness.tx_number_in_block,
+        ));
+        dst.push(WitnessCastable::cast_into_source(witness.timestamp));
     }
 }
 
