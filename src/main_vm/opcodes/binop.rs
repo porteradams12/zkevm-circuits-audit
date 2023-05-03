@@ -30,12 +30,6 @@ pub(crate) fn apply_binop<F: SmallField, CS: ConstraintSystem<F>>(
         .properties_bits
         .boolean_for_opcode(AND_OPCODE);
 
-    if crate::config::CIRCUIT_VERSOBE {
-        if (should_apply.witness_hook(&*cs))().unwrap_or(false) {
-            println!("Applying BINOP");
-        }
-    }
-
     let should_set_flags = common_opcode_state
         .decoded_opcode
         .properties_bits
@@ -55,6 +49,21 @@ pub(crate) fn apply_binop<F: SmallField, CS: ConstraintSystem<F>>(
         .boolean_for_variant(XOR_OPCODE);
     // main point of merging add/sub is to enforce single add/sub relation, that doesn't leak into any
     // other opcodes
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap_or(false) {
+            println!("Applying BINOP");
+            if is_and.witness_hook(&*cs)().unwrap_or(false) {
+                println!("BINOP AND");
+            }
+            if is_or.witness_hook(&*cs)().unwrap_or(false) {
+                println!("BINOP OR");
+            }
+            if _is_xor.witness_hook(&*cs)().unwrap_or(false) {
+                println!("BINOP XOR");
+            }
+        }
+    }
 
     let (and_result, or_result, xor_result) = get_binop_subresults(
         cs,

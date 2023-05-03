@@ -13,13 +13,12 @@ use boojum::cs::Place;
 use boojum::cs::Variable;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
-use boojum::gadgets::traits::encodable::CircuitEncodable;
+use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitEncodableExt};
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use ethereum_types::U256;
 use boojum::config::*;
-use boojum::gadgets::traits::encodable::CircuitEncodableExt;
 
 use cs_derive::*;
 
@@ -216,6 +215,7 @@ impl<F: SmallField> CircuitEncodable<F, MEMORY_QUERY_PACKED_WIDTH> for MemoryQue
     }
 }
 
+
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug, Hash)]
 pub struct MemoryValue<F: SmallField> {
@@ -300,5 +300,14 @@ impl<F: SmallField> MemoryValue<F> {
     }
 }
 
-pub type MemoryQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
+use boojum::gadgets::queue::full_state_queue::{
+    // FullStateCircuitQueue,
+    FullStateCircuitQueueWitness,
+};
+
+pub type MemoryQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> = 
+    FullStateCircuitQueue<F, MemoryQuery<F>, AW, SW, CW, MEMORY_QUERY_PACKED_WIDTH, R>;
 pub type MemoryQueue<F, R> = MemoryQueryQueue<F, 8, 12, 4, R>;
+
+pub type MemoryQueryQueueWitness<F, const SW: usize> =
+    FullStateCircuitQueueWitness<F, MemoryQuery<F>, SW, MEMORY_QUERY_PACKED_WIDTH>;

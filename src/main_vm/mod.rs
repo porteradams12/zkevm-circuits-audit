@@ -231,6 +231,8 @@ where
         );
     }
 
+    structured_input.hook_compare_witness(&*cs, &closed_form_input);
+
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
 

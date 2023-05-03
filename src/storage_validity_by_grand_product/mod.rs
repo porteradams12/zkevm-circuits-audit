@@ -16,7 +16,6 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
-use boojum::gadgets::non_native_field::implementations::utils::u16_long_subtraction;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::{
     boolean::Boolean,
@@ -379,7 +378,7 @@ where
         cs,
         structured_input
             .observable_input
-            .unsorted_log_queue_state
+            .intermediate_sorted_queue_state
             .tail,
         structured_input
             .observable_input
@@ -692,14 +691,12 @@ where
         // now resolve a logic about sorting itself
         let packed_key = concatenate_key(cs, (record.address.clone(), record.key));
 
-        // ensure sorting
+        // ensure sorting. Check that previous key < this key
         let (keys_are_equal, previous_key_is_greater) =
             unpacked_long_comparison(cs, &previous_packed_key, &packed_key);
 
         let not_item_is_trivial = item_is_trivial.negated(cs);
-        previous_key_is_greater
-            .negated(cs)
-            .conditionally_enforce_true(cs, not_item_is_trivial);
+        previous_key_is_greater.conditionally_enforce_false(cs, not_item_is_trivial);
 
         // if keys are the same then timestamps are sorted
         let (_, previous_timestamp_is_less, _) = previous_timestamp.overflowing_sub(cs, timestamp);
@@ -952,7 +949,7 @@ where
     )
 }
 
-pub fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
+fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
     _cs: &mut CS,
     key_tuple: (UInt160<F>, UInt256<F>),
 ) -> [UInt32<F>; PACKED_KEY_LENGTH] {
@@ -983,25 +980,20 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
     a: &[UInt32<F>; N],
     b: &[UInt32<F>; N],
 ) -> (Boolean<F>, Boolean<F>) {
-    let mut borrow = Boolean::allocated_constant(cs, false);
-    let zero_u32 = UInt32::zero(cs);
-    let mut result = [zero_u32; N];
-    for ((b, a), dst) in b.iter().zip(a.iter()).zip(result.iter_mut()) {
-        let (c, new_borrow) = UIntXAddGate::<32>::perform_subtraction(
-            cs,
-            b.get_variable(),
-            a.get_variable(),
-            borrow.get_variable(),
-        );
-        let (c, _) = UInt32::from_variable_checked(cs, c);
-        *dst = c;
-        borrow = unsafe { Boolean::from_variable_unchecked(new_borrow) };
+    let boolean_false = Boolean::allocated_constant(cs, false);
+    let mut equals = [boolean_false; N];
+    let mut borrow = boolean_false;
+
+    for i in 0..N {
+        let (diff, new_borrow, _) = b[i].overflowing_sub_with_borrow_in(cs, a[i], borrow);
+        borrow = new_borrow;
+        equals[i] = diff.is_zero(cs);
     }
 
-    let zero_limbs = result.map(|el| el.is_zero(cs));
-    let eq = Boolean::multi_and(cs, &zero_limbs);
+    let equal = Boolean::multi_and(cs, &equals);
+    let a_is_greater = borrow;
 
-    (eq, borrow)
+    (equal, a_is_greater)
 }
 
 #[cfg(test)]
@@ -1017,7 +1009,6 @@ mod tests {
     use boojum::cs::EmptyToolbox;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
-    use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::gadgets::tables::*;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;

@@ -46,7 +46,7 @@ pub type EcrecoverCircuitInputOutputWitness<F> = ClosedFormInputWitness<
 
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct EcrecoverCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: EcrecoverCircuitInputOutputWitness<F>,

@@ -85,7 +85,7 @@ pub type Sha256RoundFunctionCircuitInputOutputWitness<F> = ClosedFormInputWitnes
 
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct Sha256RoundFunctionCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: Sha256RoundFunctionCircuitInputOutputWitness<F>,

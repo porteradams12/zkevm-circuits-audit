@@ -16,7 +16,7 @@ smallvec = { version = "*", features = [
 ] }
 lazy_static = "*"
 arrayvec = "*"
-zkevm_opcode_defs = { path = "../zkevm_opcode_defs" }
+zkevm_opcode_defs = {git = "https://github.com/matter-labs/zkevm_opcode_defs.git", branch = "v1.3.2"}
 # boojum = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
 boojum = { path = "../boojum" }
 bincode = "*"
@@ -27,6 +27,7 @@ itertools = "0.10"
 rand_new = { package = "rand", version = "0.8" }
 num-integer = "0.1"
 num-traits = "0.2"
+hex = "*"
 
 
 [dev-dependencies]

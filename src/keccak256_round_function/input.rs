@@ -91,7 +91,7 @@ pub type Keccak256RoundFunctionCircuitInputOutputWitness<F> = ClosedFormInputWit
 
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct Keccak256RoundFunctionCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: Keccak256RoundFunctionCircuitInputOutputWitness<F>,

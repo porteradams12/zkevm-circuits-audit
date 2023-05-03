@@ -320,38 +320,9 @@ pub fn demultiplex_storage_logs_inner<
     let [rollup_storage_queue, events_queue, l1_messages_queue, keccak_calls_queue, sha256_calls_queue, ecdsa_calls_queue] =
         output_queues;
 
-    const SYSTEM_CONTRACTS_OFFSET_ADDRESS: u16 = 1 << 15;
-
-    const KECCAK256_ROUND_FUNCTION_PRECOMPILE_ADDRESS: u16 = SYSTEM_CONTRACTS_OFFSET_ADDRESS + 0x10;
-    const SHA256_ROUND_FUNCTION_PRECOMPILE_ADDRESS: u16 = 0x02; // as in Ethereum
-    const ECRECOVER_INNER_FUNCTION_PRECOMPILE_ADDRESS: u16 = 0x01; // as in Ethereum
-
-    let keccak_precompile_address = UInt160::allocated_constant(
-        cs,
-        recompose_address_from_u32x5([
-            KECCAK256_ROUND_FUNCTION_PRECOMPILE_ADDRESS as u32,
-            0,
-            0,
-            0,
-            0,
-        ]),
-    );
-
-    let sha256_precompile_address = UInt160::allocated_constant(
-        cs,
-        recompose_address_from_u32x5([SHA256_ROUND_FUNCTION_PRECOMPILE_ADDRESS as u32, 0, 0, 0, 0]),
-    );
-
-    let ecrecover_precompile_address = UInt160::allocated_constant(
-        cs,
-        recompose_address_from_u32x5([
-            ECRECOVER_INNER_FUNCTION_PRECOMPILE_ADDRESS as u32,
-            0,
-            0,
-            0,
-            0,
-        ]),
-    );
+    let keccak_precompile_address = UInt160::allocated_constant(cs, *zkevm_opcode_defs::system_params::KECCAK256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
+    let sha256_precompile_address = UInt160::allocated_constant(cs, *zkevm_opcode_defs::system_params::SHA256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
+    let ecrecover_precompile_address = UInt160::allocated_constant(cs, *zkevm_opcode_defs::system_params::ECRECOVER_INNER_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
 
     for _ in 0..limit {
         let mut execute = storage_log_queue.is_empty(cs);
