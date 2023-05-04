@@ -124,9 +124,6 @@ where
     let mut previous_value = hidden_fsm_input.previous_value;
     let mut previous_is_ptr = hidden_fsm_input.previous_is_ptr;
 
-    dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
-    dbg!(sorted_queue.length.witness_hook(cs)().unwrap());
-
     partial_accumulate_inner::<F, CS, R>(
         cs,
         &mut unsorted_queue,
@@ -219,12 +216,18 @@ where
     let not_start = is_start.negated(cs);
     Num::enforce_equal(cs, &unsorted_queue.length.into_num(), &sorted_queue.length.into_num());
 
+    let bootloader_heap_page = UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE);
+    let uint256_zero = UInt256::zero(cs);
+
     for _cycle in 0..limit {
+        dbg!(unsorted_queue.length);
         dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
-        dbg!(sorted_queue.length.witness_hook(cs)().unwrap());
-        
+
         let unsorted_is_empty = unsorted_queue.is_empty(cs);
         let sorted_is_empty = sorted_queue.is_empty(cs);
+
+        dbg!(unsorted_queue.length);
+        dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
 
         // this is an exotic way so synchronize popping from both queues
         // in asynchronous resolution
@@ -240,15 +243,12 @@ where
         let (sorted_item, sorted_item_encoding) =
             sorted_queue.pop_front(cs, can_pop);
 
+        dbg!(unsorted_queue.length);
         dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
-        dbg!(sorted_queue.length.witness_hook(cs)().unwrap());
-        dbg!(can_pop.witness_hook(cs)().unwrap());
-        dbg!(unsorted_item_encoding.map(|el| Num::from_variable(el)).witness_hook(cs)().unwrap());
-        dbg!(sorted_item_encoding.map(|el| Num::from_variable(el)).witness_hook(cs)().unwrap());
 
+        // check non-deterministic writes
         {
             let ts_is_zero = sorted_item.timestamp.is_zero(cs);
-            let bootloader_heap_page = UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE);
 
             let page_is_bootloader_heap = UInt32::equals(
                 cs,
@@ -282,6 +282,7 @@ where
                 &num_nondeterministic_writes
             );
         }
+        // check RAM ordering
         {
             // either continue the argument or do nothing
 
@@ -318,7 +319,6 @@ where
             let not_rw_flag = rw_flag.negated(cs);
 
             // check uninit read
-            let uint256_zero = UInt256::zero(cs);
             let value_is_zero = UInt256::equals(cs, &sorted_item.value, &uint256_zero);
             let is_ptr = sorted_item.is_ptr;
             let not_ptr = is_ptr.negated(cs);
@@ -357,7 +357,7 @@ where
             *previous_is_ptr = sorted_item.is_ptr;
         }
 
-        // if we did pop then accumulate
+        // if we did pop then accumulate to grand product
         for ((challenges, lhs), rhs) in fs_challenges
             .iter()
             .zip(lhs.iter_mut())
@@ -375,21 +375,6 @@ where
                 .zip(sorted_item_encoding.iter())
                 .zip(challenges[..MEMORY_QUERY_PACKED_WIDTH].iter())
             {
-                let mut tmp = Num::from_variable(*unsorted_contribution).witness_hook(cs)().unwrap();
-                dbg!(tmp);
-                tmp.mul_assign(&challenge.witness_hook(cs)().unwrap());
-                dbg!(tmp);
-                dbg!(lhs_contribution.witness_hook(cs)().unwrap());
-                dbg!(rhs_contribution.witness_hook(cs)().unwrap());
-                dbg!(Num::from_variable(*unsorted_contribution).witness_hook(cs)().unwrap());
-                dbg!(Num::from_variable(*sorted_contribution).witness_hook(cs)().unwrap());
-                dbg!(challenge.witness_hook(cs)().unwrap());
-
-                let mut lhs_value = lhs_contribution.witness_hook(cs)().unwrap();
-                dbg!(lhs_value);
-                lhs_value.add_assign(&tmp);
-                dbg!(lhs_value);
-
                 let new_lhs = Num::fma(
                     cs, 
                     &Num::from_variable(*unsorted_contribution),
@@ -398,7 +383,6 @@ where
                     &lhs_contribution, 
                     &F::ONE
                 );
-                dbg!(new_lhs.witness_hook(cs)().unwrap());
                 lhs_contribution = new_lhs;
 
                 let new_rhs = Num::fma(
@@ -411,9 +395,6 @@ where
                 );
                 rhs_contribution = new_rhs;
             }
-
-            dbg!(lhs_contribution.witness_hook(cs)().unwrap());
-            dbg!(rhs_contribution.witness_hook(cs)().unwrap());
 
             let new_lhs = lhs.mul(cs, &lhs_contribution);
             let new_rhs = rhs.mul(cs, &rhs_contribution);
