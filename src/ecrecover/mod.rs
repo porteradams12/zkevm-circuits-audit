@@ -589,7 +589,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     let one_u32 = UInt32::allocated_constant(cs, 1u32);
     let zero_u256 = UInt256::zero(cs);
     let boolean_false = Boolean::allocated_constant(cs, false);
-    let boolean_true = Boolean::allocated_constant(cs, false);
+    let boolean_true = Boolean::allocated_constant(cs, true);
 
     use crate::storage_application::ConditionalWitnessAllocator;
     let read_queries_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
@@ -623,8 +623,10 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         }
 
         let mut read_values = [zero_u256; NUM_MEMORY_READS_PER_CYCLE];
+        let mut bias_variable = should_process.get_variable();
         for dst in read_values.iter_mut() {
-            let read_query_value: UInt256<F> = read_queries_allocator.conditionally_allocate(cs, should_process);
+            let read_query_value: UInt256<F> = read_queries_allocator.conditionally_allocate_biased(cs, should_process, bias_variable);
+            bias_variable = read_query_value.inner[0].get_variable();
 
             *dst = read_query_value;
 

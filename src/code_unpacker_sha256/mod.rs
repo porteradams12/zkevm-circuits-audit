@@ -1,4 +1,5 @@
 pub mod input;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use input::*;
 
 use std::collections::VecDeque;
@@ -337,7 +338,8 @@ where
         let code_word_0 = code_word_witness.conditionally_allocate(cs, state.state_decommit);
         let code_word_0_be_bytes = code_word_0.to_be_bytes(cs);
 
-        let code_word_1 = code_word_witness.conditionally_allocate(cs, state.state_decommit);
+        // NOTE: we have to enforce a sequence of access to witness, so we always wait for code_word_0 to be resolved
+        let code_word_1 = code_word_witness.conditionally_allocate_biased(cs, process_second_word, code_word_0.inner[0].get_variable());
         let code_word_1_be_bytes = code_word_1.to_be_bytes(cs);
 
         // perform two writes. It's never a "pointer" type
@@ -400,13 +402,10 @@ where
 
         let mut sha256_padding = [zero_u32; 8];
 
-        // padding of single byte of 1<<7 and some zeroes after
+        // padding of single byte of 1<<7 and some zeroes after, and interpret it as BE integer
         sha256_padding[0] = UInt32::allocated_constant(cs, 1 << 31);
-
-        // and final word that will encode the bit length of the input
-        // and now put bitlength as BE, that is a little unfortunate, and we need to change endianess
-        let bytes = state.length_in_bits.to_be_bytes(cs);
-        sha256_padding[7] = UInt32::from_le_bytes(cs, bytes);
+        // last word is just number of bits
+        sha256_padding[7] = state.length_in_bits;
 
         assert_eq!(sha256_input.len(), 16);
         
@@ -426,7 +425,7 @@ where
             &state.sha256_inner_state,
         );
 
-        // make it into uint256, and do not forget to ignore highest two bytes
+        // make it into uint256, and do not forget to ignore highest four bytes
         let hash = UInt256{
             inner: [
                 new_internal_state[7],

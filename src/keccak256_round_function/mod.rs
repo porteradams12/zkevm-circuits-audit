@@ -120,7 +120,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     assert!(limit <= u32::MAX as usize);
 
-    let precompile_address = UInt160::allocated_constant(cs, *zkevm_opcode_defs::system_params::SHA256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
+    let precompile_address = UInt160::allocated_constant(cs, *zkevm_opcode_defs::system_params::KECCAK256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
     let aux_byte_for_precompile = UInt8::allocated_constant(cs, PRECOMPILE_AUX_BYTE);
 
     let boolean_false = Boolean::allocated_constant(cs, false);
@@ -239,8 +239,10 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         );
 
         let mut new_bytes_to_read = [zero_u8; NEW_BYTES_PER_CYCLE];
+        let mut bias_variable = should_read.get_variable();
         for dst in new_bytes_to_read.array_chunks_mut::<32>() {
-            let read_query_value = memory_read_witness.conditionally_allocate(cs, should_read);
+            let read_query_value = memory_read_witness.conditionally_allocate_biased(cs, should_read, bias_variable);
+            bias_variable = read_query_value.inner[0].get_variable();
 
             let read_query = MemoryQuery {
                 timestamp: state.timestamp_to_use_for_read,

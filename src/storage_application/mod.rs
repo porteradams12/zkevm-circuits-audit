@@ -144,6 +144,52 @@ where
         el
     }
 
+    pub fn conditionally_allocate_with_default_biased<
+        CS: ConstraintSystem<F>,
+        DEF: FnOnce() -> EL::Witness + 'static + Send + Sync,
+    >(
+        &self,
+        cs: &mut CS,
+        should_allocate: Boolean<F>,
+        bias: Variable, // any variable that has to be resolved BEFORE executing witness query
+        default_values_closure: DEF,
+    ) -> EL {
+        let el = EL::allocate_without_value(cs);
+
+        if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
+            let dependencies = [should_allocate.get_variable().into(), bias.into()];
+            let witness = self.witness_source.clone();
+            let value_fn = move |inputs: [F; 2]| {
+                let should_allocate = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
+
+                let witness = if should_allocate == true {
+                    let mut guard = witness.write().expect("not poisoned");
+                    let witness_element = guard.pop_front().expect("not empty witness");
+                    drop(guard);
+
+                    witness_element
+                } else {
+                    let witness_element = (default_values_closure)();
+
+                    witness_element
+                };
+
+                let mut result = [F::ZERO; EL::INTERNAL_STRUCT_LEN];
+                let mut dst = DstBuffer::MutSlice(&mut result, 0);
+                EL::set_internal_variables_values(witness, &mut dst);
+                drop(dst);
+
+                result
+            };
+
+            let outputs = Place::from_variables(el.flatten_as_variables());
+
+            cs.set_values_with_dependencies(&dependencies, &outputs, value_fn);
+        }
+
+        el
+    }
+
     pub fn conditionally_allocate<CS: ConstraintSystem<F>>(
         &self,
         cs: &mut CS,
@@ -153,6 +199,20 @@ where
         EL::Witness: Default,
     {
         self.conditionally_allocate_with_default(cs, should_allocate, || {
+            std::default::Default::default()
+        })
+    }
+
+    pub fn conditionally_allocate_biased<CS: ConstraintSystem<F>>(
+        &self,
+        cs: &mut CS,
+        should_allocate: Boolean<F>,
+        bias: Variable, // any variable that has to be resolved BEFORE executing witness query
+    ) -> EL
+    where
+        EL::Witness: Default,
+    {
+        self.conditionally_allocate_with_default_biased(cs, should_allocate, bias, || {
             std::default::Default::default()
         })
     }
