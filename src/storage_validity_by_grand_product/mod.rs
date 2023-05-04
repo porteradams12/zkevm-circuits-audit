@@ -999,7 +999,6 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
     use boojum::cs::implementations::reference_cs::{
         CSDevelopmentAssembly, CSReferenceImplementation,
     };
@@ -1010,7 +1009,7 @@ mod tests {
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::tables::*;
-    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::implementations::poseidon_goldilocks::PoseidonGoldilocks;
     use boojum::worker::Worker;
     use ethereum_types::{Address, U256};
 
@@ -1072,11 +1071,10 @@ mod tests {
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
-        let owned_cs =
-            MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_for_cs(
-                owned_cs,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
+        let owned_cs = MatrixMultiplicationGate::<F, 12, PoseidonGoldilocks>::configure_for_cs(
+            owned_cs,
+            GatePlacementStrategy::UseGeneralPurposeColumns,
+        );
         let owned_cs =
             NopGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
 
@@ -1109,7 +1107,7 @@ mod tests {
             DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
 
         let execute = Boolean::allocated_constant(cs, true);
-        let mut original_queue = StorageLogQueue::<F, Poseidon2Goldilocks>::empty(cs);
+        let mut original_queue = StorageLogQueue::<F, PoseidonGoldilocks>::empty(cs);
         let unsorted_input = test_input::generate_test_input_unsorted(cs);
         for el in unsorted_input {
             original_queue.push(cs, el, execute);
@@ -1125,11 +1123,11 @@ mod tests {
 
         let is_start = Boolean::allocated_constant(cs, true);
         let cycle_idx = UInt32::allocated_constant(cs, 0);
-        let round_function = Poseidon2Goldilocks;
+        let round_function = PoseidonGoldilocks;
         let fs_challenges = crate::utils::produce_fs_challenges::<
             F,
             _,
-            Poseidon2Goldilocks,
+            PoseidonGoldilocks,
             QUEUE_STATE_WIDTH,
             { TIMESTAMPED_STORAGE_LOG_ENCODING_LEN + 1 },
             DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
