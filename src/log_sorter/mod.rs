@@ -322,7 +322,10 @@ pub fn repack_and_prove_events_rollbacks_inner<
         let sorted_is_empty = intermediate_sorted_queue.is_empty(cs);
         Boolean::enforce_equal(cs, &original_is_empty, &sorted_is_empty);
 
-        let should_pop = original_is_empty.negated(cs);
+        let original_is_not_empty = original_is_empty.negated(cs);
+        let sorted_is_not_empty = sorted_is_empty.negated(cs); 
+
+        let should_pop = Boolean::multi_and(cs, &[original_is_not_empty, sorted_is_not_empty]);
         let is_trivial = original_is_empty;
 
         let (_, original_encoding) = unsorted_queue.pop_front(
@@ -375,11 +378,11 @@ pub fn repack_and_prove_events_rollbacks_inner<
 
             // ensure sorting for uniqueness timestamp and rollback flag
             // We know that timestamps are unique accross logs, and are also the same between write and rollback
-            let (keys_are_equal, new_key_is_greater) =
-                unpacked_long_comparison(cs, &[sorting_key], &[previous_key]);
+            let (keys_are_equal, new_key_is_smaller) =
+                unpacked_long_comparison(cs, &[previous_key], &[sorting_key]);
 
             // keys are always ordered no matter what, and are never equal unless it's padding
-            new_key_is_greater.conditionally_enforce_false(cs, should_pop);
+            new_key_is_smaller.conditionally_enforce_false(cs, should_pop);
 
             // there are only two cases when keys are equal:
             // - it's a padding element

@@ -8,10 +8,9 @@ use crate::base_structures::log_query::log_query_witness_from_values;
 use crate::fsm_input_output::ClosedFormInputCompactForm;
 
 use crate::base_structures::{
-    log_query::{LogQuery, LogQueryWitness, LOG_QUERY_PACKED_WIDTH},
+    log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
     vm_state::*,
 };
-use crate::main_vm::opcode_bitmask::TOTAL_OPCODE_MEANINGFULL_DESCRIPTION_BITS;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem, Variable};
@@ -19,7 +18,6 @@ use boojum::field::SmallField;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::{
     boolean::Boolean,
-    impls::lc::linear_combination_collapse,
     num::Num,
     poseidon::CircuitRoundFunction,
     queue::*,
@@ -58,7 +56,7 @@ use cs_derive::*;
 
 use std::sync::Arc;
 
-#[derive(Derivative, CSAllocatable)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Debug)]
 pub struct TimestampedStorageLogRecord<F: SmallField> {
     pub record: LogQuery<F>,
@@ -130,19 +128,7 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
     // we should be able to allocate without knowing values yet
     fn create_without_value<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            record: LogQuery::<F> {
-                address: UInt160::allocate_without_value(cs),
-                key: UInt256::allocate_without_value(cs),
-                read_value: UInt256::allocate_without_value(cs),
-                written_value: UInt256::allocate_without_value(cs),
-                rw_flag: Boolean::allocate_without_value(cs),
-                aux_byte: UInt8::allocate_without_value(cs),
-                rollback: Boolean::allocate_without_value(cs),
-                is_service: Boolean::allocate_without_value(cs),
-                shard_id: UInt8::allocate_without_value(cs),
-                tx_number_in_block: UInt32::allocate_without_value(cs),
-                timestamp: UInt32::allocate_without_value(cs),
-            },
+            record: LogQuery::<F>::allocate_without_value(cs),
             timestamp: UInt32::allocate_without_value(cs),
         }
     }
@@ -163,24 +149,8 @@ impl<F: SmallField> CSAllocatableExt<F> for TimestampedStorageLogRecord<F> {
     }
 
     fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, '_, F>) {
-        let src = WitnessCastable::cast_into_source(witness.record.address);
-        dst.extend(src);
-        let src = WitnessCastable::cast_into_source(witness.record.key);
-        dst.extend(src);
-        let src = WitnessCastable::cast_into_source(witness.record.read_value);
-        dst.extend(src);
-        let src = WitnessCastable::cast_into_source(witness.record.written_value);
-        dst.extend(src);
-        dst.push(WitnessCastable::cast_into_source(witness.record.rw_flag));
-        dst.push(WitnessCastable::cast_into_source(witness.record.aux_byte));
-        dst.push(WitnessCastable::cast_into_source(witness.record.rollback));
-        dst.push(WitnessCastable::cast_into_source(witness.record.is_service));
-        dst.push(WitnessCastable::cast_into_source(witness.record.shard_id));
-        dst.push(WitnessCastable::cast_into_source(
-            witness.record.tx_number_in_block,
-        ));
-        dst.push(WitnessCastable::cast_into_source(witness.record.timestamp));
-        dst.push(WitnessCastable::cast_into_source(witness.timestamp));
+        LogQuery::set_internal_variables_values(witness.record, dst);
+        UInt32::set_internal_variables_values(witness.timestamp, dst);
     }
 }
 
@@ -378,11 +348,11 @@ where
         cs,
         structured_input
             .observable_input
-            .intermediate_sorted_queue_state
+            .unsorted_log_queue_state
             .tail,
         structured_input
             .observable_input
-            .unsorted_log_queue_state
+            .intermediate_sorted_queue_state
             .tail,
         round_function,
     );
@@ -620,7 +590,10 @@ where
         let sorted_is_empty = intermediate_sorted_queue.is_empty(cs);
         Boolean::enforce_equal(cs, &original_is_empty, &sorted_is_empty);
 
-        let should_pop = original_is_empty.negated(cs);
+        let original_is_not_empty = original_is_empty.negated(cs);
+        let sorted_is_not_empty = sorted_is_empty.negated(cs); 
+
+        let should_pop = Boolean::multi_and(cs, &[original_is_not_empty, sorted_is_not_empty]);
         let item_is_trivial = original_is_empty;
 
         // NOTE: we do not need to check shard_id of unsorted item because we can just check it on sorted item
@@ -835,7 +808,7 @@ where
                     &this_cell_current_depth,
                 );
             }
-
+            
             // check consistency
             let read_is_equal_to_current =
                 UInt256::equals(cs, &this_cell_current_value, &record.read_value);

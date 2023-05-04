@@ -6,7 +6,6 @@ use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::selectable::Selectable;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u256::UInt256;
 
@@ -220,14 +219,8 @@ where
     let uint256_zero = UInt256::zero(cs);
 
     for _cycle in 0..limit {
-        dbg!(unsorted_queue.length);
-        dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
-
         let unsorted_is_empty = unsorted_queue.is_empty(cs);
         let sorted_is_empty = sorted_queue.is_empty(cs);
-
-        dbg!(unsorted_queue.length);
-        dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
 
         // this is an exotic way so synchronize popping from both queues
         // in asynchronous resolution
@@ -242,9 +235,6 @@ where
         // let unsorted_item_encoding = unsorted_queue.pop_first_encoding_only(cs, &can_pop, round_function);
         let (sorted_item, sorted_item_encoding) =
             sorted_queue.pop_front(cs, can_pop);
-
-        dbg!(unsorted_queue.length);
-        dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
 
         // check non-deterministic writes
         {
@@ -405,8 +395,6 @@ where
     }
 }
 
-use boojum::gadgets::traits::allocatable::CSAllocatable;
-
 pub(crate) fn long_equals<
     F: SmallField, 
     CS: ConstraintSystem<F>,
@@ -416,12 +404,8 @@ pub(crate) fn long_equals<
     a: &[UInt32<F>; N],
     b: &[UInt32<F>; N]
 ) -> Boolean<F> {
-    let boolean_default = Boolean::allocate_without_value(cs);
-    let mut equals = [boolean_default; N];
 
-    for i in 0..N {
-        equals[i] = UInt32::equals(cs, &a[i], &b[i]);
-    }
+    let equals: [_; N] = std::array::from_fn(|i| UInt32::equals(cs, &a[i], &b[i]));
 
     Boolean::multi_and(cs, &equals)
 }
