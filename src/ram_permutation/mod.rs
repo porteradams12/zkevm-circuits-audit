@@ -6,6 +6,7 @@ use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u256::UInt256;
 
@@ -71,7 +72,6 @@ where
         unsorted_queue_witness,
     ));
 
-
     // passthrought must be trivial
     observable_input.sorted_queue_initial_state.enforce_trivial_head(cs);
 
@@ -124,6 +124,8 @@ where
     let mut previous_value = hidden_fsm_input.previous_value;
     let mut previous_is_ptr = hidden_fsm_input.previous_is_ptr;
 
+    dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
+    dbg!(sorted_queue.length.witness_hook(cs)().unwrap());
 
     partial_accumulate_inner::<F, CS, R>(
         cs,
@@ -218,14 +220,31 @@ where
     Num::enforce_equal(cs, &unsorted_queue.length.into_num(), &sorted_queue.length.into_num());
 
     for _cycle in 0..limit {
-        let can_pop = unsorted_queue.is_empty(cs);
+        dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
+        dbg!(sorted_queue.length.witness_hook(cs)().unwrap());
+        
+        let unsorted_is_empty = unsorted_queue.is_empty(cs);
+        let sorted_is_empty = sorted_queue.is_empty(cs);
+
+        // this is an exotic way so synchronize popping from both queues
+        // in asynchronous resolution
+        let can_pop_unsorted = unsorted_is_empty.negated(cs);
+        let can_pop_sorted: Boolean<F> = sorted_is_empty.negated(cs);
+        Boolean::enforce_equal(cs, &can_pop_unsorted, &can_pop_sorted);
+        let can_pop = Boolean::multi_and(cs, &[can_pop_unsorted, can_pop_sorted]);
 
         // we do not need any information about unsorted element other than it's encoding
         let (_, unsorted_item_encoding) =
             unsorted_queue.pop_front(cs, can_pop);
-        // let unsorted_item_encoding = unsorted_queue.pop_first_encoding_only(cs, &can_pop, round_function)?;
+        // let unsorted_item_encoding = unsorted_queue.pop_first_encoding_only(cs, &can_pop, round_function);
         let (sorted_item, sorted_item_encoding) =
             sorted_queue.pop_front(cs, can_pop);
+
+        dbg!(unsorted_queue.length.witness_hook(cs)().unwrap());
+        dbg!(sorted_queue.length.witness_hook(cs)().unwrap());
+        dbg!(can_pop.witness_hook(cs)().unwrap());
+        dbg!(unsorted_item_encoding.map(|el| Num::from_variable(el)).witness_hook(cs)().unwrap());
+        dbg!(sorted_item_encoding.map(|el| Num::from_variable(el)).witness_hook(cs)().unwrap());
 
         {
             let ts_is_zero = sorted_item.timestamp.is_zero(cs);
@@ -307,7 +326,6 @@ where
             let ptr_equality = Num::equals(cs, &previous_is_ptr.into_num(), &is_ptr.into_num());
             let value_and_ptr_equal = value_equal.and(cs, ptr_equality);
 
-
             // we only have a difference in these flags at the first step
             if _cycle != 0 {
                 let read_uninitialized = not_same_cell.and(cs, not_rw_flag);
@@ -345,19 +363,57 @@ where
             .zip(lhs.iter_mut())
             .zip(rhs.iter_mut())
         {
+            // additive parts
             let mut lhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
             let mut rhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
+
+            debug_assert_eq!(unsorted_item_encoding.len(), sorted_item_encoding.len());
+            debug_assert_eq!(unsorted_item_encoding.len(), challenges[..MEMORY_QUERY_PACKED_WIDTH].len());
 
             for ((unsorted_contribution, sorted_contribution), challenge) in unsorted_item_encoding
                 .iter()
                 .zip(sorted_item_encoding.iter())
-                .zip(challenges.iter())
+                .zip(challenges[..MEMORY_QUERY_PACKED_WIDTH].iter())
             {
-                let l = Num::from_variable(*unsorted_contribution).mul(cs, challenge);
-                lhs_contribution = lhs_contribution.add(cs, &l);
-                let r = Num::from_variable(*sorted_contribution).mul(cs, challenge);
-                rhs_contribution = rhs_contribution.add(cs, &r);
+                let mut tmp = Num::from_variable(*unsorted_contribution).witness_hook(cs)().unwrap();
+                dbg!(tmp);
+                tmp.mul_assign(&challenge.witness_hook(cs)().unwrap());
+                dbg!(tmp);
+                dbg!(lhs_contribution.witness_hook(cs)().unwrap());
+                dbg!(rhs_contribution.witness_hook(cs)().unwrap());
+                dbg!(Num::from_variable(*unsorted_contribution).witness_hook(cs)().unwrap());
+                dbg!(Num::from_variable(*sorted_contribution).witness_hook(cs)().unwrap());
+                dbg!(challenge.witness_hook(cs)().unwrap());
+
+                let mut lhs_value = lhs_contribution.witness_hook(cs)().unwrap();
+                dbg!(lhs_value);
+                lhs_value.add_assign(&tmp);
+                dbg!(lhs_value);
+
+                let new_lhs = Num::fma(
+                    cs, 
+                    &Num::from_variable(*unsorted_contribution),
+                    challenge, 
+                    &F::ONE, 
+                    &lhs_contribution, 
+                    &F::ONE
+                );
+                dbg!(new_lhs.witness_hook(cs)().unwrap());
+                lhs_contribution = new_lhs;
+
+                let new_rhs = Num::fma(
+                    cs, 
+                    &Num::from_variable(*sorted_contribution),
+                    challenge, 
+                    &F::ONE, 
+                    &rhs_contribution, 
+                    &F::ONE
+                );
+                rhs_contribution = new_rhs;
             }
+
+            dbg!(lhs_contribution.witness_hook(cs)().unwrap());
+            dbg!(rhs_contribution.witness_hook(cs)().unwrap());
 
             let new_lhs = lhs.mul(cs, &lhs_contribution);
             let new_rhs = rhs.mul(cs, &rhs_contribution);
