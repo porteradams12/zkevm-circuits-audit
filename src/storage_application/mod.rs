@@ -24,6 +24,8 @@ use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
 use std::sync::{Arc, RwLock};
 use zkevm_opcode_defs::system_params::STORAGE_AUX_BYTE;
+use boojum::gadgets::u256::UInt256;
+use ethereum_types::U256;
 
 use super::*;
 
@@ -218,60 +220,12 @@ where
     }
 }
 
-fn allocate_merkle_path_from_witness<F: SmallField, CS: ConstraintSystem<F>>(
-    cs: &mut CS,
-    should_allocate: Boolean<F>,
-    witness_source: Arc<RwLock<VecDeque<[[u8; 32]; STORAGE_DEPTH]>>>,
-) -> [[UInt8<F>; 32]; STORAGE_DEPTH] {
-    let flattened_bytes = [UInt8::allocate_without_value(cs); 32 * STORAGE_DEPTH];
-
-    if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
-        let dependencies = [should_allocate.get_variable().into()];
-        let witness = witness_source.clone();
-        let value_fn = move |inputs: [F; 1]| {
-            let should_allocate = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
-
-            let witness = if should_allocate == true {
-                let mut guard = witness.write().expect("not poisoned");
-                let witness_element = guard.pop_front().expect("not empty witness");
-                drop(guard);
-
-                witness_element
-            } else {
-                let witness_element = [[0u8; 32]; STORAGE_DEPTH];
-
-                witness_element
-            };
-
-            let mut result = [F::ZERO; 32 * STORAGE_DEPTH];
-            for (dst, src) in result.array_chunks_mut::<32>().zip(witness.into_iter()) {
-                *dst = src.map(|el| F::from_u64_with_reduction(el as u64));
-            }
-
-            result
-        };
-
-        let outputs = Place::from_variables(flattened_bytes.map(|el| el.get_variable()));
-
-        cs.set_values_with_dependencies(&dependencies, &outputs, value_fn);
-    }
-
-    let mut result = [[MaybeUninit::uninit(); 32]; STORAGE_DEPTH];
-    for (dst, src) in result.iter_mut().zip(flattened_bytes.array_chunks::<32>()) {
-        for (dst, src) in dst.iter_mut().zip(src.iter()) {
-            dst.write(*src);
-        }
-    }
-
-    unsafe { result.map(|el| el.map(|el| el.assume_init())) }
-}
-
 fn allocate_enumeration_index_from_witness<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     should_allocate: Boolean<F>,
     witness_source: Arc<RwLock<VecDeque<(u32, u32)>>>,
 ) -> [UInt32<F>; 2] {
-    let flattened = [UInt32::allocate_without_value(cs); 2];
+    let flattened: [_; 2] = std::array::from_fn(|_| UInt32::allocate_without_value(cs));
 
     if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
         let dependencies = [should_allocate.get_variable().into()];
@@ -315,6 +269,8 @@ pub fn storage_applicator_entry_point<
 ) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
 where
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]:,
 {
     let limit = params;
 
@@ -332,10 +288,9 @@ where
         .map(|el| (el as u32, (el >> 32) as u32))
         .collect();
 
-    let merkle_paths: VecDeque<[[u8; 32]; STORAGE_DEPTH]> = merkle_paths
-        .into_iter()
-        .map(|el| el.try_into().expect("length must match"))
-        .collect();
+    let merkle_paths: VecDeque<U256> = merkle_paths.into_iter().flatten().map(|el| {
+        U256::from_little_endian(&el)
+    }).collect();
 
     let mut structured_input =
         StorageApplicationInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
@@ -402,14 +357,14 @@ where
         diffs_keccak_accumulator_state.map(|el| el.map(|el| el.map(|el| el.get_variable())));
 
     let boolean_false = Boolean::allocated_constant(cs, false);
-    let boolean_true = Boolean::allocated_constant(cs, false);
+    let boolean_true = Boolean::allocated_constant(cs, true);
     let zero_u32 = UInt32::allocated_constant(cs, 0u32);
 
     let storage_aux_byte = UInt8::allocated_constant(cs, STORAGE_AUX_BYTE);
     let mut write_stage_in_progress = boolean_false;
     let mut path_key = [zero_u8; 32];
     let mut completed = storage_accesses_queue.is_empty(cs);
-    let mut merkle_path_witness = [[zero_u8; 32]; STORAGE_DEPTH];
+    let mut merkle_path_witness = Box::new([[zero_u8; 32]; STORAGE_DEPTH]);
     let mut current_in_progress_enumeration_index = [zero_u32; 2];
     let mut saved_written_value = [zero_u8; 32];
 
@@ -423,7 +378,9 @@ where
     };
 
     let read_index_witness_allocator = Arc::new(RwLock::new(leaf_indexes_for_reads));
-    let merkle_path_witness_allocator = Arc::new(RwLock::new(merkle_paths));
+    let merkle_path_witness_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
+        witness_source: Arc::new(RwLock::new(merkle_paths))
+    };
 
     for cycle in 0..limit {
         let is_first = cycle == 0;
@@ -512,17 +469,25 @@ where
         );
 
         // index is done, now we need merkle path
-        let new_merkle_path_witness = allocate_merkle_path_from_witness(
-            cs,
-            parse_next_queue_elem,
-            merkle_path_witness_allocator.clone(),
-        );
+        let mut new_merkle_path_witness = Vec::with_capacity(STORAGE_DEPTH);
+        let mut bias_variable = parse_next_queue_elem.get_variable();
+        for _ in 0..STORAGE_DEPTH {
+            let wit = merkle_path_witness_allocator.conditionally_allocate_biased(
+                cs, 
+                parse_next_queue_elem, 
+                bias_variable,
+            );
+            bias_variable = wit.inner[0].get_variable();
+            new_merkle_path_witness.push(wit);
+        }
+
         // if we read then we save and use it for write too
         for (dst, src) in merkle_path_witness
             .iter_mut()
-            .zip(new_merkle_path_witness.into_iter())
+            .zip(new_merkle_path_witness.iter())
         {
-            *dst = UInt8::parallel_select(cs, parse_next_queue_elem, &src, &*dst);
+            let src_bytes = src.to_le_bytes(cs); // NOP 
+            *dst = UInt8::parallel_select(cs, parse_next_queue_elem, &src_bytes, &*dst);
         }
 
         let read_value_bytes = read_value.to_be_bytes(cs);
@@ -561,8 +526,12 @@ where
                 &address_bytes,
                 &state_diff_data.address,
             );
-            state_diff_data.key =
-                UInt8::parallel_select(cs, parse_next_queue_elem, &key_bytes, &state_diff_data.key);
+            state_diff_data.key = UInt8::parallel_select(
+                cs, 
+                parse_next_queue_elem, 
+                &key_bytes, 
+                &state_diff_data.key
+            );
             state_diff_data.derived_key = UInt8::parallel_select(
                 cs,
                 parse_next_queue_elem,
@@ -695,6 +664,7 @@ where
         &mut diffs_keccak_accumulator_state,
         &padding_block,
     );
+    
     // squeeze
     let mut result = [MaybeUninit::<UInt8<F>>::uninit(); keccak256::KECCAK256_DIGEST_SIZE];
     for (i, dst) in result.array_chunks_mut::<8>().enumerate() {
@@ -723,6 +693,8 @@ where
         &empty_observable_output,
     );
     structured_input.observable_output = observable_output;
+
+    use boojum::gadgets::traits::witnessable::WitnessHookable;
 
     // self-check
     structured_input.hook_compare_witness(cs, &closed_form_input);
