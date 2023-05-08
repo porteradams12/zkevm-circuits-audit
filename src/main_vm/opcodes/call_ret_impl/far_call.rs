@@ -26,6 +26,7 @@ use boojum::cs::traits::cs::DstBuffer;
 use crate::base_structures::decommit_query::DecommitQuery;
 use crate::base_structures::decommit_query::DecommitQueryWitness;
 use crate::main_vm::opcodes::call_ret_impl::far_call::log_query::LogQueryWitness;
+use boojum::gadgets::traits::allocatable::CSAllocatable;
 
 const FORCED_ERGS_FOR_MSG_VALUE_SIMUALTOR: bool = false;
 
@@ -52,7 +53,7 @@ pub(crate) struct FarCallData<F: SmallField> {
     pub(crate) new_memory_pages_counter: UInt32<F>,
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 
 pub(crate) struct FarCallPartialABI<F: SmallField> {
@@ -88,7 +89,7 @@ impl<F: SmallField> FarCallPartialABI<F> {
     }
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 
 pub(crate) struct CommonCallRetABI<F: SmallField> {
@@ -97,7 +98,7 @@ pub(crate) struct CommonCallRetABI<F: SmallField> {
     pub(crate) ptr_validation_data: PtrValidationData<F>,
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 
 pub(crate) struct CallRetForwardingMode<F: SmallField> {
@@ -106,7 +107,7 @@ pub(crate) struct CallRetForwardingMode<F: SmallField> {
     pub(crate) forward_fat_pointer: Boolean<F>,
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 pub(crate) struct FatPtrInABI<F: SmallField> {
     pub(crate) offset: UInt32<F>,
@@ -137,7 +138,7 @@ impl<F: SmallField> Selectable<F> for FatPtrInABI<F> {
     }
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 pub(crate) struct PtrValidationData<F: SmallField> {
     pub(crate) generally_invalid: Boolean<F>, // common invariants
@@ -162,19 +163,12 @@ impl<F: SmallField> FatPtrInABI<F> {
 
         let non_zero_offset_if_should_be_fresh = Boolean::multi_and(cs, &[offset_is_non_zero, as_fresh]);
 
-        let (end_non_inclusive, out_of_bounds, _) = start.overflowing_add(cs, length);
-
-        // check that we do not have overflows in addressable range
-        let is_addresable = out_of_bounds.negated(cs);
+        let (end_non_inclusive, slice_u32_range_overflow, _) = start.overflowing_add(cs, length);
 
         // offset <= length, that captures the empty slice (0, 0)
-        let (_, uf, _) = length.overflowing_sub(cs, offset);
-        let is_in_bounds = uf.negated(cs);
+        let (_, is_invalid_as_slice, _) = length.overflowing_sub(cs, offset);
 
-        let is_out_of_bounds = is_in_bounds.negated(cs);
-        let is_non_addressable = is_addresable.negated(cs);
-
-        let ptr_is_invalid = Boolean::multi_or(cs, &[non_zero_offset_if_should_be_fresh, out_of_bounds, is_out_of_bounds, is_non_addressable]);
+        let ptr_is_invalid = Boolean::multi_or(cs, &[non_zero_offset_if_should_be_fresh, slice_u32_range_overflow, is_invalid_as_slice]);
 
         let offset = offset.mask_negated(cs, ptr_is_invalid);
         let page = page.mask_negated(cs, ptr_is_invalid);
@@ -190,7 +184,7 @@ impl<F: SmallField> FatPtrInABI<F> {
 
         let validation_data = PtrValidationData {
             generally_invalid: ptr_is_invalid,
-            is_non_addressable,
+            is_non_addressable: slice_u32_range_overflow,
         };
 
         (new, end_non_inclusive, validation_data)
@@ -418,6 +412,13 @@ where
     far_call_abi.system_call =
         Boolean::multi_and(cs, &[far_call_abi.system_call, target_is_kernel]);
 
+    if crate::config::CIRCUIT_VERSOBE {
+        if execute.witness_hook(&*cs)().unwrap_or(false) {
+            dbg!(forwarding_data.witness_hook(&*cs)().unwrap());
+            dbg!(far_call_abi.witness_hook(&*cs)().unwrap());
+        }
+    }
+
     // the same as we use for LOG
     let timestamp_to_use_for_decommittment_request =
         common_opcode_state.timestamp_for_first_decommit_or_precompile_read;
@@ -570,7 +571,7 @@ where
 
     // exceptions, along with `bytecode_hash_is_trivial` indicate whether we will or will decommit code
     // into memory, or will just use UNMAPPED_PAGE
-    let mut exceptions = ArrayVec::<Boolean<F>, 4>::new();
+    let mut exceptions = ArrayVec::<Boolean<F>, 5>::new();
     exceptions.push(code_format_exception);
     exceptions.push(call_now_in_construction_kernel);
 
@@ -582,6 +583,10 @@ where
     let fat_ptr_expected_exception =
         Boolean::multi_and(cs, &[forward_fat_pointer, src0_is_integer]);
     exceptions.push(fat_ptr_expected_exception);
+
+    // add pointer validation cases
+    exceptions.push(common_abi_parts.ptr_validation_data.generally_invalid);
+    exceptions.push(common_abi_parts.ptr_validation_data.is_non_addressable);
 
     let do_not_forward_ptr = forward_fat_pointer.negated(cs);
 
@@ -596,24 +601,7 @@ where
     // }
 
     let fat_ptr = common_abi_parts.fat_ptr;
-    let upper_bound = common_abi_parts.upper_bound;
-    // first mask to 0 if exceptions happened
-    let upper_bound = upper_bound.mask_negated(cs, exceptions_collapsed);
-    // then compute to penalize for out of memory access attemp
-    let memory_region_is_not_addressable = common_abi_parts.ptr_validation_data.is_non_addressable;
-
-    let fat_ptr = fat_ptr.mask_into_empty(cs, exceptions_collapsed);
-    // also mask upped bound since we do not recompute
-    let upper_bound = upper_bound.mask_negated(cs, exceptions_collapsed);
-    // and penalize if pointer is fresh and not addressable
-    let penalize_heap_overflow =
-        Boolean::multi_and(cs, &[memory_region_is_not_addressable, do_not_forward_ptr]);
-    let u32_max = UInt32::allocated_constant(cs, u32::MAX);
-
-    let upper_bound =
-        UInt32::conditionally_select(cs, penalize_heap_overflow, &u32_max, &upper_bound);
-
-    // now we can modify fat ptr that is prevalidated
+    // we readjust before heap resize
 
     let fat_ptr_adjusted_if_forward = fat_ptr.readjust(cs);
 
@@ -638,7 +626,33 @@ where
         &fat_ptr_for_heaps,
     );
 
-    // potentially pay for memory growth
+    // and mask in case of exceptions
+
+    let final_fat_ptr = final_fat_ptr.mask_into_empty(cs, exceptions_collapsed);
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if execute.witness_hook(&*cs)().unwrap_or(false) {
+            dbg!(final_fat_ptr.witness_hook(&*cs)().unwrap());
+        }
+    }
+
+    // now we can resize memory
+
+    let upper_bound = common_abi_parts.upper_bound;
+    // first mask to 0 if exceptions happened
+    let upper_bound = upper_bound.mask_negated(cs, exceptions_collapsed);
+    // then compute to penalize for out of memory access attemp
+    let memory_region_is_not_addressable = common_abi_parts.ptr_validation_data.is_non_addressable;
+
+    // and penalize if pointer is fresh and not addressable
+    let penalize_heap_overflow =
+        Boolean::multi_and(cs, &[memory_region_is_not_addressable, do_not_forward_ptr]);
+    let u32_max = UInt32::allocated_constant(cs, u32::MAX);
+
+    let upper_bound =
+        UInt32::conditionally_select(cs, penalize_heap_overflow, &u32_max, &upper_bound);
+
+    // potentially pay for memory growth for heap and aux heap
 
     let heap_max_accessed = upper_bound.mask(cs, forwarding_data.use_heap);
     let heap_bound = current_callstack_entry.heap_upper_bound;
@@ -759,6 +773,12 @@ where
 
     let exception = Boolean::multi_or(cs, &[exception, not_enough_ergs_to_decommit]);
 
+    if crate::config::CIRCUIT_VERSOBE {
+        if execute.witness_hook(&*cs)().unwrap_or(false) {
+            dbg!(exception.witness_hook(&*cs)().unwrap());
+        }
+    }
+
     // on call-like path we continue the forward queue, but have to allocate the rollback queue state from witness
     let call_timestamp = draft_vm_state.timestamp;
 
@@ -804,12 +824,6 @@ where
     let preliminary_ergs_left = ergs_remaining_after_decommit;
 
     let (ergs_div_by_64, _) = preliminary_ergs_left.div_by_constant(cs, 64);
-
-    // if crate::config::CIRCUIT_VERSOBE {
-    //     if execute.witness_hook(&*cs)().unwrap() {
-    //         dbg!(ergs_div_by_64.witness_hook(&*cs)().unwrap());
-    //     }
-    // }
 
     let constant_63 = UInt32::allocated_constant(cs, 63);
     // NOTE: max passable is 63 / 64 * preliminary_ergs_left, that is itself u32, so it's safe to just
