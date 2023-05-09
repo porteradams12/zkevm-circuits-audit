@@ -250,6 +250,7 @@ pub fn commit_variable_length_encodable_item<
             *chunk, 
             capacity_els
         );
+        state = R::compute_round_function(cs, state);
     }
 
     let output = R::state_into_commitment::<N>(
