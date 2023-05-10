@@ -1124,7 +1124,7 @@ mod tests {
         let shard_id_to_process = UInt8::allocated_constant(cs, 0);
         let limit = 16;
 
-        let commitments = sort_and_deduplicate_storage_access_inner(
+        sort_and_deduplicate_storage_access_inner(
             cs,
             lhs,
             rhs,

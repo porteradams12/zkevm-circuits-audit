@@ -467,3 +467,432 @@ pub fn check_if_bitmask_and_if_empty<F: SmallField, CS: ConstraintSystem<F>, con
 
     is_boolean
 }
+
+
+#[cfg(test)]
+mod tests { 
+    use super::*;
+    use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
+    use boojum::cs::implementations::reference_cs::{
+        CSDevelopmentAssembly,
+    };
+    use boojum::cs::toolboxes::gate_config::{GatePlacementStrategy};
+    use boojum::cs::traits::configurable_cs::ConfigurableCS;
+    use boojum::cs::CSGeometry;
+    use boojum::cs::*;
+    use boojum::field::goldilocks::GoldilocksField;
+    use boojum::gadgets::tables::*;
+    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::worker::Worker;
+    use ethereum_types::{Address, U256};
+    use boojum::gadgets::u160::UInt160;
+    use boojum::gadgets::u256::UInt256;
+    use boojum::gadgets::u8::UInt8;
+    type F = GoldilocksField;
+
+    #[test]
+    fn test_demultiplex_storage_logs_inner() {
+        let geometry = CSGeometry {
+            num_columns_under_copy_permutation: 100,
+            num_witness_columns: 0,
+            num_constant_columns: 8,
+            max_allowed_constraint_degree: 4,
+        };
+
+        let owned_cs = CSDevelopmentAssembly::<F, _, _>::new_for_geometry(
+            geometry,
+            1 << 26,
+            1 << 20
+        );
+
+        let owned_cs = owned_cs.allow_lookup(
+            LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                width: 3,
+                num_repetitions: 8,
+                share_table_id: true,
+            },
+        );
+        let owned_cs = ConstantsAllocatorGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = BooleanConstraintGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = UIntXAddGate::<32>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = UIntXAddGate::<16>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = SelectionGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = ZeroCheckGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns,false);
+        let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = NopGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+
+        let mut owned_cs = owned_cs.freeze();
+
+        // add tables
+        let table = create_xor8_table();
+        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+
+        let cs = &mut owned_cs;
+
+        let execute = Boolean::allocated_constant(cs, true);
+
+        let mut storage_log_queue = StorageLogQueue::<F, Poseidon2Goldilocks>::empty(cs);
+        let unsorted_input = witness_input_unsorted(cs);
+        for el in unsorted_input {
+            storage_log_queue.push(cs, el, execute);
+        }
+        let mut output_queue = StorageLogQueue::empty(cs);
+        let mut output_queue1 = StorageLogQueue::empty(cs);
+        let mut output_queue2 = StorageLogQueue::empty(cs);
+        let mut output_queue3 = StorageLogQueue::empty(cs);
+        let mut output_queue4 = StorageLogQueue::empty(cs);
+        let mut output_queue5 = StorageLogQueue::empty(cs);
+
+        let output = [&mut output_queue,
+        &mut output_queue1,
+        &mut output_queue2,
+        &mut output_queue3,
+        &mut output_queue4,
+        &mut output_queue5
+        ];
+        let limit = 16;
+        demultiplex_storage_logs_inner(
+            cs, 
+            &mut storage_log_queue,
+            output,
+            limit
+        );
+
+        cs.print_gate_stats();
+
+        cs.pad_and_shrink();
+        let worker = Worker::new();
+        assert!(owned_cs.check_if_satisfied(&worker));
+
+
+    }
+    fn witness_input_unsorted<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<LogQuery<F>> {
+        let mut unsorted_querie = vec![];
+        let bool_false = Boolean::allocated_constant(cs, false);
+        let bool_true = Boolean::allocated_constant(cs, true);
+        let zero_8 = UInt8::allocated_constant(cs, 0);
+        let zero_32 = UInt32::allocated_constant(cs, 0);
+
+        let q = LogQuery::<F> {
+            address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32770)),
+            key: UInt256::allocated_constant(cs, U256::from_dec_str("32779").unwrap()),
+            read_value: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
+            written_value: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
+            rw_flag: bool_false,
+            aux_byte: zero_8,
+            rollback: bool_false,
+            is_service: bool_false,
+            shard_id: zero_8,
+            tx_number_in_block: zero_32,
+            timestamp: UInt32::allocated_constant(cs, 1205),
+        };
+
+        unsorted_querie.push(q);
+
+        let q = LogQuery::<F> {
+            address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32779)),
+            key: UInt256::allocated_constant(cs, U256::from_dec_str("1").unwrap()),
+            read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+            written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+            rw_flag: bool_false,
+            aux_byte: zero_8,
+            rollback: bool_false,
+            is_service: bool_false,
+            shard_id: zero_8,
+            tx_number_in_block: zero_32,
+            timestamp: UInt32::allocated_constant(cs, 1425),
+        };
+        unsorted_querie.push(q);
+
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32770)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("32779").unwrap()),
+        read_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        written_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 1609),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32779)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("7").unwrap()),
+        read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 1777),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32770)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("32779").unwrap()),
+        read_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        written_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 1969),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32779)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("5").unwrap()),
+        read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 2253),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32769)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("10").unwrap()),
+        read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        rw_flag: bool_true,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 2357),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32770)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("32779").unwrap()),
+        read_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        written_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 2429),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32779)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("4").unwrap()),
+        read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 2681),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32769)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("9").unwrap()),
+        read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 2797),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32769)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("9").unwrap()),
+        read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        rw_flag: bool_true,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 2829),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32770)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("32779").unwrap()),
+        read_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        written_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 2901),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32779)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("3").unwrap()),
+        read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 3089),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32769)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("8").unwrap()),
+        read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        rw_flag: bool_true,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 3193),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32770)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("32779").unwrap()),
+        read_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        written_value: UInt256::allocated_constant(
+            cs,
+            U256::from_dec_str(
+                "452319300877325313852488925888724764263521004047156906617735320131041551860",
+            )
+            .unwrap(),
+        ),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 3265),
+    };
+    unsorted_querie.push(q);
+
+    let q = LogQuery::<F> {
+        address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32779)),
+        key: UInt256::allocated_constant(cs, U256::from_dec_str("2").unwrap()),
+        read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        written_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        rw_flag: bool_false,
+        aux_byte: zero_8,
+        rollback: bool_false,
+        is_service: bool_false,
+        shard_id: zero_8,
+        tx_number_in_block: zero_32,
+        timestamp: UInt32::allocated_constant(cs, 3421),
+    };
+    unsorted_querie.push(q);
+
+    unsorted_querie
+
+    }
+}
+
+
