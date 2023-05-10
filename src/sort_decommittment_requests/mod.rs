@@ -7,13 +7,13 @@ use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
 use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
 use boojum::gadgets::{
-    poseidon::CircuitRoundFunction,
     traits::{selectable::Selectable, allocatable::CSAllocatableExt},
     num::Num,
     boolean::Boolean,
     u32::UInt32,
     queue::*
 };
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::encodable::CircuitEncodable;
 use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use crate::storage_validity_by_grand_product::unpacked_long_comparison;

@@ -65,7 +65,7 @@ pub struct PendingSponge<F: SmallField> {
 
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use crate::base_structures::vm_state::VmLocalState;
 
 // create a draft candidate for next VM state, as well as all the data required for

@@ -10,7 +10,7 @@ use crate::base_structures::{
 
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
@@ -382,7 +382,7 @@ pub(crate) fn apply_uma<
             current_memory_queue_state[11].get_variable(),
         ];
 
-        use boojum::gadgets::poseidon::simulate_round_function;
+        use boojum::gadgets::round_function::simulate_round_function;
 
         let final_state_candidate =
             simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, should_read_a_cell);
@@ -689,7 +689,7 @@ pub(crate) fn apply_uma<
             new_memory_queue_tail_after_read[11].get_variable(),
         ];
 
-        use boojum::gadgets::poseidon::simulate_round_function;
+        use boojum::gadgets::round_function::simulate_round_function;
 
         let final_state_candidate =
             simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, execute_write);

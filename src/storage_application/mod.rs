@@ -14,7 +14,7 @@ use boojum::gadgets::blake2s::blake2s;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::keccak256;
 use boojum::gadgets::num::Num;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt, CSPlaceholder};

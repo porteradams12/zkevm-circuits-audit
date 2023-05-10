@@ -10,7 +10,7 @@ use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::gadgets::num::Num;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u32::UInt32;

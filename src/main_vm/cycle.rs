@@ -6,7 +6,7 @@ use super::state_diffs::{StateDiffsAccumulator, MAX_ADD_SUB_RELATIONS_PER_CYCLE,
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::CSGeometry;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use boojum::gadgets::traits::selectable::MultiSelectable;
 use boojum::gadgets::u256::{UInt256, recompose_u256_as_u32x8};
