@@ -50,12 +50,6 @@ where
         .decoded_opcode
         .properties_bits
         .boolean_for_opcode(RET_OPCODE);
-
-    if crate::config::CIRCUIT_VERSOBE {
-        if (execute.witness_hook(&*cs))().unwrap_or(false) {
-            println!("Applying RET");
-        }
-    }
     
     let is_ret_ok = common_opcode_state
         .decoded_opcode
@@ -82,6 +76,27 @@ where
         .current_context
         .saved_context
         .is_local_call;
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if execute.witness_hook(&*cs)().unwrap_or(false) {
+            println!("Applying RET");
+            if is_local_frame.witness_hook(&*cs)().unwrap_or(false) {
+                println!("Is local RET");
+            } else {
+                println!("Is global RET");
+            }
+
+            if is_ret_ok.witness_hook(&*cs)().unwrap_or(false) {
+                println!("Applying RET Ok");
+            }
+            if is_ret_revert.witness_hook(&*cs)().unwrap_or(false) {
+                println!("Applying RET Revert");
+            }
+            if is_ret_panic.witness_hook(&*cs)().unwrap_or(false) {
+                println!("Applying RET Panic");
+            }
+        }
+    }
 
     let current_callstack_entry = draft_vm_state.callstack.current_context.saved_context;
 

@@ -143,8 +143,12 @@ impl<F: SmallField> CSAllocatableExt<F> for DecommitQuery<F> {
             self.timestamp.get_variable(),
         ]
     }
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
-        todo!();
+    fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, '_, F>) {
+        // NOTE: must be same sequence as in `flatten_as_variables`
+        UInt256::set_internal_variables_values(witness.code_hash, dst);
+        UInt32::set_internal_variables_values(witness.page, dst);
+        Boolean::set_internal_variables_values(witness.is_first, dst);
+        UInt32::set_internal_variables_values(witness.timestamp, dst);
     }
 }
 

@@ -204,14 +204,6 @@ where
     structured_input.observable_output = observable_output;
     structured_input.hidden_fsm_output = final_state;
 
-    // if let Some(circuit_result) = (structured_input.witness_hook(&*cs))() {
-    //     let comparison_lines = <VmLocalState<F> as PrettyComparison<F>>::find_diffs(&circuit_result.hidden_fsm_output, &closed_form_input.hidden_fsm_output);
-    //     if comparison_lines.is_empty() == false {
-    //         panic!("{}", comparison_lines.join("\n"));
-    //     }
-    //     assert_eq!(circuit_result, closed_form_input);
-    // }
-
     // if we generate witness then we can self-check 
     if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
         let value_fn = move |_ins: [F; 1]| {
@@ -231,11 +223,14 @@ where
         );
     }
 
+    structured_input.hook_compare_witness(&*cs, &closed_form_input);
+
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
 
     let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &compact_form, round_function);
     for el in input_commitment.iter() {
+        dbg!(el.witness_hook(cs)());
         let gate = PublicInputGate::new(el.get_variable());
         gate.add_to_cs(cs);
     }

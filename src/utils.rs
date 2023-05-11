@@ -38,6 +38,7 @@ pub fn produce_fs_challenges<
         let mut state_to_keep = [zero_num; 4];
         state_to_keep.copy_from_slice(&state[8..]);
         state = R::absorb_with_replacement_over_nums(cs, *chunk, state_to_keep);
+        state = R::compute_round_function_over_nums(cs, state);
     }
 
     let remainder = it.remainder();
@@ -47,6 +48,7 @@ pub fn produce_fs_challenges<
         let mut padded_chunk = [zero_num; 8];
         padded_chunk[..remainder.len()].copy_from_slice(remainder);
         state = R::absorb_with_replacement_over_nums(cs, padded_chunk, state_to_keep);
+        state = R::compute_round_function_over_nums(cs, state);
     }
 
     // now get as many as necessary

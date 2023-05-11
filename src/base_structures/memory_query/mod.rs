@@ -21,10 +21,11 @@ use ethereum_types::U256;
 use boojum::config::*;
 
 use cs_derive::*;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 
 pub const MEMORY_QUERY_PACKED_WIDTH: usize = 8;
 
-#[derive(Derivative, CSSelectable, CSAllocatable)]
+#[derive(Derivative, CSSelectable, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug, Hash)]
 pub struct MemoryQuery<F: SmallField> {
     pub timestamp: UInt32<F>,
@@ -66,8 +67,14 @@ impl<F: SmallField> CSAllocatableExt<F> for MemoryQuery<F> {
         ]
     }
 
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
-        todo!()
+    fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, '_, F>) {
+        // NOTE: must be same sequence as in `flatten_as_variables`
+        UInt32::set_internal_variables_values(witness.timestamp, dst);
+        UInt32::set_internal_variables_values(witness.memory_page, dst);
+        UInt32::set_internal_variables_values(witness.index, dst);
+        Boolean::set_internal_variables_values(witness.rw_flag, dst);
+        Boolean::set_internal_variables_values(witness.is_ptr, dst);
+        UInt256::set_internal_variables_values(witness.value, dst);
     }
 
     fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {

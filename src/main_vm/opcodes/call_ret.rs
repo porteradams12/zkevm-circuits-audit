@@ -331,6 +331,7 @@ pub(crate) fn apply_calls_and_ret<
 
     let mut common_relations_buffer = ArrayVec::<
         (
+            Boolean<F>,
             [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
             [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
         ),
@@ -339,23 +340,27 @@ pub(crate) fn apply_calls_and_ret<
     // first we push relations that are common, namely callstack sponge
 
     common_relations_buffer.push((
+        apply_any,
         round_0_initial.map(|el| Num::from_variable(el)),
         round_0_final.map(|el| Num::from_variable(el)),
     ));
 
     common_relations_buffer.push((
+        apply_any,
         round_1_initial.map(|el| Num::from_variable(el)),
         round_1_final.map(|el| Num::from_variable(el)),
     ));
 
     common_relations_buffer.push((
+        apply_any,
         round_2_initial.map(|el| Num::from_variable(el)),
         round_2_final.map(|el| Num::from_variable(el)),
     ));
 
     common_relations_buffer.push((
-        round_2_initial.map(|el| Num::from_variable(el)),
-        round_2_final.map(|el| Num::from_variable(el)),
+        apply_any,
+        round_3_initial.map(|el| Num::from_variable(el)),
+        round_3_final.map(|el| Num::from_variable(el)),
     ));
 
     // and now we append relations for far call, that are responsible for storage read and decommittment

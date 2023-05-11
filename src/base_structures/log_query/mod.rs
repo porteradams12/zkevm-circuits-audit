@@ -6,7 +6,7 @@ use boojum::gadgets::u256::{recompose_u256_as_u32x8, UInt256};
 use boojum::gadgets::u32::UInt32;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::traits::cs::DstBuffer;
-use boojum::cs::Variable;
+use boojum::cs::{Variable, Witness};
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
 use boojum::gadgets::traits::castable::WitnessCastable;
@@ -516,7 +516,9 @@ impl<F: SmallField> CircuitEncodable<F, LOG_QUERY_PACKED_WIDTH> for LogQuery<F> 
     }
 }
 
-pub(crate) fn log_query_witness_from_values<F: SmallField>(values: [F; FLATTENED_VARIABLE_LENGTH]) -> <LogQuery<F> as CSAllocatable<F>>::Witness {
+pub(crate) fn log_query_witness_from_values<F: SmallField>(
+    values: [F; FLATTENED_VARIABLE_LENGTH],
+) -> <LogQuery<F> as CSAllocatable<F>>::Witness {
     let address: [u32; 5] = [
         WitnessCastable::cast_from_source(values[0]),
         WitnessCastable::cast_from_source(values[1]),
@@ -593,8 +595,20 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
     }
 
     // we should be able to allocate without knowing values yet
-    fn create_without_value<CS: ConstraintSystem<F>>(_cs: &mut CS) -> Self {
-        todo!()
+    fn create_without_value<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        Self {
+            address: UInt160::allocate_without_value(cs),
+            key: UInt256::allocate_without_value(cs),
+            read_value: UInt256::allocate_without_value(cs),
+            written_value: UInt256::allocate_without_value(cs),
+            rw_flag: Boolean::allocate_without_value(cs),
+            aux_byte: UInt8::allocate_without_value(cs),
+            rollback: Boolean::allocate_without_value(cs),
+            is_service: Boolean::allocate_without_value(cs),
+            shard_id: UInt8::allocate_without_value(cs),
+            tx_number_in_block: UInt32::allocate_without_value(cs),
+            timestamp: UInt32::allocate_without_value(cs),
+        }
     }
 
     fn flatten_as_variables(&self) -> [Variable; Self::INTERNAL_STRUCT_LEN]
@@ -604,8 +618,19 @@ impl<F: SmallField> CSAllocatableExt<F> for LogQuery<F> {
         self.flatten_as_variables_impl()
     }
 
-    fn set_internal_variables_values(_witness: Self::Witness, _dst: &mut DstBuffer<'_, '_, F>) {
-        todo!();
+    fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, '_, F>) {
+        // NOTE: must be same sequence as in `flatten_as_variables`
+        UInt160::set_internal_variables_values(witness.address, dst);
+        UInt256::set_internal_variables_values(witness.key, dst);
+        UInt256::set_internal_variables_values(witness.read_value, dst);
+        UInt256::set_internal_variables_values(witness.written_value, dst);
+        UInt8::set_internal_variables_values(witness.aux_byte, dst);
+        Boolean::set_internal_variables_values(witness.rw_flag, dst);
+        Boolean::set_internal_variables_values(witness.rollback, dst);
+        Boolean::set_internal_variables_values(witness.is_service, dst);
+        UInt8::set_internal_variables_values(witness.shard_id, dst);
+        UInt32::set_internal_variables_values(witness.tx_number_in_block, dst);
+        UInt32::set_internal_variables_values(witness.timestamp, dst);
     }
 }
 

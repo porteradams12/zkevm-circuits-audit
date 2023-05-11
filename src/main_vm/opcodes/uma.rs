@@ -1,7 +1,8 @@
 use boojum::{
     cs::gates::reduction_by_powers_gate,
-    gadgets::{u256::UInt256, traits::selectable::MultiSelectable},
+    gadgets::{u256::UInt256, traits::{selectable::MultiSelectable, castable::WitnessCastable}},
 };
+use cs_derive::CSAllocatable;
 use crate::base_structures::{
     log_query::{self, LogQuery, LOG_QUERY_PACKED_WIDTH, ROLLBACK_PACKING_FLAG_VARIABLE_IDX},
     register::VMRegister,
@@ -32,7 +33,7 @@ pub(crate) fn apply_uma<
     opcode_carry_parts: &AfterDecodingCarryParts<F>,
     diffs_accumulator: &mut StateDiffsAccumulator<F>,
     witness_oracle: &SynchronizedWitnessOracle<F, W>,
-    round_function: &R,
+    _round_function: &R,
 ) where
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
@@ -46,12 +47,6 @@ pub(crate) fn apply_uma<
         .decoded_opcode
         .properties_bits
         .boolean_for_opcode(UMA_HEAP_READ_OPCODE);
-
-    if crate::config::CIRCUIT_VERSOBE {
-        if (should_apply.witness_hook(&*cs))().unwrap_or(false) {
-            println!("Applying UMA");
-        }
-    }
 
     let is_uma_heap_read = common_opcode_state
         .decoded_opcode
@@ -82,24 +77,26 @@ pub(crate) fn apply_uma<
     let access_heap = Boolean::multi_or(cs, &[is_uma_heap_read, is_uma_heap_write]);
     let access_aux_heap = Boolean::multi_or(cs, &[is_uma_aux_heap_read, is_uma_aux_heap_write]);
 
-    // if crate::VERBOSE_CIRCUITS && should_apply.get_value().unwrap_or(false) {
-    //     println!("Executing UMA");
-    //     if is_uma_heap_read.get_value().unwrap_or(false) {
-    //         println!("Heap read");
-    //     }
-    //     if is_uma_heap_write.get_value().unwrap_or(false) {
-    //         println!("Heap write");
-    //     }
-    //     if is_uma_aux_heap_read.get_value().unwrap_or(false) {
-    //         println!("Aux heap read");
-    //     }
-    //     if is_uma_aux_heap_write.get_value().unwrap_or(false) {
-    //         println!("Aux heap write");
-    //     }
-    //     if is_uma_fat_ptr_read.get_value().unwrap_or(false) {
-    //         println!("Fat ptr read");
-    //     }
-    // }
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap_or(false) {
+            println!("Applying UMA");
+            if is_uma_heap_read.witness_hook(&*cs)().unwrap_or(false) {
+                println!("Heap read");
+            }
+            if is_uma_heap_write.witness_hook(&*cs)().unwrap_or(false) {
+                println!("Heap write");
+            }
+            if is_uma_aux_heap_read.witness_hook(&*cs)().unwrap_or(false) {
+                println!("Aux heap read");
+            }
+            if is_uma_aux_heap_write.witness_hook(&*cs)().unwrap_or(false) {
+                println!("Aux heap write");
+            }
+            if is_uma_fat_ptr_read.witness_hook(&*cs)().unwrap_or(false) {
+                println!("Fat ptr read");
+            }
+        }
+    }
 
     let src0_is_integer = common_opcode_state.src0_view.is_ptr.negated(cs);
 
@@ -159,10 +156,28 @@ pub(crate) fn apply_uma<
     let top_bits_are_clear = Boolean::multi_and(cs, &limbs_are_zero);
     let top_bits_are_non_zero = top_bits_are_clear.negated(cs);
 
-    let t = Boolean::multi_or(cs, &[top_bits_are_non_zero, quasi_fat_ptr.heap_dered_out_of_bounds]);
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap_or(false) {
+            dbg!(quasi_fat_ptr.witness_hook(&*cs)().unwrap());
+            dbg!(&common_opcode_state.src0_view.u32x8_view.witness_hook(&*cs)().unwrap()[..4]);
+            dbg!(common_opcode_state.src1.witness_hook(&*cs)().unwrap());
+        }
+    }
+
+    let t: Boolean<F> = Boolean::multi_or(cs, &[top_bits_are_non_zero, quasi_fat_ptr.heap_deref_out_of_bounds]);
     let heap_access_like = Boolean::multi_or(cs, &[access_heap, access_aux_heap]);
     let exception_heap_deref_out_of_bounds = Boolean::multi_and(cs, &[heap_access_like, t]);
 
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap_or(false) {
+            dbg!(top_bits_are_non_zero.witness_hook(&*cs)().unwrap());
+            dbg!(quasi_fat_ptr.heap_deref_out_of_bounds.witness_hook(&*cs)().unwrap());
+            dbg!(heap_access_like.witness_hook(&*cs)().unwrap());
+            dbg!(exception_heap_deref_out_of_bounds.witness_hook(&*cs)().unwrap());
+        }
+    }
+
+    // penalize for heap out of bounds access
     let uint32_max = UInt32::allocated_constant(cs, u32::MAX);
     growth_cost =
         UInt32::conditionally_select(cs, exception_heap_deref_out_of_bounds, &uint32_max, &growth_cost);
@@ -171,7 +186,12 @@ pub(crate) fn apply_uma<
         .preliminary_ergs_left
         .overflowing_sub(cs, growth_cost);
 
-    let set_panic = Boolean::multi_or(cs, &[quasi_fat_ptr.should_set_panic, uf, exception_heap_deref_out_of_bounds]); // not enough ergs for growth
+    let set_panic = Boolean::multi_or(cs, &[quasi_fat_ptr.should_set_panic, uf, exception_heap_deref_out_of_bounds]);
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap_or(false) {
+            dbg!(set_panic.witness_hook(&*cs)().unwrap());
+        }
+    }
     // burn all the ergs if not enough
     let ergs_left_after_growth = ergs_left_after_growth.mask_negated(cs, uf);
 
@@ -189,12 +209,18 @@ pub(crate) fn apply_uma<
     // if rem = offset % 32 is zero than it is the only one cell to be accessed
     // 1) cell_idx = offset / cell_length, rem = offset % cell_length =>
     // offset = cell_idx * cell_length + rem
-    // we should also enforce that cell_idx /in [0, 2^16-1] - this would require range check
+    // we should also enforce that cell_idx /in [0, 2^32-1] - this would require range check
     // we should also enforce that 0 <= rem < cell_length = 2^5;
     // rem is actually the byte offset in the first touched cell, to compute bitoffset and shifts
     // we do bit_offset = rem * 8 and then apply shift computing tables
     // flag does_cross_border = rem != 0
     let offset = quasi_fat_ptr.absolute_address;
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap() {
+            dbg!(offset.witness_hook(&*cs)().unwrap());
+        }
+    }
 
     let (cell_idx, unalignment) = offset.div_by_constant(cs, 32);
     let unalignment_is_zero = unalignment.is_zero(cs);
@@ -206,15 +232,9 @@ pub(crate) fn apply_uma<
     let current_memory_queue_length = draft_vm_state.memory_queue_length;
 
     let mut mem_page = quasi_fat_ptr.page_candidate;
-
-    mem_page = UInt32::multiselect(cs, &mem_page,
-        [
-            (access_heap, opcode_carry_parts.heap_page),
-            (access_aux_heap, opcode_carry_parts.aux_heap_page),
-        ].into_iter(), 
-        2
-    );        
-
+    mem_page = UInt32::conditionally_select(cs, access_heap, &opcode_carry_parts.heap_page, &mem_page);
+    mem_page = UInt32::conditionally_select(cs, access_aux_heap, &opcode_carry_parts.aux_heap_page, &mem_page);
+    
     let a_cell_idx = cell_idx;
     let one_uint32 = UInt32::allocated_constant(cs, 1);
     // wrap around
@@ -254,11 +274,16 @@ pub(crate) fn apply_uma<
         cs,
         move |inputs: &[F]| {
             debug_assert_eq!(inputs.len(), 4);
-            let timestamp = inputs[0].as_u64() as u32;
-            let memory_page = inputs[1].as_u64() as u32;
-            let index = inputs[2].as_u64() as u32;
-            debug_assert!(inputs[3].as_u64() == 0 || inputs[3].as_u64() == 1);
-            let should_access = if inputs[3].as_u64() == 0 { false } else { true };
+            let timestamp = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
+            let memory_page = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[1]);
+            let index = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[2]);
+            let should_access = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[3]);
+
+            if crate::config::CIRCUIT_VERSOBE {
+                if should_access {
+                    println!("Will read word A for UMA");
+                }
+            }
 
             let mut guard = oracle.inner.write().expect("not poisoned");
             let witness =
@@ -280,11 +305,16 @@ pub(crate) fn apply_uma<
         cs,
         move |inputs: &[F]| {
             debug_assert_eq!(inputs.len(), 5);
-            let timestamp = inputs[0].as_u64() as u32;
-            let memory_page = inputs[1].as_u64() as u32;
-            let index = inputs[2].as_u64() as u32;
-            debug_assert!(inputs[3].as_u64() == 0 || inputs[3].as_u64() == 1);
-            let should_access = if inputs[3].as_u64() == 0 { false } else { true };
+            let timestamp = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
+            let memory_page = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[1]);
+            let index = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[2]);
+            let should_access = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[3]);
+
+            if crate::config::CIRCUIT_VERSOBE {
+                if should_access {
+                    println!("Will read word B for UMA");
+                }
+            }
 
             let mut guard = oracle.inner.write().expect("not poisoned");
             let witness =
@@ -297,7 +327,9 @@ pub(crate) fn apply_uma<
             mem_read_timestamp.get_variable().into(),
             b_memory_loc.page.get_variable().into(),
             b_memory_loc.index.get_variable().into(),
-            should_read_a_cell.get_variable().into(),
+            should_read_b_cell.get_variable().into(),
+            // NOTE: we need to evaluate this closure strictly AFTER we evaluate previous access to witness,
+            // so we "bias" it here
             memory_value_a.value.inner[0].get_variable().into(),
         ],
     );
@@ -313,6 +345,13 @@ pub(crate) fn apply_uma<
         sponge_candidates_after_read
     ) = {
         let mut relations = ArrayVec::new();
+
+        // if crate::config::CIRCUIT_VERSOBE {
+        //     if should_apply.witness_hook(&*cs)().unwrap() {
+        //         dbg!(should_read_a_cell.witness_hook(&*cs)().unwrap());
+        //         dbg!(should_read_b_cell.witness_hook(&*cs)().unwrap());
+        //     }
+        // }
 
         let query = MemoryQuery {
             timestamp: mem_read_timestamp,
@@ -346,10 +385,20 @@ pub(crate) fn apply_uma<
         use boojum::gadgets::poseidon::simulate_round_function;
 
         let final_state_candidate =
-            simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, boolean_true);
+            simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, should_read_a_cell);
         let final_state_candidate = final_state_candidate.map(|el| Num::from_variable(el));
 
+        // if crate::config::CIRCUIT_VERSOBE {
+        //     if should_apply.witness_hook(&*cs)().unwrap() {
+        //         if should_read_a_cell.witness_hook(&*cs)().unwrap() {
+        //             dbg!(initial_state.map(|el| Num::from_variable(el)).witness_hook(&*cs)().unwrap());
+        //             dbg!(final_state_candidate.witness_hook(&*cs)().unwrap());
+        //         }
+        //     }
+        // }
+
         relations.push((
+            should_read_a_cell,
             initial_state.map(|el| Num::from_variable(el)),
             final_state_candidate,
         ));
@@ -376,7 +425,7 @@ pub(crate) fn apply_uma<
         let query = MemoryQuery {
             timestamp: mem_read_timestamp,
             memory_page: b_memory_loc.page,
-            index: a_memory_loc.index,
+            index: b_memory_loc.index,
             is_ptr: boolean_false,
             value: memory_value_b.value,
             rw_flag: boolean_false,
@@ -401,10 +450,20 @@ pub(crate) fn apply_uma<
         ];
 
         let final_state_candidate =
-            simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, boolean_true);
+            simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, should_read_b_cell);
         let final_state_candidate = final_state_candidate.map(|el| Num::from_variable(el));
 
+        // if crate::config::CIRCUIT_VERSOBE {
+        //     if should_apply.witness_hook(&*cs)().unwrap() {
+        //         if should_read_b_cell.witness_hook(&*cs)().unwrap() {
+        //             dbg!(initial_state.map(|el| Num::from_variable(el)).witness_hook(&*cs)().unwrap());
+        //             dbg!(final_state_candidate.witness_hook(&*cs)().unwrap());
+        //         }
+        //     }
+        // }
+
         relations.push((
+            should_read_b_cell,
             initial_state.map(|el| Num::from_variable(el)),
             final_state_candidate,
         ));
@@ -421,7 +480,7 @@ pub(crate) fn apply_uma<
 
         let new_length = UInt32::conditionally_select(
             cs,
-            should_read_a_cell,
+            should_read_b_cell,
             &new_len_candidate,
             &new_length,
         );
@@ -433,48 +492,63 @@ pub(crate) fn apply_uma<
         )
     };
 
+    // if crate::config::CIRCUIT_VERSOBE {
+    //     if should_apply.witness_hook(&*cs)().unwrap() {
+    //         dbg!(new_memory_queue_length_after_read.witness_hook(&*cs)().unwrap());
+    //     }
+    // }
+
     // the issue with UMA is that if we cleanup bytes using shifts
     // then it's just too heavy in our arithmetization compared to some implementation of shift
     // register
 
     // we have a table that is:
-    // 0 if unalignment is 0
-    // b1000000.. LSB first if unalignment is 1
-    // b0100000.. LSB first if unalignment is 2
-    // so it's 31 bits max
+    // b1000000.. LSB first if unalignment is 0
+    // b0100000.. LSB first if unalignment is 1
+    // so it's 32 bits max, and we use parallel select
 
     let unalignment_bitspread = uma_shift_into_bitspread(cs, Num::from_variable(unalignment.get_variable()));
-    let unalignment_bit_mask = unalignment_bitspread.spread_into_bits::<_, 31>(cs);
+    let unalignment_bit_mask = unalignment_bitspread.spread_into_bits::<_, 32>(cs);
 
     // implement shift register
     let zero_u8 = UInt8::zero(cs);
     let mut bytes_array = [zero_u8; 64];
 
-    for (dst, src) in bytes_array[..32].array_chunks_mut::<4>().zip(memory_value_a.value.inner.iter().rev()) {
-        let mut be_bytes = src.decompose_into_bytes(cs);
-        be_bytes.reverse();
-        *dst = be_bytes;
-    }
+    let memory_value_a_bytes = memory_value_a.value.to_be_bytes(cs);
+    bytes_array[..32].copy_from_slice(&memory_value_a_bytes);
 
-    for (dst, src) in bytes_array[32..].array_chunks_mut::<4>().zip(memory_value_b.value.inner.iter().rev()) {
-        let mut be_bytes = src.decompose_into_bytes(cs);
-        be_bytes.reverse();
-        *dst = be_bytes;
-    }
+    let memory_value_b_bytes = memory_value_b.value.to_be_bytes(cs);
+    bytes_array[32..].copy_from_slice(&memory_value_b_bytes);
 
     // now mask-shift
     let mut selected_word = [zero_u8; 32];
 
-    for (idx, dst) in selected_word.iter_mut().enumerate() {
-        // just linear combination
-        let src = &bytes_array[idx..(idx + 32)];
+    // idx 0 is unalignment of 0 (aligned), idx 31 is unalignment of 31
+    for (idx, mask_bit) in unalignment_bit_mask.iter().enumerate() {
+        let src = &bytes_array[idx..(idx + 32)]; // source
+        debug_assert_eq!(src.len(), selected_word.len());
 
-        *dst = UInt8::multiselect(
-            cs, 
-            &src[0],
-            unalignment_bit_mask.iter().copied().zip(src[1..].iter().copied()),
-            31
-        );
+        for (dst, src) in selected_word.array_chunks_mut::<4>().zip(src.array_chunks::<4>()) {
+            *dst = UInt8::parallel_select(
+                cs, 
+                *mask_bit, 
+                src, 
+                &*dst
+            );
+        }
+
+        // if crate::config::CIRCUIT_VERSOBE {
+        //     if should_apply.witness_hook(&*cs)().unwrap() {
+        //         if should_read_a_cell.witness_hook(&*cs)().unwrap() {
+        //             let src: [_; 32] = src.to_vec().try_into().unwrap();
+        //             dbg!(mask_bit.witness_hook(&*cs)().unwrap());
+        //             let src_buffer = src.witness_hook(&*cs)().unwrap();
+        //             dbg!(hex::encode(&src_buffer));
+        //             let dst_buffer = selected_word.witness_hook(&*cs)().unwrap();
+        //             dbg!(hex::encode(&dst_buffer));
+        //         }
+        //     }
+        // }
     }
 
     // in case of out-of-bounds UMA we should zero-out tail of our array
@@ -482,11 +556,25 @@ pub(crate) fn apply_uma<
     use crate::tables::uma_ptr_read_cleanup::UMAPtrReadCleanupTable;
 
     let table_id = cs.get_table_id_for_marker::<UMAPtrReadCleanupTable>().expect("table must exist");
-    let [uma_cleanup_bitspread, _] = cs.perform_lookup::<1, 2>(table_id, &[quasi_fat_ptr.bytes_to_cleanup_out_of_bounds.get_variable()]);
+    let bytes_to_cleanup_out_of_bound = quasi_fat_ptr.bytes_to_cleanup_out_of_bounds;
+    let bytes_to_cleanup_out_of_bound_if_ptr_read = bytes_to_cleanup_out_of_bound.mask(cs, is_uma_fat_ptr_read);
+    let [uma_cleanup_bitspread, _] = cs.perform_lookup::<1, 2>(table_id, &[bytes_to_cleanup_out_of_bound_if_ptr_read.get_variable()]);
     let uma_ptr_read_cleanup_mask = Num::from_variable(uma_cleanup_bitspread).spread_into_bits::<_, 32>(cs);
 
     for (dst, masking_bit) in selected_word.iter_mut().zip(uma_ptr_read_cleanup_mask.iter().rev()) {
         *dst = dst.mask(cs, *masking_bit);
+    }
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap() {
+            if should_read_a_cell.witness_hook(&*cs)().unwrap() {
+                dbg!(unalignment.witness_hook(&*cs)().unwrap());
+                let src_buffer = bytes_array.witness_hook(&*cs)().unwrap();
+                dbg!(hex::encode(&src_buffer));
+                let result_buffer = selected_word.witness_hook(&*cs)().unwrap();
+                dbg!(hex::encode(&result_buffer));
+            }
+        }
     }
 
     // for "write" we have to keep the "leftovers"
@@ -505,58 +593,37 @@ pub(crate) fn apply_uma<
     let mut written_bytes_buffer = bytes_array;
     // now it's a little trickier as we have to kind-of transpose
 
-    for (idx, dst) in written_bytes_buffer.iter_mut().enumerate() {
-        if idx == 0 {
-            // there is only one possible candidate to write in here
-            *dst = UInt8::conditionally_select(
-                cs,
-                unalignment_is_zero,
-                &written_value_bytes[idx],
-                &*dst,
-            );
-        } else if idx < 32 {
-            // if e.g. we have unalignment of 1 and we want to write byte 1,
-            // then at the end of the day we should use byte 0
-            // if unalignment = 1 then the mask is 1000000 (as LSB first)
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap() {
+            if execute_write.witness_hook(&*cs)().unwrap() {
+                dbg!(unalignment.witness_hook(&*cs)().unwrap());
+                let to_write = written_value_bytes.witness_hook(&*cs)().unwrap();
+                dbg!(hex::encode(&to_write));
+                let original_buffer = bytes_array.witness_hook(&*cs)().unwrap();
+                dbg!(hex::encode(&original_buffer));
+            }
+        }
+    }
 
-            // but we should also keep in mind that now all the source bytes may end up being written here
-            let baseline = UInt8::conditionally_select(
-                cs,
-                unalignment_is_zero,
-                &written_value_bytes[idx],
-                &*dst,
-            );
-
-            *dst = UInt8::multiselect(
+    // place back
+    for (idx, mask_bit) in unalignment_bit_mask.iter().enumerate() {
+        let dst = &mut written_bytes_buffer[idx..(idx + 32)]; // destination
+        for (dst, src) in dst.array_chunks_mut::<4>().zip(written_value_bytes.array_chunks::<4>()) {
+            *dst = UInt8::parallel_select(
                 cs, 
-                &baseline, 
-                unalignment_bit_mask[..idx].iter().copied().zip(written_value_bytes[..idx].iter().copied()),
-                idx
+                *mask_bit, 
+                src, 
+                &*dst
             );
-        } else {
-            // we are stepping into word 2, and now number of candidates decreases
+        }
+    }
 
-            // if e.g. we have unalignment of 1 and we want to write byte 32,
-            // then at the end of the day we should use byte 31
-            // if unalignment = 1 then the mask is 1000000 (as LSB first)
-
-            // if e.g. we have unalignment of 2 and we want to write byte 32,
-            // then at the end of the day we should use byte 30
-            // if unalignment = 2 then the mask is 01000000 (as LSB first)
-
-            // TODO: may be optimize later on
-
-            // here changes happen ONLY if we do unaligned access
-            let baseline = *dst;
-            let upper_bound = 63 - idx;
-            let src_bytes = &written_value_bytes[(idx-31)..];
-
-            *dst = UInt8::multiselect(
-                cs, 
-                &baseline, 
-                unalignment_bit_mask[..upper_bound].iter().rev().copied().zip(src_bytes.iter().copied()),
-                upper_bound
-            );
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_apply.witness_hook(&*cs)().unwrap() {
+            if execute_write.witness_hook(&*cs)().unwrap() {
+                let result_buffer = written_bytes_buffer.witness_hook(&*cs)().unwrap();
+                dbg!(hex::encode(&result_buffer));
+            }
         }
     }
 
@@ -570,21 +637,26 @@ pub(crate) fn apply_uma<
     ) = {
         let mut relations = sponge_candidates_after_read;
 
+        if crate::config::CIRCUIT_VERSOBE {
+            if should_apply.witness_hook(&*cs)().unwrap() {
+                dbg!(execute_write.witness_hook(&*cs)().unwrap());
+                dbg!(execute_unaligned_write.witness_hook(&*cs)().unwrap());
+            }
+        }
+
         let mut a_new_value = UInt256::zero(cs);
         // read value is LE integer, while words are treated as BE
         for (dst, src) in a_new_value.inner.iter_mut().rev().zip(written_bytes_buffer[..32].array_chunks::<4>()) {
-            let mut le_bytes = *src;
-            le_bytes.reverse();
-            let u32_word = UInt32::from_le_bytes(cs, le_bytes);
+            let be_bytes = *src;
+            let u32_word = UInt32::from_be_bytes(cs, be_bytes);
             *dst = u32_word;
         }
 
         let mut b_new_value = UInt256::zero(cs);
         // read value is LE integer, while words are treated as BE
         for (dst, src) in b_new_value.inner.iter_mut().rev().zip(written_bytes_buffer[32..].array_chunks::<4>()) {
-            let mut le_bytes = *src;
-            le_bytes.reverse();
-            let u32_word = UInt32::from_le_bytes(cs, le_bytes);
+            let be_bytes = *src;
+            let u32_word = UInt32::from_be_bytes(cs, be_bytes);
             *dst = u32_word;
         }
 
@@ -620,10 +692,20 @@ pub(crate) fn apply_uma<
         use boojum::gadgets::poseidon::simulate_round_function;
 
         let final_state_candidate =
-            simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, boolean_true);
+            simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, execute_write);
         let final_state_candidate = final_state_candidate.map(|el| Num::from_variable(el));
 
+        // if crate::config::CIRCUIT_VERSOBE {
+        //     if should_apply.witness_hook(&*cs)().unwrap() {
+        //         if execute_write.witness_hook(&*cs)().unwrap() {
+        //             dbg!(initial_state.map(|el| Num::from_variable(el)).witness_hook(&*cs)().unwrap());
+        //             dbg!(final_state_candidate.witness_hook(&*cs)().unwrap());
+        //         }
+        //     }
+        // }
+
         relations.push((
+            execute_write,
             initial_state.map(|el| Num::from_variable(el)),
             final_state_candidate,
         ));
@@ -650,7 +732,7 @@ pub(crate) fn apply_uma<
         let b_query = MemoryQuery {
             timestamp: mem_timestamp_write,
             memory_page: b_memory_loc.page,
-            index: a_memory_loc.index,
+            index: b_memory_loc.index,
             is_ptr: boolean_false,
             value: b_new_value,
             rw_flag: boolean_true,
@@ -675,10 +757,20 @@ pub(crate) fn apply_uma<
         ];
 
         let final_state_candidate =
-            simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, boolean_true);
+            simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, execute_unaligned_write);
         let final_state_candidate = final_state_candidate.map(|el| Num::from_variable(el));
 
+        // if crate::config::CIRCUIT_VERSOBE {
+        //     if should_apply.witness_hook(&*cs)().unwrap() {
+        //         if execute_unaligned_write.witness_hook(&*cs)().unwrap() {
+        //             dbg!(initial_state.map(|el| Num::from_variable(el)).witness_hook(&*cs)().unwrap());
+        //             dbg!(final_state_candidate.witness_hook(&*cs)().unwrap());
+        //         }
+        //     }
+        // }
+
         relations.push((
+            execute_unaligned_write,
             initial_state.map(|el| Num::from_variable(el)),
             final_state_candidate,
         ));
@@ -720,11 +812,16 @@ pub(crate) fn apply_uma<
                 &dependencies,
                 &[],
                 move |inputs: &[F], _buffer: &mut DstBuffer<'_, '_, F>| {
-                    let execute_0 = inputs[0].as_u64();
-                    let execute_0 = u64_as_bool(execute_0);
+                    debug_assert_eq!(inputs.len(), 2 + 2 * <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN);
 
-                    let execute_1 = inputs[1].as_u64();
-                    let execute_1 = u64_as_bool(execute_1);
+                    let execute_0 = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
+                    let execute_1 = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[1]);
+
+                    if crate::config::CIRCUIT_VERSOBE {
+                        if execute_0 {
+                            println!("Will overwrite word A for UMA")
+                        }
+                    }
 
                     let mut query =
                         [F::ZERO; <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN];
@@ -734,6 +831,12 @@ pub(crate) fn apply_uma<
 
                     let mut guard = oracle.inner.write().expect("not poisoned");
                     guard.push_memory_witness(&a_query, execute_0);
+
+                    if crate::config::CIRCUIT_VERSOBE {
+                        if execute_1 {
+                            println!("Will overwrite word B for UMA")
+                        }
+                    }
 
                     let mut query =
                         [F::ZERO; <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN];
@@ -753,6 +856,12 @@ pub(crate) fn apply_uma<
             relations
         )
     };
+
+    // if crate::config::CIRCUIT_VERSOBE {
+    //     if should_apply.witness_hook(&*cs)().unwrap() {
+    //         dbg!(new_memory_queue_length_after_writes.witness_hook(&*cs)().unwrap());
+    //     }
+    // }
 
     let mut read_value_u256 = UInt256::zero(cs);
     // read value is LE integer, while words are treated as BE
@@ -801,7 +910,8 @@ pub(crate) fn apply_uma<
     diffs_accumulator.dst_1_values.push((should_update_dst1, incremented_src0_register));
 
     // exceptions
-    diffs_accumulator.pending_exceptions.push(set_panic);
+    let should_panic = Boolean::multi_and(cs, &[should_apply, set_panic]);
+    diffs_accumulator.pending_exceptions.push(should_panic);
 
     // and memory related staff
     diffs_accumulator.new_heap_bounds.push((grow_heap, new_heap_upper_bound));
@@ -817,11 +927,15 @@ pub(crate) fn apply_uma<
     diffs_accumulator.memory_queue_candidates.push((should_apply, new_memory_queue_length_after_writes, new_memory_queue_tail_after_writes));
 }
 
+use boojum::gadgets::traits::allocatable::CSAllocatable;
+use cs_derive::*;
+
+#[derive(CSAllocatable, WitnessHookable)]
 pub struct QuasiFatPtrInUMA<F: SmallField> {
     pub absolute_address: UInt32<F>,
     pub page_candidate: UInt32<F>,
     pub incremented_offset: UInt32<F>,
-    pub heap_dered_out_of_bounds: Boolean<F>,
+    pub heap_deref_out_of_bounds: Boolean<F>,
     pub skip_memory_access: Boolean<F>,
     pub should_set_panic: Boolean<F>,
     pub bytes_to_cleanup_out_of_bounds: UInt8<F>,
@@ -842,15 +956,22 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
         let start = input.u32x8_view[2];
         let length = input.u32x8_view[3];
 
-        let (_, in_bounds, _) = offset.overflowing_sub(cs, length);
-        let out_of_bounds = in_bounds.negated(cs);
+        // if crate::config::CIRCUIT_VERSOBE {
+        //     dbg!(offset.witness_hook(&*cs)().unwrap());
+        //     dbg!(start.witness_hook(&*cs)().unwrap());
+        //     dbg!(length.witness_hook(&*cs)().unwrap());
+        // }
 
-        let skip_if_legitimate_fat_ptr = Boolean::multi_and(cs, &[out_of_bounds, is_fat_ptr]);
+        // we need to check whether we will or not deref the fat pointer.
+        // we only dereference if offset < length (or offset - length < 0)
+        let (_, offset_is_strictly_in_slice, _) = offset.overflowing_sub(cs, length);
+        let offset_is_beyond_the_slice = offset_is_strictly_in_slice.negated(cs);
+        let skip_if_legitimate_fat_ptr = Boolean::multi_and(cs, &[offset_is_beyond_the_slice, is_fat_ptr]);
 
-        // check that we agree in logic with out-of-circuit comparisons
-        debug_assert_eq!(zkevm_opcode_defs::uma::MAX_OFFSET_TO_DEREF_LOW_U32 + 32u32, u32::MAX);
-
-        let formal_start = start.mask(cs, is_fat_ptr); // 0 of it's heap/aux heap, otherwise use what we have
+        // 0 of it's heap/aux heap, otherwise use what we have
+        let formal_start = start.mask(cs, is_fat_ptr); 
+        // by prevalidating fat pointer we know that there is no overflow here,
+        // so we ignore the information
         let (absolute_address, _of, _) =
             formal_start.overflowing_add(cs, offset);
 
@@ -858,6 +979,13 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
 
         let (incremented_offset, is_non_addressable, _) =
             offset.overflowing_add(cs, u32_constant_32);
+
+        // check that we agree in logic with out-of-circuit comparisons
+        debug_assert_eq!(zkevm_opcode_defs::uma::MAX_OFFSET_TO_DEREF_LOW_U32 + 32u32, u32::MAX);
+        let max_offset = UInt32::allocated_constant(cs, u32::MAX);
+        let is_non_addressable_extra = UInt32::equals(cs, &incremented_offset, &max_offset);
+
+        let is_non_addressable = Boolean::multi_or(cs, &[is_non_addressable, is_non_addressable_extra]);
 
         let should_set_panic = Boolean::multi_or(
             cs,
@@ -867,7 +995,7 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
             ],
         );
 
-        let skip_op = Boolean::multi_or(cs, 
+        let skip_memory_access = Boolean::multi_or(cs, 
             &[
                 already_panicked,
                 skip_if_legitimate_fat_ptr,
@@ -875,21 +1003,23 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
             ]
         );
 
+        // only necessary for fat pointer deref: now many bytes we zero-out beyond the end of fat pointer
         let (mut bytes_out_of_bound, uf, _) =
             incremented_offset.overflowing_sub(cs, length);
 
-        bytes_out_of_bound = bytes_out_of_bound.mask_negated(cs, skip_op);
+        bytes_out_of_bound = bytes_out_of_bound.mask_negated(cs, skip_memory_access);
         bytes_out_of_bound = bytes_out_of_bound.mask_negated(cs, uf);
 
         let (_, bytes_out_of_bound) = bytes_out_of_bound.div_by_constant(cs, 32);
+        // remainder fits into 8 bits too
         let bytes_to_cleanup_out_of_bounds = unsafe { UInt8::from_variable_unchecked(bytes_out_of_bound.get_variable()) };
         
         let new = Self {
             absolute_address,
             page_candidate: page,
             incremented_offset,
-            heap_dered_out_of_bounds: out_of_bounds,
-            skip_memory_access: skip_op,
+            heap_deref_out_of_bounds: is_non_addressable,
+            skip_memory_access: skip_memory_access,
             should_set_panic,
             bytes_to_cleanup_out_of_bounds,
         };
@@ -898,7 +1028,7 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
     }
 }
 
-// for integer N returns a field element with value 0 if N is zero, and 1 << (N-1) otherwise
+// for integer N returns a field element with value 1 << N
 pub fn uma_shift_into_bitspread<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     integer: Num<F>,

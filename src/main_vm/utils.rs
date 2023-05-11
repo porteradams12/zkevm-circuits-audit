@@ -144,6 +144,14 @@ pub(crate) fn may_be_read_memory_for_code<
     UInt256<F>,
     ([Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH], UInt32<F>),
 ) {
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_access.witness_hook(&*cs)().unwrap() {
+            println!("Will read 32-byte word for opcode");
+            // dbg!(timestamp.witness_hook(&*cs)().unwrap());
+            // dbg!(location.witness_hook(&*cs)().unwrap());
+        }
+    }
+
     let MemoryLocation { page, index } = location;
 
     let witness_oracle = witness_oracle.clone();
@@ -399,6 +407,14 @@ pub fn may_be_read_memory_for_source_operand<
         Boolean<F>,
     ),
 ) {
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_access.witness_hook(&*cs)().unwrap() {
+            println!("Will read SRC0 from memory");
+            dbg!(timestamp.witness_hook(&*cs)().unwrap());
+            dbg!(location.witness_hook(&*cs)().unwrap());
+        }
+    }
+
     let MemoryLocation { page, index } = location;
 
     let witness_oracle = witness_oracle.clone();
@@ -444,9 +460,6 @@ pub fn may_be_read_memory_for_source_operand<
 
     use crate::base_structures::memory_query::MEMORY_QUERY_PACKED_WIDTH;
 
-    // we always simulate, for simplicity of working later on
-    let boolean_true = Boolean::allocated_constant(cs, true);
-
     let simulated_values = simulate_new_tail_for_full_state_queue::<
         F,
         8,
@@ -459,7 +472,7 @@ pub fn may_be_read_memory_for_source_operand<
         cs,
         packed_query,
         current_memory_sponge_state.map(|el| el.get_variable()),
-        boolean_true,
+        should_access,
     );
 
     let initial_state = [

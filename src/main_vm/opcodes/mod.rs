@@ -121,7 +121,18 @@ pub(crate) fn enforce_mul_relation<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS, 
     relation: MulDivRelation<F>,
 ) {
-    let MulDivRelation { a, b, rem, mul_low, mul_high } = relation;
+    let MulDivRelation { 
+        a, 
+        b, 
+        rem, 
+        mul_low, 
+        mul_high 
+    } = relation;
+
+    // a * b + rem = mul_low + 2^256 * mul_high
+
+    // in case of multiplication rem == 0, a and b are src0 and src1
+    // in case of division a = quotient, b = src1, rem is remainder, mul_low = src0
 
     if cs.gate_is_allowed::<U8x4FMAGate>() {
         let mut partial_result = [UInt32::zero(cs); 16];
@@ -134,7 +145,14 @@ pub(crate) fn enforce_mul_relation<F: SmallField, CS: ConstraintSystem<F>>(
                 );
                 partial_result[a_idx+b_idx] = low_wrapped.0;
                 intermidiate_overflow = high_wrapped.0;
-            }  
+            }
+            // place end of chain
+            if a_idx + 8 < 16 {
+                partial_result[a_idx+8] = partial_result[a_idx+8].add_no_overflow(cs, intermidiate_overflow).0;
+            } else {
+                let zero_num = Num::zero(cs);
+                Num::enforce_equal(cs, &zero_num, &intermidiate_overflow.into_num());
+            }
         }
         for (lhs, rhs) in partial_result.iter().zip(mul_low.iter().chain(mul_high.iter())) {
             Num::enforce_equal(cs, &lhs.into_num(), &rhs.into_num())

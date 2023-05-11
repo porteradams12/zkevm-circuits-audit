@@ -71,7 +71,6 @@ where
         unsorted_queue_witness,
     ));
 
-
     // passthrought must be trivial
     observable_input.sorted_queue_initial_state.enforce_trivial_head(cs);
 
@@ -123,7 +122,6 @@ where
     let mut previous_full_key = hidden_fsm_input.previous_full_key;
     let mut previous_value = hidden_fsm_input.previous_value;
     let mut previous_is_ptr = hidden_fsm_input.previous_is_ptr;
-
 
     partial_accumulate_inner::<F, CS, R>(
         cs,
@@ -217,19 +215,30 @@ where
     let not_start = is_start.negated(cs);
     Num::enforce_equal(cs, &unsorted_queue.length.into_num(), &sorted_queue.length.into_num());
 
+    let bootloader_heap_page = UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE);
+    let uint256_zero = UInt256::zero(cs);
+
     for _cycle in 0..limit {
-        let can_pop = unsorted_queue.is_empty(cs);
+        let unsorted_is_empty = unsorted_queue.is_empty(cs);
+        let sorted_is_empty = sorted_queue.is_empty(cs);
+
+        // this is an exotic way so synchronize popping from both queues
+        // in asynchronous resolution
+        let can_pop_unsorted = unsorted_is_empty.negated(cs);
+        let can_pop_sorted: Boolean<F> = sorted_is_empty.negated(cs);
+        Boolean::enforce_equal(cs, &can_pop_unsorted, &can_pop_sorted);
+        let can_pop = Boolean::multi_and(cs, &[can_pop_unsorted, can_pop_sorted]);
 
         // we do not need any information about unsorted element other than it's encoding
         let (_, unsorted_item_encoding) =
             unsorted_queue.pop_front(cs, can_pop);
-        // let unsorted_item_encoding = unsorted_queue.pop_first_encoding_only(cs, &can_pop, round_function)?;
+        // let unsorted_item_encoding = unsorted_queue.pop_first_encoding_only(cs, &can_pop, round_function);
         let (sorted_item, sorted_item_encoding) =
             sorted_queue.pop_front(cs, can_pop);
 
+        // check non-deterministic writes
         {
             let ts_is_zero = sorted_item.timestamp.is_zero(cs);
-            let bootloader_heap_page = UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE);
 
             let page_is_bootloader_heap = UInt32::equals(
                 cs,
@@ -263,6 +272,7 @@ where
                 &num_nondeterministic_writes
             );
         }
+        // check RAM ordering
         {
             // either continue the argument or do nothing
 
@@ -299,14 +309,12 @@ where
             let not_rw_flag = rw_flag.negated(cs);
 
             // check uninit read
-            let uint256_zero = UInt256::zero(cs);
             let value_is_zero = UInt256::equals(cs, &sorted_item.value, &uint256_zero);
             let is_ptr = sorted_item.is_ptr;
             let not_ptr = is_ptr.negated(cs);
             let is_zero = value_is_zero.and(cs, not_ptr);
             let ptr_equality = Num::equals(cs, &previous_is_ptr.into_num(), &is_ptr.into_num());
             let value_and_ptr_equal = value_equal.and(cs, ptr_equality);
-
 
             // we only have a difference in these flags at the first step
             if _cycle != 0 {
@@ -339,24 +347,43 @@ where
             *previous_is_ptr = sorted_item.is_ptr;
         }
 
-        // if we did pop then accumulate
+        // if we did pop then accumulate to grand product
         for ((challenges, lhs), rhs) in fs_challenges
             .iter()
             .zip(lhs.iter_mut())
             .zip(rhs.iter_mut())
         {
+            // additive parts
             let mut lhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
             let mut rhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
+
+            debug_assert_eq!(unsorted_item_encoding.len(), sorted_item_encoding.len());
+            debug_assert_eq!(unsorted_item_encoding.len(), challenges[..MEMORY_QUERY_PACKED_WIDTH].len());
 
             for ((unsorted_contribution, sorted_contribution), challenge) in unsorted_item_encoding
                 .iter()
                 .zip(sorted_item_encoding.iter())
-                .zip(challenges.iter())
+                .zip(challenges[..MEMORY_QUERY_PACKED_WIDTH].iter())
             {
-                let l = Num::from_variable(*unsorted_contribution).mul(cs, challenge);
-                lhs_contribution = lhs_contribution.add(cs, &l);
-                let r = Num::from_variable(*sorted_contribution).mul(cs, challenge);
-                rhs_contribution = rhs_contribution.add(cs, &r);
+                let new_lhs = Num::fma(
+                    cs, 
+                    &Num::from_variable(*unsorted_contribution),
+                    challenge, 
+                    &F::ONE, 
+                    &lhs_contribution, 
+                    &F::ONE
+                );
+                lhs_contribution = new_lhs;
+
+                let new_rhs = Num::fma(
+                    cs, 
+                    &Num::from_variable(*sorted_contribution),
+                    challenge, 
+                    &F::ONE, 
+                    &rhs_contribution, 
+                    &F::ONE
+                );
+                rhs_contribution = new_rhs;
             }
 
             let new_lhs = lhs.mul(cs, &lhs_contribution);
@@ -368,8 +395,6 @@ where
     }
 }
 
-use boojum::gadgets::traits::allocatable::CSAllocatable;
-
 pub(crate) fn long_equals<
     F: SmallField, 
     CS: ConstraintSystem<F>,
@@ -379,12 +404,8 @@ pub(crate) fn long_equals<
     a: &[UInt32<F>; N],
     b: &[UInt32<F>; N]
 ) -> Boolean<F> {
-    let boolean_default = Boolean::allocate_without_value(cs);
-    let mut equals = [boolean_default; N];
 
-    for i in 0..N {
-        equals[i] = UInt32::equals(cs, &a[i], &b[i]);
-    }
+    let equals: [_; N] = std::array::from_fn(|i| UInt32::equals(cs, &a[i], &b[i]));
 
     Boolean::multi_and(cs, &equals)
 }

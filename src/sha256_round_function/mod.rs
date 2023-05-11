@@ -121,6 +121,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     let boolean_false = Boolean::allocated_constant(cs, false);
     let boolean_true = Boolean::allocated_constant(cs, true);
     let zero_u32 = UInt32::zero(cs);
+    let zero_u256 = UInt256::zero(cs);
 
     // we can have a degenerate case when queue is empty, but it's a first circuit in the queue,
     // so we taken default FSM state that has state.read_precompile_call = true;
@@ -192,8 +193,10 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 
         let mut memory_queries_as_u32_words = [zero_u32; 8 * MEMORY_READ_QUERIES_PER_CYCLE];
         let should_read = zero_rounds_left.negated(cs);
+        let mut bias_variable = should_read.get_variable();
         for dst in memory_queries_as_u32_words.array_chunks_mut::<8>() {
-            let read_query_value = memory_read_witness.conditionally_allocate(cs, should_read);
+            let read_query_value = memory_read_witness.conditionally_allocate_biased(cs, should_read, bias_variable);
+            bias_variable = read_query_value.inner[0].get_variable();
 
             let read_query = MemoryQuery {
                 timestamp: state.timestamp_to_use_for_read,
@@ -251,7 +254,11 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         let no_rounds_left = state.precompile_call_params.num_rounds.is_zero(cs);
         let write_result = Boolean::multi_and(cs, &[state.read_words_for_round, no_rounds_left]);
 
-        let write_word = UInt256::from_be_bytes(cs, sha256_output);
+        let mut write_word = zero_u256;
+        // some endianess magic
+        for (dst, src) in write_word.inner.iter_mut().rev().zip(sha256_output.array_chunks::<4>()) {
+            *dst = UInt32::from_le_bytes(cs, *src);
+        }
 
         let write_query = MemoryQuery {
             timestamp: state.timestamp_to_use_for_write,

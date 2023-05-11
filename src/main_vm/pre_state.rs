@@ -6,7 +6,7 @@ use super::*;
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
-use boojum::gadgets::traits::selectable::MultiSelectable;
+use boojum::serde_utils::BigArraySerde;
 use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
@@ -35,14 +35,14 @@ pub struct CommonOpcodeState<F: SmallField> {
     pub timestamp_for_dst_write: UInt32<F>,
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 pub struct MemoryLocation<F: SmallField> {
     pub page: UInt32<F>,
     pub index: UInt32<F>,
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Debug)]
 pub struct AfterDecodingCarryParts<F: SmallField> {
     pub did_skip_cycle: Boolean<F>,
@@ -55,7 +55,7 @@ pub struct AfterDecodingCarryParts<F: SmallField> {
     pub dst0_performs_memory_access: Boolean<F>,
 }
 
-#[derive(Derivative, CSSelectable)]
+#[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 pub struct PendingSponge<F: SmallField> {
     pub initial_state: [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
@@ -85,8 +85,6 @@ pub fn create_prestate<
     CommonOpcodeState<F>,
     AfterDecodingCarryParts<F>,
 ) {
-    // println!("NEW CYCLE -------------- PRESTATE");
-
     let mut current_state = current_state;
 
     let execution_has_ended = current_state.callstack.is_empty(cs);
@@ -94,9 +92,12 @@ pub fn create_prestate<
     let pending_exception = current_state.pending_exception;
     let execute_cycle = should_skip_cycle.negated(cs);
 
-    // we should even try to perform a read only if we have something to do this cycle. So We should not skip
-    // cycle or have some pending operation
-    let should_try_to_read_opcode = Boolean::multi_or(cs, &[execute_cycle, pending_exception]);
+    if crate::config::CIRCUIT_VERSOBE {
+        dbg!(execution_has_ended.witness_hook(&*cs)().unwrap());
+    }
+
+    // we should even try to perform a read only if we have something to do this cycle
+    let should_try_to_read_opcode = execute_cycle.mask_negated(cs, pending_exception);
 
     let execute_pending_exception_at_this_cycle = pending_exception;
 
@@ -201,6 +202,15 @@ pub fn create_prestate<
         &[code_word.inner[0], code_word.inner[1]], 
         &opcode,
     );
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if should_skip_cycle.witness_hook(&*cs)().unwrap() {
+            println!("Skipping cycle");
+        }
+        if execute_pending_exception_at_this_cycle.witness_hook(&*cs)().unwrap() {
+            println!("Executing pending exception");
+        }
+    }
 
     // mask if we would be ok with NOPing. This masks a full 8-byte opcode, and not properties bitspread
     // We mask if this cycle is just NOPing till the end of circuit
@@ -322,6 +332,11 @@ pub fn create_prestate<
     let stack_page = unsafe { base_page.increment_unchecked(cs) };
     let heap_page = unsafe { stack_page.increment_unchecked(cs) };
     let aux_heap_page = unsafe { heap_page.increment_unchecked(cs) };
+
+    if crate::config::CIRCUIT_VERSOBE {
+        dbg!(decoded_opcode.imm0.witness_hook(&*cs)().unwrap());
+        dbg!(decoded_opcode.imm1.witness_hook(&*cs)().unwrap());
+    }
 
     let (memory_location_for_src0, new_sp_after_src0, should_read_memory_for_src0) =
         resolve_memory_region_and_index_for_source(
