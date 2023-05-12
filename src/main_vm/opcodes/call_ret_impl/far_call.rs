@@ -12,7 +12,7 @@ use crate::base_structures::{
 
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecordWitness;
@@ -1274,7 +1274,7 @@ fn construct_hash_relations_code_hash_read<
         current_state[11],
     ];
 
-    use boojum::gadgets::poseidon::simulate_round_function;
+    use boojum::gadgets::round_function::simulate_round_function;
 
     let round_0_final =
         simulate_round_function::<_, _, 8, 12, 4, R>(cs, round_0_initial, boolean_true);
@@ -1503,7 +1503,7 @@ where
         current_decommittment_queue_tail[11].get_variable(),
     ];
 
-    use boojum::gadgets::poseidon::simulate_round_function;
+    use boojum::gadgets::round_function::simulate_round_function;
 
     // NOTE: since we do merged call/ret, we simulate proper relations here always,
     // because we will do join enforcement on call/ret

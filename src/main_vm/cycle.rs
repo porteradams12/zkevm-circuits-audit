@@ -6,7 +6,7 @@ use super::state_diffs::{StateDiffsAccumulator, MAX_ADD_SUB_RELATIONS_PER_CYCLE,
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::CSGeometry;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use boojum::gadgets::traits::selectable::MultiSelectable;
 use boojum::gadgets::u256::{UInt256, recompose_u256_as_u32x8};
@@ -187,62 +187,70 @@ where
     let can_update_dst0_as_register_only =
         Boolean::multi_or(cs, &can_update_dst0_as_register_only);
 
-    let mut dst0_is_ptr_candidates_iter = diffs_accumulator
+    let dst0_is_ptr_candidates_iter = diffs_accumulator
         .dst_0_values
         .iter()
-        .map(|el| (el.1, el.2.is_pointer));
-    let mut dst0_value_candidates_iter = diffs_accumulator
-        .dst_0_values
-        .iter()
-        .map(|el| (el.1, el.2.value));
+        .map(|el: &(bool, Boolean<F>, VMRegister<F>)| (el.1.get_variable(), el.2.is_pointer.get_variable()));
     let num_candidates_len = dst0_is_ptr_candidates_iter.len();
 
-    let dst0_is_ptr = dst0_is_ptr_candidates_iter.next().expect("is some").1;
-    let dst0_value = dst0_value_candidates_iter.next().expect("is some").1;
+    // Safety: we know by orthogonality of opcodes that boolean selectors in our iterators form either a mask,
+    // or an empty mask. So we can use unchecked casts below. Even if none of the bits is set (like in NOP case),
+    // it's not a problem because in the same situation we will not have an update of register/memory anyway
 
-    // Note on multiselect - here we only select candidates, and only between dst0 and dst1 separately.
-    // Each of the selection procedures is either bitmasked by opcode that is used, or will give "default"
-    // baseline that we will accept or not accept later on in the application phase. But we need to know a value
-    // here because we may write it into memory (same - if we do not write nothing happens)
-
-    let dst0_is_ptr = Boolean::multiselect(
+    use boojum::gadgets::num::dot_product;
+    let dst0_is_ptr = dot_product(
         cs,
-        &dst0_is_ptr,
-        &mut dst0_is_ptr_candidates_iter,
-        num_candidates_len - 1,
+        dst0_is_ptr_candidates_iter,
+        num_candidates_len,
     );
-    let dst0_value = UInt256::multiselect(
-        cs,
-        &dst0_value,
-        &mut dst0_value_candidates_iter,
-        num_candidates_len - 1,
-    );
+    let dst0_is_ptr = unsafe { Boolean::from_variable_unchecked(dst0_is_ptr) };
 
-    let mut dst1_is_ptr_candidates_iter = diffs_accumulator
+    let mut dst0_value = UInt256::zero(cs);
+    for (idx, dst) in dst0_value.inner.iter_mut().enumerate() {
+        let src = diffs_accumulator
+        .dst_0_values
+        .iter()
+        .map(|el: &(bool, Boolean<F>, VMRegister<F>)| (el.1.get_variable(), el.2.value.inner[idx].get_variable()));
+
+        let limb = dot_product(
+            cs,
+            src,
+            num_candidates_len,
+        );
+
+        let limb = unsafe { UInt32::from_variable_unchecked(limb) };
+        *dst = limb;
+    }
+
+    let dst1_is_ptr_candidates_iter = diffs_accumulator
         .dst_1_values
         .iter()
-        .map(|el| (el.0, el.1.is_pointer));
-    let mut dst1_value_candidates_iter = diffs_accumulator
-        .dst_1_values
-        .iter()
-        .map(|el| (el.0, el.1.value));
+        .map(|el| (el.0.get_variable(), el.1.is_pointer.get_variable()));
     let num_candidates_len = dst1_is_ptr_candidates_iter.len();
 
-    let dst1_is_ptr = dst1_is_ptr_candidates_iter.next().expect("is some").1;
-    let dst1_value = dst1_value_candidates_iter.next().expect("is some").1;
+    let dst1_is_ptr = dot_product(
+        cs,
+        dst1_is_ptr_candidates_iter,
+        num_candidates_len,
+    );
+    let dst1_is_ptr = unsafe { Boolean::from_variable_unchecked(dst1_is_ptr) };
 
-    let dst1_is_ptr = Boolean::multiselect(
-        cs,
-        &dst1_is_ptr,
-        &mut dst1_is_ptr_candidates_iter,
-        num_candidates_len - 1,
-    );
-    let dst1_value = UInt256::multiselect(
-        cs,
-        &dst1_value,
-        &mut dst1_value_candidates_iter,
-        num_candidates_len - 1,
-    );
+    let mut dst1_value = UInt256::zero(cs);
+    for (idx, dst) in dst1_value.inner.iter_mut().enumerate() {
+        let src = diffs_accumulator
+        .dst_1_values
+        .iter()
+        .map(|el: &(Boolean<F>, VMRegister<F>)| (el.0.get_variable(), el.1.value.inner[idx].get_variable()));
+
+        let limb = dot_product(
+            cs,
+            src,
+            num_candidates_len,
+        );
+
+        let limb = unsafe { UInt32::from_variable_unchecked(limb) };
+        *dst = limb;
+    }
     
     let perform_dst0_memory_write_update = Boolean::multi_and(
         cs,
@@ -384,32 +392,35 @@ where
 
         let any_ptr_update_as_dst0 = Boolean::multi_or(cs, &apply_ptr_update_as_dst0);
         let any_ptr_update_as_dst1 = Boolean::multi_or(cs, &apply_ptr_update_as_dst1);
+        
+        // Safety: our update flags are preconditioned by the applicability of the opcodes, and if opcode
+        // updates specific registers it does NOT write using "normal" dst0/dst1 addressing, so our mask
+        // is indeed a bitmask or empty
 
-        // boolean flags benefit from multiselect, and multiselect over them is over empty set or bitmask, where empty
-        // case is handles by extra explicit select
-        let is_ptr_baseline = boolean_false;
         // as dst0
         let num_candidates = it_is_ptr_as_dst0.len();
-        let is_ptr_as_dst0 = Boolean::multiselect(
+        let is_ptr_as_dst0 = dot_product(
             cs,
-            &is_ptr_baseline,
-            it_is_ptr_as_dst0.into_iter(),
+            it_is_ptr_as_dst0.into_iter().map(|el| (el.0.get_variable(), el.1.get_variable())),
             num_candidates,
         );
+        let is_ptr_as_dst0 = unsafe { Boolean::from_variable_unchecked(is_ptr_as_dst0) };
+    
         new_state.registers[idx].is_pointer = Boolean::conditionally_select(
             cs,
             any_ptr_update_as_dst0,
             &is_ptr_as_dst0,
             &new_state.registers[idx].is_pointer,
         );
+
         // now as dst1
         let num_candidates = it_is_ptr_as_dst1.len();
-        let is_ptr_as_dst1 = Boolean::multiselect(
+        let is_ptr_as_dst1 = dot_product(
             cs,
-            &is_ptr_baseline,
-            it_is_ptr_as_dst1.into_iter(),
+            it_is_ptr_as_dst1.into_iter().map(|el| (el.0.get_variable(), el.1.get_variable())),
             num_candidates,
         );
+        let is_ptr_as_dst1 = unsafe { Boolean::from_variable_unchecked(is_ptr_as_dst1) };
         new_state.registers[idx].is_pointer = Boolean::conditionally_select(
             cs,
             any_ptr_update_as_dst1,

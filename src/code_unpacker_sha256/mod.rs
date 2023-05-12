@@ -6,11 +6,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use ethereum_types::U256;
 use boojum::cs::Variable;
-
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
 use boojum::gadgets::{
-    poseidon::CircuitRoundFunction,
     traits::{
         selectable::Selectable, 
         allocatable::CSAllocatableExt, 
