@@ -24,7 +24,7 @@ use std::sync::{Arc, RwLock};
 use boojum::pairing::{CurveAffine, GenericCurveProjective};
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::queue::QueueState;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use crate::base_structures::log_query::*;
@@ -862,7 +862,7 @@ mod test {
             max_variables, 
             max_trace_len
         );
-        let builder = new_cs_builder::<_, F>(builder_impl);
+        let builder = new_builder::<_, F>(builder_impl);
 
         let builder = configure(builder);
         let mut owned_cs = builder.build(());

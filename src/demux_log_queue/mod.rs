@@ -15,7 +15,6 @@ use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
-    poseidon::CircuitRoundFunction,
     queue::*,
     traits::{
         allocatable::CSAllocatableExt, encodable::CircuitEncodableExt, selectable::Selectable,
@@ -23,6 +22,7 @@ use boojum::gadgets::{
     u160::*,
     u32::UInt32,
 };
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
 use zkevm_opcode_defs::system_params::*;
 

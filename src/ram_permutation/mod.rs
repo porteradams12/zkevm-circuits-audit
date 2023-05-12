@@ -10,7 +10,7 @@ use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u256::UInt256;
 
 use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::base_structures::memory_query::MemoryQuery;
 use boojum::gadgets::queue::{QueueState};

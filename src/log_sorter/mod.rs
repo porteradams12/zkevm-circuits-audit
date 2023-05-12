@@ -4,7 +4,6 @@ use super::*;
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
 use boojum::gadgets::{
-    poseidon::CircuitRoundFunction,
     traits::{selectable::Selectable, allocatable::{CSAllocatableExt}},
     num::Num,
     boolean::Boolean,
@@ -13,6 +12,7 @@ use boojum::gadgets::{
     u256::UInt256,
     u8::UInt8
 };
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use crate::fsm_input_output::{ClosedFormInputCompactForm, commit_variable_length_encodable_item};
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::base_structures::log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH};

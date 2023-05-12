@@ -1,6 +1,6 @@
 use boojum::field::SmallField;
 use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::gadgets::queue::QueueTailState;
 use boojum::gadgets::u32::UInt32;

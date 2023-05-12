@@ -10,7 +10,7 @@ use crate::base_structures::{
 
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::main_vm::opcodes::log::log_query::LogQueryWitness;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
@@ -530,7 +530,7 @@ fn construct_hash_relations_for_log_and_new_queue_states<
         current_state[11],
     ];
 
-    use boojum::gadgets::poseidon::simulate_round_function;
+    use boojum::gadgets::round_function::simulate_round_function;
 
     let round_0_final =
         simulate_round_function::<_, _, 8, 12, 4, R>(cs, round_0_initial, *should_execute_either);

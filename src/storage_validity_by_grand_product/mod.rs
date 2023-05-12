@@ -19,7 +19,6 @@ use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
-    poseidon::CircuitRoundFunction,
     queue::*,
     traits::{
         allocatable::*,
@@ -32,6 +31,7 @@ use boojum::gadgets::{
     u32::UInt32,
     u8::UInt8,
 };
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
 use crate::{
     demux_log_queue::StorageLogQueue,

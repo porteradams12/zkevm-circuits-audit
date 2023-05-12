@@ -119,7 +119,7 @@ pub(crate) fn should_read_memory<F: SmallField, CS: ConstraintSystem<F>>(
     can_skip.negated(cs)    
 }
 
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
 use crate::main_vm::pre_state::MemoryLocation;
 use crate::main_vm::witness_oracle::WitnessOracle;

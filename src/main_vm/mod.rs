@@ -31,7 +31,7 @@ use crate::base_structures::vm_state::{QUEUE_STATE_WIDTH, FULL_SPONGE_QUEUE_STAT
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::fsm_input_output::circuit_inputs::main_vm::VmCircuitWitness;
 use crate::main_vm::witness_oracle::{WitnessOracle, SynchronizedWitnessOracle};
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use crate::base_structures::log_query::LogQuery;
 use crate::base_structures::decommit_query::DecommitQuery;
@@ -230,7 +230,6 @@ where
 
     let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &compact_form, round_function);
     for el in input_commitment.iter() {
-        dbg!(el.witness_hook(cs)());
         let gate = PublicInputGate::new(el.get_variable());
         gate.add_to_cs(cs);
     }

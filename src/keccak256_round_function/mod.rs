@@ -23,7 +23,7 @@ use std::sync::{Arc, RwLock};
 use boojum::pairing::{CurveAffine, GenericCurveProjective};
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::queue::QueueState;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use crate::base_structures::log_query::*;
