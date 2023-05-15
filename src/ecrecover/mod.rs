@@ -337,7 +337,6 @@ fn ecrecover_precompile_inner_routine<
     for _ in 1..X_POWERS_ARR_LEN {
         let prev = t_powers.last_mut().unwrap();
         let next = prev.square(cs);
-        drop(prev);
         t_powers.push(next);
     }
 

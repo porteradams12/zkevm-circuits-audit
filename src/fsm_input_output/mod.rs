@@ -221,8 +221,31 @@ pub fn commit_variable_length_encodable_item<
     _round_function: &R
 ) -> [Num<F>; N] {
     // we use length specialization here
-
     let expected_length = item.encoding_length();
+
+    let mut buffer = Vec::with_capacity(expected_length);
+    item.encode_to_buffer(cs, &mut buffer);
+
+    assert_eq!(buffer.len(), expected_length);
+
+    commit_encoding::<F, CS, AW, SW, CW, N, R>(cs, &buffer, _round_function)
+}
+
+pub fn commit_encoding<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    const AW: usize,
+    const SW: usize,
+    const CW: usize,
+    const N: usize,
+    R: CircuitRoundFunction<F, AW, SW, CW>
+>(
+    cs: &mut CS,
+    input: &[Variable],
+    _round_function: &R
+) -> [Num<F>; N] {
+    // we use length specialization here
+    let expected_length = input.len();
 
     let mut state = R::create_empty_state(cs);
     let length = UInt32::allocated_constant(cs, expected_length as u32);
@@ -238,7 +261,8 @@ pub fn commit_variable_length_encodable_item<
     buffer_length *= AW;
 
     let mut buffer = Vec::with_capacity(buffer_length);
-    item.encode_to_buffer(cs, &mut buffer);
+    buffer.extend_from_slice(input);
+
     let zero_var = cs.allocate_constant(F::ZERO);
     buffer.resize(buffer_length, zero_var);
 
