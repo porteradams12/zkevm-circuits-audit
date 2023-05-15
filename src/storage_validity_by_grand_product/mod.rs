@@ -555,10 +555,10 @@ where
 {
     assert!(limit <= u32::MAX as usize);
 
-    let unsorted_queue_lenght = Num::from_variable(original_queue.length.get_variable());
-    let intermediate_sorted_queue_lenght = Num::from_variable(sorted_queue.length.get_variable());
+    let unsorted_queue_length = Num::from_variable(original_queue.length.get_variable());
+    let intermediate_sorted_queue_length = Num::from_variable(intermediate_sorted_queue.length.get_variable());
 
-    Num::enforce_equal(cs,  &unsorted_queue_lenght, &intermediate_sorted_queue_lenght);
+    Num::enforce_equal(cs,  &unsorted_queue_length, &intermediate_sorted_queue_length);
 
     // we can recreate it here, there are two cases:
     // - we are 100% empty, but it's the only circuit in this case

@@ -285,10 +285,10 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     assert!(limit <= u32::MAX as usize);
-    let unsorted_queue_lenght = Num::from_variable(original_queue.length.get_variable());
-    let intermediate_sorted_queue_lenght = Num::from_variable(sorted_queue.length.get_variable());
+    let unsorted_queue_length = Num::from_variable(original_queue.length.get_variable());
+    let intermediate_sorted_queue_length = Num::from_variable(sorted_queue.length.get_variable());
 
-    Num::enforce_equal(cs,  &unsorted_queue_lenght, &intermediate_sorted_queue_lenght);
+    Num::enforce_equal(cs,  &unsorted_queue_length, &intermediate_sorted_queue_length);
 
     let no_work = original_queue.is_empty(cs);
     // we can not have circuits that just do nothing
