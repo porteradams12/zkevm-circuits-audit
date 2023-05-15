@@ -1,40 +1,43 @@
 use super::*;
-use arrayvec::ArrayVec;
-use boojum::cs::gates::ConstantAllocatableCS;
-use boojum::field::SmallField;
-use boojum::gadgets::curves::sw_projective::SWProjectivePoint;
-use boojum::gadgets::keccak256::keccak256;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
-use boojum::gadgets::u16::UInt16;
-use cs_derive::*;
-use boojum::gadgets::u32::UInt32;
-use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::u256::UInt256;
-use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::traits::selectable::Selectable;
-use boojum::gadgets::non_native_field::traits::NonNativeField;
-use boojum::gadgets::non_native_field::implementations::*;
-use ethereum_types::U256;
-use boojum::crypto_bigint::{U1024, Zero};
-use boojum::gadgets::num::Num;
-use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
-use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
-use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
-use boojum::pairing::{CurveAffine, GenericCurveProjective};
-use boojum::gadgets::u8::UInt8;
-use boojum::gadgets::queue::QueueState;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use crate::base_structures::log_query::*;
-use crate::fsm_input_output::*;
-use boojum::gadgets::u160::UInt160;
-use crate::demux_log_queue::StorageLogQueue;
-use boojum::gadgets::queue::CircuitQueueWitness;
 use crate::base_structures::memory_query::*;
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
-
+use crate::demux_log_queue::StorageLogQueue;
+use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use crate::fsm_input_output::*;
+use arrayvec::ArrayVec;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::crypto_bigint::{Zero, U1024};
+use boojum::cs::gates::ConstantAllocatableCS;
+use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::field::SmallField;
+use boojum::gadgets::boolean::Boolean;
+use boojum::gadgets::curves::sw_projective::SWProjectivePoint;
+use boojum::gadgets::curves::zeroable_affine::ZeroableAffinePoint;
+use boojum::gadgets::keccak256::keccak256;
+use boojum::gadgets::non_native_field::implementations::*;
+use boojum::gadgets::non_native_field::traits::NonNativeField;
+use boojum::gadgets::num::Num;
+use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::queue::CircuitQueueWitness;
+use boojum::gadgets::queue::QueueState;
+use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
+use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
+use boojum::gadgets::u16::UInt16;
+use boojum::gadgets::u160::UInt160;
+use boojum::gadgets::u256::UInt256;
+use boojum::gadgets::u32::UInt32;
+use boojum::gadgets::u8::UInt8;
+use boojum::pairing::GenericCurveAffine;
+use boojum::pairing::{CurveAffine, GenericCurveProjective};
+use boojum::sha3::digest::typenum::private::IsGreaterPrivate;
+use cs_derive::*;
+use ethereum_types::U256;
+use std::collections::VecDeque;
+use std::str::FromStr;
+use std::sync::{Arc, RwLock};
+use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 
 pub mod input;
 pub use self::input::*;
@@ -43,10 +46,7 @@ mod secp256k1;
 
 pub const MEMORY_QUERIES_PER_CALL: usize = 4;
 
-#[derive(
-    Derivative,
-    CSSelectable,
-)]
+#[derive(Derivative, CSSelectable)]
 #[derivative(Clone, Debug)]
 pub struct EcrecoverPrecompileCallParams<F: SmallField> {
     pub input_page: UInt32<F>,
@@ -65,10 +65,7 @@ impl<F: SmallField> EcrecoverPrecompileCallParams<F> {
     //     }
     // }
 
-    pub fn from_encoding<CS: ConstraintSystem<F>>(
-        _cs: &mut CS,
-        encoding: UInt256<F>,
-    ) -> Self {
+    pub fn from_encoding<CS: ConstraintSystem<F>>(_cs: &mut CS, encoding: UInt256<F>) -> Self {
         let input_offset = encoding.inner[0];
         let output_offset = encoding.inner[2];
         let input_page = encoding.inner[4];
@@ -117,15 +114,18 @@ pub fn secp256k1_scalar_field_params() -> Secp256ScalarNNFieldParams {
 // assume that constructed field element is not zero
 // if this is not satisfied - set the result to be F::one
 fn convert_uint256_to_field_element_masked<
-    F: SmallField, 
-    CS: ConstraintSystem<F>, 
-    P: boojum::pairing::ff::PrimeField, 
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    P: boojum::pairing::ff::PrimeField,
     const N: usize,
 >(
     cs: &mut CS,
     elem: &UInt256<F>,
     params: &Arc<NonNativeFieldOverU16Params<P, N>>,
-) -> (NonNativeFieldOverU16<F, P, N>, Boolean<F>) where [(); N+1]: {
+) -> (NonNativeFieldOverU16<F, P, N>, Boolean<F>)
+where
+    [(); N + 1]:,
+{
     let is_zero = elem.is_zero(cs);
     let one_nn = NonNativeFieldOverU16::<F, P, N>::allocated_constant(cs, P::one(), params);
     // we still have to decompose it into u16 words
@@ -154,12 +154,10 @@ fn convert_uint256_to_field_element_masked<
     let element = NonNativeFieldOverU16 {
         limbs: limbs,
         non_zero_limbs: 16,
-        tracker: OverflowTracker {
-            max_moduluses,
-        },
+        tracker: OverflowTracker { max_moduluses },
         form: RepresentationForm::Normalized,
         params: params.clone(),
-        _marker: std::marker::PhantomData
+        _marker: std::marker::PhantomData,
     };
 
     let selected = Selectable::conditionally_select(cs, is_zero, &one_nn, &element);
@@ -168,9 +166,9 @@ fn convert_uint256_to_field_element_masked<
 }
 
 fn convert_uint256_to_field_element<
-    F: SmallField, 
-    CS: ConstraintSystem<F>, 
-    P: boojum::pairing::ff::PrimeField, 
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    P: boojum::pairing::ff::PrimeField,
     const N: usize,
 >(
     cs: &mut CS,
@@ -202,21 +200,121 @@ fn convert_uint256_to_field_element<
     let element = NonNativeFieldOverU16 {
         limbs: limbs,
         non_zero_limbs: 16,
-        tracker: OverflowTracker {
-            max_moduluses,
-        },
+        tracker: OverflowTracker { max_moduluses },
         form: RepresentationForm::Normalized,
         params: params.clone(),
-        _marker: std::marker::PhantomData
+        _marker: std::marker::PhantomData,
     };
 
     element
 }
 
-fn ecrecover_precompile_inner_routine<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
->(
+fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    mut point: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>,
+    scalar: Secp256ScalarNNField<F>,
+) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
+    let scalar_params = Arc::new(secp256k1_scalar_field_params());
+    let scalar_from_hex_str = |s: &str| -> Secp256ScalarNNField<F> {
+        let v = U256::from_str_radix(s, 16).unwrap();
+        let v = UInt256::allocated_constant(cs, v);
+        convert_uint256_to_field_element(cs, &v, &scalar_params)
+    };
+    let pow_2_128 = U256::from_dec_str("340282366920938463463374607431768211456").unwrap();
+    let pow_2_128 = UInt256::allocated_constant(cs, pow_2_128);
+    let pow_2_128 = convert_uint256_to_field_element(cs, &pow_2_128, &scalar_params);
+    let modulus =
+        scalar_from_hex_str("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
+
+    let base_params = Arc::new(secp256k1_base_field_params());
+    let beta = U256::from_str_radix(
+        "0x7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee",
+        16,
+    )
+    .unwrap();
+    let beta = UInt256::allocated_constant(cs, beta);
+    let beta = convert_uint256_to_field_element(cs, &beta, &base_params);
+
+    let (k1_neg, mut k1, k2_neg, mut k2) = {
+        let mut two_inverse = scalar_from_hex_str("2").inverse_unchecked(cs);
+        let a1 = scalar_from_hex_str("0x3086d221a7d46bcde86c90e49284eb15");
+        let b1 = scalar_from_hex_str("0xe4437ed6010e88286f547fa90abfe4c3");
+        let a2 = scalar_from_hex_str("0x114ca50f7a8e2f3f657c1108d9d44cfd8");
+        let b2 = a1;
+        let c1 = b2
+            .add(cs, &mut scalar.mul(cs, &mut two_inverse))
+            .mul(cs, &mut modulus.inverse_unchecked(cs));
+        let c2 = b1
+            .add(cs, &mut scalar.mul(cs, &mut two_inverse))
+            .mul(cs, &mut modulus.inverse_unchecked(cs));
+        let k1 = scalar
+            .sub(cs, &mut c1)
+            .mul(cs, &mut a1)
+            .sub(cs, &mut c2)
+            .mul(cs, &mut a2);
+        let k2 = c1
+            .negated(cs)
+            .mul(cs, &mut b1.negated(cs))
+            .sub(cs, &mut c2)
+            .mul(cs, &mut b2);
+        // NOTING THIS NOW: it's likely you'll have to actually build out both codepaths and then use cond select to make this work
+        let k1_neg = Boolean::allocated_constant(cs, false);
+        if (k1.tracker.add(&pow_2_128.tracker))
+            .overflow_over_representation(&k1.params.modulus_u1024.as_ref(), k1.params.repr_bits())
+            > 0
+        {
+            k1 = k1.negated(cs);
+            k1_neg = k1_neg.negated(cs);
+        }
+        let k2_neg = Boolean::allocated_constant(cs, false);
+        if (k2.tracker.add(&pow_2_128.tracker))
+            .overflow_over_representation(&k2.params.modulus_u1024.as_ref(), k2.params.repr_bits())
+            > 0
+        {
+            k2 = k2.negated(cs);
+            k2_neg = k1_neg.negated(cs);
+        }
+
+        (k1_neg, k1, k2_neg, k2)
+    };
+
+    let mut k1p =
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
+    let mut k2p =
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
+    
+    let k1_bits = k1.limbs.iter().map(|el| {
+        Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs)
+    }).flatten().collect();
+    let k2_bits = k2.limbs.iter().map(|el| {
+        Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs)
+    }).flatten().collect();
+    k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
+        let ((x, y), _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
+        // also needs cond selects
+        if k1.and(1) {
+            k1p.add_mixed(cs, &mut (point.x.clone(), point.y.clone()));
+        }
+        if k2.and(1) {
+            k2p.add_mixed(cs, &mut (point.x.clone(), point.y.clone()));
+        }
+        point.double(cs);
+    });
+
+    // Also needs cond selects
+    if k1_neg {
+        k1p.negated(cs);
+    }
+    if k2_neg {
+        k2p.negated(cs);
+    }
+
+    k2p.x = k2p.x.mul(cs, &mut beta);
+    k2p.convert_to_affine_or_default(cs, Secp256Affine::one());
+    k1p.add_mixed(cs, &mut (k2p.x, k2p.y))
+}
+
+fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     recid: &UInt8<F>,
     r: &UInt256<F>,
@@ -234,8 +332,10 @@ fn ecrecover_precompile_inner_routine<
     let mut minus_one = Secp256Fq::one();
     minus_one.negate();
 
-    let mut curve_b_nn = Secp256BaseNNField::<F>::allocated_constant(cs, curve_b, &base_field_params);
-    let mut minus_one_nn = Secp256BaseNNField::<F>::allocated_constant(cs, minus_one, &base_field_params);
+    let mut curve_b_nn =
+        Secp256BaseNNField::<F>::allocated_constant(cs, curve_b, &base_field_params);
+    let mut minus_one_nn =
+        Secp256BaseNNField::<F>::allocated_constant(cs, minus_one, &base_field_params);
 
     let secp_n_u256 = U256([
         scalar_field_params.modulus_u1024.as_ref().as_words()[0],
@@ -264,11 +364,11 @@ fn ecrecover_precompile_inner_routine<
     // This in turn means that the overwhelming majority of r determine a unique x, however some of them determine
     // two: x = r and x = r + n. If x_overflow flag is set than x = r + n
 
-    let [y_is_odd, x_overflow, ..] = Num::<F>::from_variable(recid.get_variable()).spread_into_bits::<_, 8>(cs);
+    let [y_is_odd, x_overflow, ..] =
+        Num::<F>::from_variable(recid.get_variable()).spread_into_bits::<_, 8>(cs);
 
     let (r_plus_n, of) = r.overflowing_add(cs, &secp_n_u256);
-    let mut x_as_u256 =
-        UInt256::conditionally_select(cs, x_overflow, &r_plus_n, &r);
+    let mut x_as_u256 = UInt256::conditionally_select(cs, x_overflow, &r_plus_n, &r);
     let error = Boolean::multi_and(cs, &[x_overflow, of]);
     exception_flags.push(error);
 
@@ -282,25 +382,16 @@ fn ecrecover_precompile_inner_routine<
 
     let mut x_fe = convert_uint256_to_field_element(cs, &x_as_u256, &base_field_params);
 
-    let (mut r_fe, r_is_zero) = convert_uint256_to_field_element_masked(
-        cs,
-        &r,
-        &scalar_field_params,
-    );
+    let (mut r_fe, r_is_zero) =
+        convert_uint256_to_field_element_masked(cs, &r, &scalar_field_params);
     exception_flags.push(r_is_zero);
-    let (mut s_fe, s_is_zero) = convert_uint256_to_field_element_masked(
-        cs,
-        &s,
-        &scalar_field_params,
-    );
+    let (mut s_fe, s_is_zero) =
+        convert_uint256_to_field_element_masked(cs, &s, &scalar_field_params);
     exception_flags.push(s_is_zero);
 
     // NB: although it is not strictly an exception we also assume that hash is never zero as field element
-    let (mut message_hash_fe, message_hash_is_zero) = convert_uint256_to_field_element_masked(
-        cs,
-        &message_hash,
-        &scalar_field_params,
-    );
+    let (mut message_hash_fe, message_hash_is_zero) =
+        convert_uint256_to_field_element_masked(cs, &message_hash, &scalar_field_params);
     exception_flags.push(message_hash_is_zero);
 
     // curve equation is y^2 = x^3 + b
@@ -314,21 +405,13 @@ fn ecrecover_precompile_inner_routine<
 
     let mut t = x_fe.square(cs);
     t = t.mul(cs, &mut x_fe);
-    t = t.add(
-        cs,
-        &mut curve_b_nn,
-    );
+    t = t.lazy_add(cs, &mut curve_b_nn);
 
     let t_is_zero = t.is_zero(cs);
     exception_flags.push(t_is_zero);
 
     // if t is zero then just mask
-    let t = Selectable::conditionally_select(
-        cs,
-        t_is_zero,
-        &valid_t_in_external_field,
-        &t,
-    );
+    let t = Selectable::conditionally_select(cs, t_is_zero, &valid_t_in_external_field, &t);
 
     // array of powers of t of the form t^{2^i} starting from i = 0 to 255
     let mut t_powers = Vec::with_capacity(X_POWERS_ARR_LEN);
@@ -363,14 +446,15 @@ fn ecrecover_precompile_inner_routine<
     let mut may_be_recovered_y_negated = may_be_recovered_y.negated(cs);
     may_be_recovered_y_negated.normalize(cs);
 
-    let [lowest_bit, ..] = Num::<F>::from_variable(may_be_recovered_y.limbs[0]).spread_into_bits::<_, 16>(cs);
+    let [lowest_bit, ..] =
+        Num::<F>::from_variable(may_be_recovered_y.limbs[0]).spread_into_bits::<_, 16>(cs);
 
     // if lowest bit != parity bit, then we need conditionally select
     let should_swap = lowest_bit.xor(cs, y_is_odd);
     let may_be_recovered_y = Selectable::conditionally_select(
-        cs, 
-        should_swap, 
-        &may_be_recovered_y_negated, 
+        cs,
+        should_swap,
+        &may_be_recovered_y_negated,
         &may_be_recovered_y,
     );
 
@@ -380,12 +464,8 @@ fn ecrecover_precompile_inner_routine<
     // unfortunately, if t is found to be a quadratic nonresidue, we can't simply let x to be zero,
     // because then t_new = 7 is again a quadratic nonresidue. So, in this case we let x to be 9, then
     // t = 16 is a quadratic residue
-    let x = Selectable::conditionally_select(
-        cs,
-        t_is_nonresidue,
-        &valid_x_in_external_field,
-        &x_fe,
-    );
+    let x =
+        Selectable::conditionally_select(cs, t_is_nonresidue, &valid_x_in_external_field, &x_fe);
     let y = Selectable::conditionally_select(
         cs,
         t_is_nonresidue,
@@ -401,56 +481,19 @@ fn ecrecover_precompile_inner_routine<
     s_by_r_inv.normalize(cs);
     message_hash_by_r_inv.normalize(cs);
 
-    let mut gen_negated = Secp256Affine::one();
-    gen_negated.negate();
-    let (gen_negated_x, gen_negated_y) = gen_negated.into_xy_unchecked();
-    let gen_negated_x = Secp256BaseNNField::allocated_constant(cs, gen_negated_x, base_field_params);
-    let gen_negated_y = Secp256BaseNNField::allocated_constant(cs, gen_negated_y, base_field_params);
-
-    let s_by_r_inv_normalized_lsb_bits: Vec<_> = s_by_r_inv.limbs.iter().map(|el| {
-        Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs)
-    }).flatten().collect();
-    let message_hash_by_r_inv_lsb_bits: Vec<_> = message_hash_by_r_inv.limbs.iter().map(|el| {
-        Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs)
-    }).flatten().collect();
-
     // now we are going to compute the public key Q = (x, y) determined by the formula:
     // Q = (s * X - hash * G) / r which is equivalent to r * Q = s * X - hash * G
-    // current implementation of point by scalar multiplications doesn't support multiplication by zero
-    // so we check that all s, r, hash are not zero (as FieldElements):
-    // if any of them is zero we reject the signature and in circuit itself replace all zero variables by ones
 
-    let mut recovered_point = (x, y);
-    let mut generator_point = (gen_negated_x, gen_negated_y);
+    let mut recovered_point =
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(cs, x, y);
     // now we do multiexponentiation
-    let mut q_acc = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
+    let s_times_x = wnaf_scalar_mul(cs, recovered_point, s_by_r_inv);
 
-    // we should start from MSB, double the accumulator, then conditionally add
-    for (cycle, (x_bit, hash_bit)) in s_by_r_inv_normalized_lsb_bits.into_iter().rev().zip(message_hash_by_r_inv_lsb_bits.into_iter().rev()).enumerate() {
-        if cycle != 0 {
-            q_acc = q_acc.double(cs);
-        }
-        let q_plus_x = q_acc.add_mixed(cs, &mut recovered_point);
-        let mut q_0: SWProjectivePoint<F, Secp256Affine, NonNativeFieldOverU16<F, Secp256Fq, 17>> = Selectable::conditionally_select(
-            cs,
-            x_bit,
-            &q_plus_x,
-            &q_acc
-        );
+    let hash_times_g = Secp256FixedBaseMulGate::new(message_hash_by_r_inv);
+    let q_acc = s_times_x.sub_mixed(cs, hash_times_g);
 
-        let q_plux_gen = q_0.add_mixed(cs, &mut generator_point);
-        let q_1 = Selectable::conditionally_select(
-            cs,
-            hash_bit,
-            &q_plux_gen,
-            &q_0,
-        );
-
-        q_acc = q_1;
-    }
-
-    use boojum::pairing::GenericCurveAffine;
-    let ((mut q_x, mut q_y), is_infinity) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
+    let ((mut q_x, mut q_y), is_infinity) =
+        q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
     exception_flags.push(is_infinity);
     let any_exception = Boolean::multi_or(cs, &exception_flags[..]);
 
@@ -460,8 +503,11 @@ fn ecrecover_precompile_inner_routine<
     let zero_u8 = UInt8::zero(cs);
 
     let mut bytes_to_hash = [zero_u8; 64];
-    let it = q_x.limbs[..16].iter().rev().chain(q_y.limbs[..16].iter().rev());
-    
+    let it = q_x.limbs[..16]
+        .iter()
+        .rev()
+        .chain(q_y.limbs[..16].iter().rev());
+
     for (dst, src) in bytes_to_hash.array_chunks_mut::<2>().zip(it) {
         let limb = unsafe { UInt16::from_variable_unchecked(*src) };
         *dst = limb.to_be_bytes(cs);
@@ -489,10 +535,11 @@ pub fn ecrecover_function_entry_point<
     round_function: &R,
     limit: usize,
 ) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
-where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]: 
+    [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]:,
 {
     assert!(limit <= u32::MAX as usize);
 
@@ -504,7 +551,10 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 
     let memory_reads_witness: VecDeque<_> = memory_reads_witness.into_iter().flatten().collect();
 
-    let precompile_address = UInt160::allocated_constant(cs, *zkevm_opcode_defs::system_params::ECRECOVER_INNER_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
+    let precompile_address = UInt160::allocated_constant(
+        cs,
+        *zkevm_opcode_defs::system_params::ECRECOVER_INNER_FUNCTION_PRECOMPILE_FORMAL_ADDRESS,
+    );
     let aux_byte_for_precompile = UInt8::allocated_constant(cs, PRECOMPILE_AUX_BYTE);
 
     let scalar_params = Arc::new(secp256k1_scalar_field_params());
@@ -528,24 +578,16 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         &base_params,
     );
 
-    let mut structured_input = EcrecoverCircuitInputOutput::alloc_ignoring_outputs(
-        cs,
-        closed_form_input.clone(),
-    );
+    let mut structured_input =
+        EcrecoverCircuitInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
     let start_flag = structured_input.start_flag;
 
-    let requests_queue_state_from_input = 
-        structured_input
-            .observable_input
-            .initial_log_queue_state;
+    let requests_queue_state_from_input = structured_input.observable_input.initial_log_queue_state;
 
     // it must be trivial
     requests_queue_state_from_input.enforce_trivial_head(cs);
 
-    let requests_queue_state_from_fsm = 
-        structured_input
-            .hidden_fsm_input
-            .log_queue_state;
+    let requests_queue_state_from_fsm = structured_input.hidden_fsm_input.log_queue_state;
 
     let requests_queue_state = QueueState::conditionally_select(
         cs,
@@ -554,18 +596,13 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         &requests_queue_state_from_fsm,
     );
 
-    let memory_queue_state_from_input = 
-        structured_input
-            .observable_input
-            .initial_memory_queue_state;
+    let memory_queue_state_from_input =
+        structured_input.observable_input.initial_memory_queue_state;
 
     // it must be trivial
     memory_queue_state_from_input.enforce_trivial_head(cs);
 
-    let memory_queue_state_from_fsm = 
-        structured_input
-            .hidden_fsm_input
-            .memory_queue_state;
+    let memory_queue_state_from_fsm = structured_input.hidden_fsm_input.memory_queue_state;
 
     let memory_queue_state = QueueState::conditionally_select(
         cs,
@@ -574,17 +611,11 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         &memory_queue_state_from_fsm,
     );
 
-    let mut requests_queue = StorageLogQueue::<F, R>::from_state(
-        cs,
-        requests_queue_state
-    );
+    let mut requests_queue = StorageLogQueue::<F, R>::from_state(cs, requests_queue_state);
     let queue_witness = CircuitQueueWitness::from_inner_witness(requests_queue_witness);
     requests_queue.witness = Arc::new(queue_witness);
 
-    let mut memory_queue = MemoryQueue::<F, R>::from_state(
-        cs,
-        memory_queue_state,
-    );
+    let mut memory_queue = MemoryQueue::<F, R>::from_state(cs, memory_queue_state);
 
     let one_u32 = UInt32::allocated_constant(cs, 1u32);
     let zero_u256 = UInt256::zero(cs);
@@ -593,7 +624,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 
     use crate::storage_application::ConditionalWitnessAllocator;
     let read_queries_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
-        witness_source: Arc::new(RwLock::new(memory_reads_witness))
+        witness_source: Arc::new(RwLock::new(memory_reads_witness)),
     };
 
     for _cycle in 0..limit {
@@ -605,7 +636,8 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
             EcrecoverPrecompileCallParams::from_encoding(cs, request.key);
 
         let timestamp_to_use_for_read = request.timestamp;
-        let (timestamp_to_use_for_write, _) = timestamp_to_use_for_read.add_no_overflow(cs, one_u32);
+        let (timestamp_to_use_for_write, _) =
+            timestamp_to_use_for_read.add_no_overflow(cs, one_u32);
 
         Num::conditionally_enforce_equal(
             cs,
@@ -613,7 +645,12 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
             &Num::from_variable(request.aux_byte.get_variable()),
             &Num::from_variable(aux_byte_for_precompile.get_variable()),
         );
-        for (a, b) in request.address.inner.iter().zip(precompile_address.inner.iter()) {
+        for (a, b) in request
+            .address
+            .inner
+            .iter()
+            .zip(precompile_address.inner.iter())
+        {
             Num::conditionally_enforce_equal(
                 cs,
                 should_process,
@@ -625,7 +662,8 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         let mut read_values = [zero_u256; NUM_MEMORY_READS_PER_CYCLE];
         let mut bias_variable = should_process.get_variable();
         for dst in read_values.iter_mut() {
-            let read_query_value: UInt256<F> = read_queries_allocator.conditionally_allocate_biased(cs, should_process, bias_variable);
+            let read_query_value: UInt256<F> = read_queries_allocator
+                .conditionally_allocate_biased(cs, should_process, bias_variable);
             bias_variable = read_query_value.inner[0].get_variable();
 
             *dst = read_query_value;
@@ -636,14 +674,15 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
                 index: precompile_call_params.input_offset,
                 rw_flag: boolean_false,
                 is_ptr: boolean_false,
-                value: read_query_value
+                value: read_query_value,
             };
 
             let _ = memory_queue.push(cs, read_query, should_process);
 
             precompile_call_params.input_offset = precompile_call_params
                 .input_offset
-                .add_no_overflow(cs, one_u32).0;
+                .add_no_overflow(cs, one_u32)
+                .0;
         }
 
         let [message_hash_as_u256, v_as_u256, r_as_u256, s_as_u256] = read_values;
@@ -662,7 +701,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
             &scalar_params,
         );
 
-        let success_as_u32 = unsafe {UInt32::from_variable_unchecked(success.get_variable())};
+        let success_as_u32 = unsafe { UInt32::from_variable_unchecked(success.get_variable()) };
         let mut success_as_u256 = zero_u256;
         success_as_u256.inner[0] = success_as_u32;
 
@@ -677,7 +716,8 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 
         precompile_call_params.output_offset = precompile_call_params
             .output_offset
-            .add_no_overflow(cs, one_u32).0;
+            .add_no_overflow(cs, one_u32)
+            .0;
 
         let _ = memory_queue.push(cs, success_query, should_process);
 
@@ -701,13 +741,12 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     let final_memory_state = memory_queue.into_state();
     let final_requets_state = requests_queue.into_state();
 
-    structured_input.observable_output.final_memory_state =
-        QueueState::conditionally_select(
-            cs,
-            structured_input.completion_flag,
-            &final_memory_state,
-            &structured_input.observable_output.final_memory_state,
-        );
+    structured_input.observable_output.final_memory_state = QueueState::conditionally_select(
+        cs,
+        structured_input.completion_flag,
+        &final_memory_state,
+        &structured_input.observable_output.final_memory_state,
+    );
 
     structured_input.hidden_fsm_output.log_queue_state = final_requets_state;
     structured_input.hidden_fsm_output.memory_queue_state = final_memory_state;
@@ -742,17 +781,17 @@ mod test {
 
     use boojum::config::DevCSConfig;
 
-    use rand::XorShiftRng;
-    use rand::SeedableRng;
-    use rand::Rng;
-    use boojum::pairing::{GenericCurveAffine, GenericCurveProjective};
     use boojum::pairing::ff::PrimeFieldRepr;
+    use boojum::pairing::{GenericCurveAffine, GenericCurveProjective};
+    use rand::Rng;
+    use rand::SeedableRng;
+    use rand::XorShiftRng;
 
     pub fn deterministic_rng() -> XorShiftRng {
         XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654])
     }
 
-    fn simulate_signature()-> (Secp256Fr, Secp256Fr, Secp256Affine, Secp256Fr){
+    fn simulate_signature() -> (Secp256Fr, Secp256Fr, Secp256Affine, Secp256Fr) {
         let mut rng = deterministic_rng();
         let sk: Secp256Fr = rng.gen();
 
@@ -761,11 +800,13 @@ mod test {
 
     fn transmute_representation<T: PrimeFieldRepr, U: PrimeFieldRepr>(repr: T) -> U {
         assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<U>());
-    
+
         unsafe { std::mem::transmute_copy::<T, U>(&repr) }
     }
 
-    fn simulate_signature_for_sk(sk: Secp256Fr) -> (Secp256Fr, Secp256Fr, Secp256Affine, Secp256Fr) {
+    fn simulate_signature_for_sk(
+        sk: Secp256Fr,
+    ) -> (Secp256Fr, Secp256Fr, Secp256Affine, Secp256Fr) {
         let mut rng = deterministic_rng();
         let pk = Secp256Affine::one().mul(sk.into_repr()).into_affine();
         let digest: Secp256Fr = rng.gen();
@@ -812,13 +853,13 @@ mod test {
         u256
     }
 
-    use boojum::gadgets::tables::byte_split::ByteSplitTable;
-    use boojum::cs::CSGeometry;
-    use boojum::cs::gates::*;
-    use boojum::gadgets::tables::*;
-    use boojum::cs::*;
-    use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
     use boojum::cs::cs_builder::*;
+    use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
+    use boojum::cs::gates::*;
+    use boojum::cs::CSGeometry;
+    use boojum::cs::*;
+    use boojum::gadgets::tables::byte_split::ByteSplitTable;
+    use boojum::gadgets::tables::*;
 
     #[test]
     fn test_signature_for_address_verification() {
@@ -831,43 +872,78 @@ mod test {
         let max_variables = 1 << 26;
         let max_trace_len = 1 << 20;
 
-        fn configure<F: SmallField, T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
-            builder: CsBuilder<T, F, GC, TB>
+        fn configure<
+            F: SmallField,
+            T: CsBuilderImpl<F, T>,
+            GC: GateConfigurationHolder<F>,
+            TB: StaticToolboxHolder,
+        >(
+            builder: CsBuilder<T, F, GC, TB>,
         ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
             let builder = builder.allow_lookup(
-                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant { 
-                    width: 3, 
-                    num_repetitions: 8, 
-                    share_table_id: true 
-                }
+                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                    width: 3,
+                    num_repetitions: 8,
+                    share_table_id: true,
+                },
             );
-            let builder = ConstantsAllocatorGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ReductionGate::<F, 4>::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ConstantsAllocatorGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ReductionGate::<F, 4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
             // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
-            let builder = BooleanConstraintGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<32>::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<16>::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = SelectionGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ZeroCheckGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns, false);
-            let builder = DotProductGate::<4>::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = BooleanConstraintGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<32>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<16>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = SelectionGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ZeroCheckGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+                false,
+            );
+            let builder = DotProductGate::<4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
             // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
-            let builder = NopGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
-    
+            let builder = NopGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+
             builder
         }
 
         let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry, 
-            max_variables, 
-            max_trace_len
+            geometry,
+            max_variables,
+            max_trace_len,
         );
-        let builder = new_cs_builder::<_, F>(builder_impl);
+        let builder = new_builder::<_, F>(builder_impl);
 
         let builder = configure(builder);
         let mut owned_cs = builder.build(());
-    
-        
+
         // add tables
         let table = create_xor8_table();
         owned_cs.add_lookup_table::<Xor8Table, 3>(table);
@@ -886,7 +962,10 @@ mod test {
 
         let cs = &mut owned_cs;
 
-        let sk = crate::ff::from_hex::<Secp256Fr>("b5b1870957d373ef0eeffecc6e4812c0fd08f554b37b233526acc331bf1544f7").unwrap();
+        let sk = crate::ff::from_hex::<Secp256Fr>(
+            "b5b1870957d373ef0eeffecc6e4812c0fd08f554b37b233526acc331bf1544f7",
+        )
+        .unwrap();
         let eth_address = hex::decode("12890d2cce102216644c59dae5baed380d84830c").unwrap();
         let (r, s, _pk, digest) = simulate_signature_for_sk(sk);
 
