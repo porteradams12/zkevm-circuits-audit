@@ -672,7 +672,7 @@ where
         previous_key_is_greater.conditionally_enforce_false(cs, not_item_is_trivial);
 
         // if keys are the same then timestamps are sorted
-        let (_, previous_timestamp_is_less, _) = previous_timestamp.overflowing_sub(cs, timestamp);
+        let (_, previous_timestamp_is_less) = previous_timestamp.overflowing_sub(cs, timestamp);
         // enforce if keys are the same and not trivial
         let must_enforce = keys_are_equal.and(cs, not_item_is_trivial);
         previous_timestamp_is_less.conditionally_enforce_true(cs, must_enforce);

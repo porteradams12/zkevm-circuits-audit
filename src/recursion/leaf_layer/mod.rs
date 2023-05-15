@@ -85,12 +85,13 @@ where
 
     let input = RecursionLeafInput::allocate(cs, input);
     let RecursionLeafInput {
-        circuit_type,
-        vk_commitment,
+        params,
         queue_state,
     } = input;
     let mut queue = 
         RecursionQueue::<F, 8, 12, 4, R>::from_state(cs, queue_state);
+
+    let RecursionLeafParameters { circuit_type, vk_commitment } = params;
 
     queue.witness = Arc::new(
         FullStateCircuitQueueWitness::from_inner_witness(queue_witness)
@@ -169,6 +170,10 @@ where
             Num::conditionally_enforce_equal(cs, can_pop, a, b);
         }
     }
+
+    let queue_is_empty = queue.is_empty(cs);
+    let boolean_true = Boolean::allocated_constant(cs, true);
+    Boolean::enforce_equal(cs, &queue_is_empty, &boolean_true);
 
     let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &input, round_function);
     for el in input_commitment.iter() {

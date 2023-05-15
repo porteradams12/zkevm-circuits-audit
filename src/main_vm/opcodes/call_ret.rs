@@ -287,7 +287,7 @@ pub(crate) fn apply_calls_and_ret<
             .increment_unchecked(cs)
     };
     let one_u32 = UInt32::allocated_constant(cs, 1);
-    let (depth_decreased, uf, _) = draft_vm_state
+    let (depth_decreased, uf) = draft_vm_state
         .callstack
         .context_stack_depth
         .overflowing_sub(cs, one_u32);

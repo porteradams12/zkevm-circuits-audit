@@ -111,7 +111,7 @@ where
         &near_call_abi.ergs_passed,
     );
 
-    let (remaining_for_this_context, uf, _) =
+    let (remaining_for_this_context, uf) =
         preliminary_ergs_left.overflowing_sub(cs, ergs_to_pass);
 
     let remaining_ergs_if_pass = remaining_for_this_context;

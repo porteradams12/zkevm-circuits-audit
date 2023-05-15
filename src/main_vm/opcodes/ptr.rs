@@ -76,13 +76,13 @@ pub(crate) fn apply_ptr<F: SmallField, CS: ConstraintSystem<F>>(
         Boolean::multi_and(cs, &[src1_0_to_128_is_nonzero, ptr_pack_variant]);
 
     // now check overflows/underflows
-    let (result_for_ptr_add, of, _) = src_0.u32x8_view[0].overflowing_add(cs, src_1.u32x8_view[0]);
+    let (result_for_ptr_add, of) = src_0.u32x8_view[0].overflowing_add(cs, src_1.u32x8_view[0]);
     let overflow_panic_if_add = Boolean::multi_and(cs, &[ptr_add_variant, of]);
 
-    let (result_for_ptr_sub, uf, _) = src_0.u32x8_view[0].overflowing_sub(cs, src_1.u32x8_view[0]);
+    let (result_for_ptr_sub, uf) = src_0.u32x8_view[0].overflowing_sub(cs, src_1.u32x8_view[0]);
     let underflow_panic_if_sub = Boolean::multi_and(cs, &[ptr_sub_variant, uf]);
 
-    let (result_for_ptr_shrink, uf, _) =
+    let (result_for_ptr_shrink, uf) =
         src_0.u32x8_view[3].overflowing_sub(cs, src_1.u32x8_view[0]);
     let underflow_panic_if_shrink = Boolean::multi_and(cs, &[ptr_shrink_variant, uf]);
 

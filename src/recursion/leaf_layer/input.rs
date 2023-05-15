@@ -24,18 +24,33 @@ use boojum::field::FieldExtension;
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
-pub struct RecursionLeafInput<F: SmallField> {
+pub struct RecursionLeafParameters<F: SmallField> {
     pub circuit_type: Num<F>,
     pub vk_commitment: [Num<F>; VK_COMMITMENT_LENGTH],
-    pub queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
 }
 
-impl<F: SmallField> CSPlaceholder<F> for RecursionLeafInput<F> {
+impl<F: SmallField> CSPlaceholder<F> for RecursionLeafParameters<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         let zero = Num::zero(cs);
         Self {
             circuit_type: zero,
             vk_commitment: [zero; VK_COMMITMENT_LENGTH],
+        }
+    }
+}
+
+#[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
+#[derivative(Clone, Copy, Debug)]
+#[DerivePrettyComparison("true")]
+pub struct RecursionLeafInput<F: SmallField> {
+    pub params: RecursionLeafParameters<F>,
+    pub queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+}
+
+impl<F: SmallField> CSPlaceholder<F> for RecursionLeafInput<F> {
+    fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        Self {
+            params: RecursionLeafParameters::placeholder(cs),
             queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
         }
     }
@@ -47,6 +62,6 @@ impl<F: SmallField> CSPlaceholder<F> for RecursionLeafInput<F> {
 pub struct RecursionLeafInstanceWitness<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, BaseField = F>> {
     pub input: RecursionLeafInputWitness<F>,
     pub vk_witness: VerificationKey<F, H::NonCircuitSimulator>,
-    pub queue_witness: FullStateCircuitQueueRawWitness<F, RecursionQuery<F>, 12, RECURSION_QUERY_PACKED_WIDTH>,
+    pub queue_witness: FullStateCircuitQueueRawWitness<F, RecursionQuery<F>, FULL_SPONGE_QUEUE_STATE_WIDTH, RECURSION_QUERY_PACKED_WIDTH>,
     pub proof_witnesses: VecDeque<Proof<F, H::NonCircuitSimulator, EXT>>,
 }
