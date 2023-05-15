@@ -66,7 +66,7 @@ TR: RecursiveTranscript<F, CompatibleCap = <H::NonCircuitSimulator as TreeHasher
 CTR: CircuitTranscript<F, CircuitCompatibleCap = <H as CircuitTreeHasher<F, Num<F>>>::CircuitOutput, TransciptParameters = TR::TransciptParameters>,
 POW: RecursivePoWRunner<F>,
 >(
-    mut cs: &mut CS,
+    cs: &mut CS,
     witness: RecursionLeafInstanceWitness<F, H, EXT>,
     round_function: &R,
     config: LeafLayerRecursionConfig<F, H::NonCircuitSimulator, EXT>,

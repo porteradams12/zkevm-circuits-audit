@@ -52,6 +52,6 @@ impl<F: SmallField> CSPlaceholder<F> for RecursionNodeInput<F> {
 pub struct RecursionNodeInstanceWitness<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, BaseField = F>> {
     pub input: RecursionNodeInputWitness<F>,
     pub vk_witness: VerificationKey<F, H::NonCircuitSimulator>,
-    pub split_points: VecDeque<QueueTailStateWitness<F, FULL_SPONGE_QUEUE_STATE_WIDTH>>,
+    pub split_points: VecDeque<[F; FULL_SPONGE_QUEUE_STATE_WIDTH]>,
     pub proof_witnesses: VecDeque<Proof<F, H::NonCircuitSimulator, EXT>>,
 }

@@ -2,6 +2,7 @@ use crate::base_structures::recursion_query::{RecursionQuery, RecursionQueue};
 use crate::fsm_input_output::commit_variable_length_encodable_item;
 use boojum::cs::implementations::proof::Proof;
 use boojum::cs::implementations::prover::ProofConfig;
+use boojum::gadgets::queue;
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 use boojum::gadgets::recursion::recursive_transcript::RecursiveTranscript;
@@ -51,13 +52,13 @@ use boojum::cs::implementations::verifier::VerificationKeyCircuitGeometry;
 #[serde(bound = "H::Output: serde::Serialize + serde::de::DeserializeOwned")]
 pub struct NodeLayerRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
     pub proof_config: ProofConfig,
+    pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
     pub leaf_layer_capacity: usize,
     pub node_layer_capacity: usize,
     pub padding_proof: Proof<F, H, EXT>
 }
 
 use boojum::cs::traits::circuit::CircuitParametersForVerifier;
-
 
 pub fn node_layer_recursion_entry_point<
 F: SmallField,
@@ -70,11 +71,10 @@ TR: RecursiveTranscript<F, CompatibleCap = <H::NonCircuitSimulator as TreeHasher
 CTR: CircuitTranscript<F, CircuitCompatibleCap = <H as CircuitTreeHasher<F, Num<F>>>::CircuitOutput, TransciptParameters = TR::TransciptParameters>,
 POW: RecursivePoWRunner<F>,
 >(
-    mut cs: &mut CS,
+    cs: &mut CS,
     witness: RecursionNodeInstanceWitness<F, H, EXT>,
     round_function: &R,
     config: NodeLayerRecursionConfig<F, H::NonCircuitSimulator, EXT>,
-    circuit_placeholder: C,
     transcript_params: TR::TransciptParameters,
 )
 where 
@@ -94,8 +94,6 @@ where
         node_layer_vk_commitment,
         queue_state,
     } = input;
-    let mut queue = 
-        RecursionQueue::<F, 8, 12, 4, R>::from_state(cs, queue_state);
 
     let vk = AllocatedVerificationKey::<F, H>::allocate(cs, vk_witness);
     let vk_commitment_computed: [_; VK_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &vk, round_function);
@@ -117,18 +115,34 @@ where
 
     // now we need to try to split the circuit
 
+    let NodeLayerRecursionConfig { 
+        proof_config, 
+        vk_fixed_parameters,
+        leaf_layer_capacity,
+        node_layer_capacity,
+        padding_proof 
+    } = config;
+
+    let max_length_if_leafs = leaf_layer_capacity * node_layer_capacity;
+    let max_length_if_leafs = UInt32::allocated_constant(cs, max_length_if_leafs as u32);
+    // if queue length is <= max_length_if_leafs then next layer we aggregate leafs, or aggregate nodes otherwise
+    let (_, uf) = max_length_if_leafs.overflowing_sub(cs, queue_state.tail.length);
+    let next_layer_aggregates_nodes = uf;
+    vk_commitment = <[Num<F>; VK_COMMITMENT_LENGTH]>::conditionally_select(
+        cs, 
+        next_layer_aggregates_nodes, 
+        &node_layer_vk_commitment, 
+        &vk_commitment
+    );
+
     for (a, b) in vk_commitment.iter().zip(vk_commitment_computed.iter()) {
         Num::enforce_equal(cs, a, b);
     }
 
-    let mut proof_witnesses = proof_witnesses;
+    // split the original queue into "node_layer_capacity" elements, regardless if next layer
+    // down will aggregate leafs or nodes
 
-    let LeafLayerRecursionConfig { 
-        proof_config, 
-        vk_fixed_parameters,
-        capacity, 
-        padding_proof 
-    } = config;
+    let mut proof_witnesses = proof_witnesses;
 
     use boojum::gadgets::recursion::recursive_verifier_builder::CsRecursiveVerifierBuilder;
 
@@ -137,28 +151,35 @@ where
     let r = cs as *mut CS;
     let tmp_cs = unsafe {&mut *r};
 
+    assert_eq!(vk_fixed_parameters.parameters, C::geometry());
+    assert_eq!(vk_fixed_parameters.lookup_parameters, C::lookup_parameters());
+
     let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
         tmp_cs, 
-        vk_fixed_parameters.parameters, 
-        vk_fixed_parameters.lookup_parameters,
+        C::geometry(), 
+        C::lookup_parameters(),
     );
     use boojum::cs::cs_builder::new_builder;
     let builder = new_builder::<_, F>(builder_impl);
 
-    let builder = circuit_placeholder.configure_builder(builder);
+    let builder = C::configure_builder(builder);
     let verifier = builder.build(());
 
-    for _ in 0..capacity {
+    let subqueues = split_queue_state_into_n(
+        cs,
+        queue_state,
+        node_layer_capacity,
+        split_points,
+    );
+
+    assert_eq!(subqueues.len(), node_layer_capacity);
+
+    for subqueue in subqueues.into_iter() {
         let witness = proof_witnesses.pop_front().unwrap_or(padding_proof.clone());
         let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
 
-        let queue_is_empty = queue.is_empty(cs);
-        let can_pop = queue_is_empty.negated(cs);
-
-        let (recursive_request, _) = queue.pop_front(cs, can_pop);
-
-        // ensure that it's an expected type
-        Num::conditionally_enforce_equal(cs, can_pop, &recursive_request.circuit_type, &circuit_type);
+        let chunk_is_empty = subqueue.tail.length.is_zero(cs);
+        let chunk_is_meaningful = chunk_is_empty.negated(cs);
 
         // verify the proof
         let (is_valid, public_inputs) = verifier.verify::<
@@ -177,15 +198,7 @@ where
 
         assert_eq!(public_inputs.len(), INPUT_OUTPUT_COMMITMENT_LENGTH);
 
-
-        // expected proof should be valid
-        is_valid.conditionally_enforce_true(cs, can_pop);
-
-        // enforce publici inputs
-
-        for (a, b) in recursive_request.input_commitment.iter().zip(public_inputs.iter()) {
-            Num::conditionally_enforce_equal(cs, can_pop, a, b);
-        }
+        is_valid.conditionally_enforce_true(cs, chunk_is_meaningful);
     }
 
     let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &input, round_function);
@@ -203,13 +216,96 @@ pub(crate) fn split_first_n_from_queue_state<
     cs: &mut CS,
     queue_state: QueueState<F, N>,
     elements_to_split: UInt32<F>,
+    split_point_witness: [F; N],
 ) -> (
     QueueState<F, N>,
     QueueState<F, N>
 ) {
     // check length <= elements_to_split
-    let (_, uf) = elements_to_split.overflowing_sub(cs, queue_state.tail.length);
-    let second_is_trivial = uf.negated(cs);
+    let (second_length, uf) = queue_state.tail.length.overflowing_sub(cs, elements_to_split);
+    let second_is_zero = second_length.is_zero(cs);
 
-    todo!()
+    let second_is_trivial = Boolean::multi_or(cs, &[second_is_zero, uf]);
+
+    let intermediate = <[Num<F>; N]>::allocate(cs, split_point_witness);
+    let intermediate_state = QueueTailState {
+        tail: intermediate,
+        length: elements_to_split
+    };
+
+    let first_tail = QueueTailState::conditionally_select(
+        cs,
+        uf, 
+        &queue_state.tail, 
+        &intermediate_state,
+    );
+
+    for (a, b) in intermediate.iter().zip(queue_state.tail.tail.iter()) {
+        Num::conditionally_enforce_equal(cs, second_is_trivial, a, b);
+    }
+
+    let first = QueueState {
+        head: queue_state.head,
+        tail: first_tail,
+    };
+
+    let second_length = second_length.mask_negated(cs, uf);
+
+    let second = QueueState {
+        head: intermediate_state.tail,
+        tail: QueueTailState { 
+            tail: queue_state.tail.tail,
+            length: second_length, 
+        },
+    };
+
+    (first, second)
+}
+
+pub(crate) fn split_queue_state_into_n<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    const N: usize,
+>(
+    cs: &mut CS,
+    queue_state: QueueState<F, N>,
+    split_into: usize,
+    mut split_point_witnesses: VecDeque<[F; N]>,
+) -> Vec<QueueState<F, N>> {
+    assert!(split_into <= u32::MAX as usize);
+    assert!(split_into >= 2);
+    if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
+        assert_eq!(split_point_witnesses.len() + 1, split_into);
+    }
+    let (div, rem) = queue_state.tail.length.div_by_constant(cs, split_into as u32);
+    let div_plus_one = unsafe { div.increment_unchecked(cs) };
+    let rem_is_zero = rem.is_zero(cs);
+    let split_size = UInt32::conditionally_select(
+        cs, 
+        rem_is_zero, 
+        &div, 
+        &div_plus_one,
+    );
+
+    let mut current_state = queue_state;
+    let mut result = Vec::with_capacity(split_into);
+
+    for _ in 0..(split_into-1) {
+        let witness = split_point_witnesses.pop_front().unwrap_or([F::ZERO; N]);
+        let (first, second) = split_first_n_from_queue_state(
+            cs,
+            current_state,
+            split_size,
+            witness
+        );
+
+        current_state = second;
+        result.push(first);
+    }
+    // push the last one
+    result.push(current_state);
+
+    assert_eq!(result.len(), split_into);
+    
+    result
 }
