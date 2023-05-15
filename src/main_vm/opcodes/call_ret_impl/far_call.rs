@@ -214,8 +214,8 @@ impl<F: SmallField> FatPtrInABI<F> {
     pub(crate) fn readjust<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> Self {
         // if we have prevalidated everything, then we KNOW that "length + start" doesn't overflow and is within addressable bound,
         // and that offset < length, so overflows here can be ignored
-        let (new_start, _) = self.start.add_no_overflow(cs, self.offset);
-        let (new_length, _) = self.length.sub_no_overflow(cs, self.offset);
+        let new_start = self.start.add_no_overflow(cs, self.offset);
+        let new_length = self.length.sub_no_overflow(cs, self.offset);
 
         let zero_u32 = UInt32::zero(cs);
 
@@ -427,7 +427,7 @@ where
     // increment next counter
     let new_base_page = draft_vm_state.memory_page_counter;
     let memory_pages_per_far_call = UInt32::allocated_constant(cs, NEW_MEMORY_PAGES_PER_FAR_CALL);
-    let (new_memory_pages_counter, _) = draft_vm_state
+    let new_memory_pages_counter = draft_vm_state
         .memory_page_counter
         .add_no_overflow(cs, memory_pages_per_far_call);
 
@@ -725,7 +725,7 @@ where
         let max_pubdata_bytes = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_PUBDATA_BYTES_TO_PREPAY);
         
         let pubdata_cost = max_pubdata_bytes.non_widening_mul(cs, &draft_vm_state.ergs_per_pubdata_byte);
-        let (cost, _) = pubdata_cost.add_no_overflow(cs, additive_cost);
+        let cost = pubdata_cost.add_no_overflow(cs, additive_cost);
 
         cost.mask(cs, require_extra)
     };
@@ -850,7 +850,7 @@ where
 
     let remaining_ergs_if_pass = remaining_for_this_context;
     let passed_ergs_if_pass = ergs_to_pass;
-    let (passed_ergs_if_pass, _) = passed_ergs_if_pass.add_no_overflow(cs, callee_stipend);
+    let passed_ergs_if_pass = passed_ergs_if_pass.add_no_overflow(cs, callee_stipend);
 
     current_callstack_entry.ergs_remaining = remaining_ergs_if_pass;
 

@@ -243,9 +243,9 @@ pub(crate) fn apply_log<
 
     let initial_storage_write_pubdata_bytes =
         UInt32::allocated_constant(cs, INITIAL_STORAGE_WRITE_PUBDATA_BYTES as u32);
-    let (net_cost, _) = initial_storage_write_pubdata_bytes.sub_no_overflow(cs, pubdata_refund);
+    let net_cost = initial_storage_write_pubdata_bytes.sub_no_overflow(cs, pubdata_refund);
 
-    let (ergs_to_burn_for_rollup_storage_write) = draft_vm_state
+    let ergs_to_burn_for_rollup_storage_write = draft_vm_state
         .ergs_per_pubdata_byte
         .non_widening_mul(cs, &net_cost);
 

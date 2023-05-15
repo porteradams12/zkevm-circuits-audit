@@ -288,7 +288,7 @@ where
 
     // -----------------------------------------
 
-    let (new_ergs_left, _) =
+    let new_ergs_left =
         ergs_left_after_growth.add_no_overflow(cs, new_callstack_entry.ergs_remaining);
 
     new_callstack_entry.ergs_remaining = new_ergs_left;
@@ -337,7 +337,7 @@ where
         Num::conditionally_enforce_equal(cs, perform_revert, a, b);
     }
 
-    let (new_forward_queue_len_if_revert, _) = draft_vm_state
+    let new_forward_queue_len_if_revert = draft_vm_state
         .callstack
         .current_context
         .log_queue_forward_part_length
@@ -355,7 +355,7 @@ where
         Num::conditionally_enforce_equal(cs, should_perform_ret_ok, a, b);
     }
 
-    let (new_rollback_queue_len_if_ok, _) = new_callstack_entry
+    let new_rollback_queue_len_if_ok = new_callstack_entry
         .reverted_queue_segment_len
         .add_no_overflow(cs, current_callstack_entry.reverted_queue_segment_len);
 

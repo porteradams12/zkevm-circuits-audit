@@ -958,7 +958,7 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
     let mut borrow = boolean_false;
 
     for i in 0..N {
-        let (diff, new_borrow, _) = b[i].overflowing_sub_with_borrow_in(cs, a[i], borrow);
+        let (diff, new_borrow) = b[i].overflowing_sub_with_borrow_in(cs, a[i], borrow);
         borrow = new_borrow;
         equals[i] = diff.is_zero(cs);
     }

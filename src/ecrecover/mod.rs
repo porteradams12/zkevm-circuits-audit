@@ -604,7 +604,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
             EcrecoverPrecompileCallParams::from_encoding(cs, request.key);
 
         let timestamp_to_use_for_read = request.timestamp;
-        let (timestamp_to_use_for_write, _) = timestamp_to_use_for_read.add_no_overflow(cs, one_u32);
+        let timestamp_to_use_for_write = timestamp_to_use_for_read.add_no_overflow(cs, one_u32);
 
         Num::conditionally_enforce_equal(
             cs,
@@ -642,7 +642,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 
             precompile_call_params.input_offset = precompile_call_params
                 .input_offset
-                .add_no_overflow(cs, one_u32).0;
+                .add_no_overflow(cs, one_u32);
         }
 
         let [message_hash_as_u256, v_as_u256, r_as_u256, s_as_u256] = read_values;
@@ -676,7 +676,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 
         precompile_call_params.output_offset = precompile_call_params
             .output_offset
-            .add_no_overflow(cs, one_u32).0;
+            .add_no_overflow(cs, one_u32);
 
         let _ = memory_queue.push(cs, success_query, should_process);
 
