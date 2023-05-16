@@ -457,3 +457,35 @@ pub fn repack_and_prove_events_rollbacks_inner<
         previous_item
     )
 }
+
+/// Check that a == b and a > b by performing a long subtraction b - a with borrow.
+/// Both a and b are considered as least significant word first
+#[track_caller]
+pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    a: &[Num<F>],
+    b: &[Num<F>],
+    width_data: &[usize],
+) -> (Boolean<F>, Boolean<F>){
+    assert_eq!(a.len(), b.len());
+    assert_eq!(a.len(), width_data.len());
+
+    let mut previous_borrow = Boolean::allocated_constant(cs, false);
+    let mut limbs_are_equal = vec![];
+    for (a, b) in a.iter().zip(b.iter()) {
+        let a_uint32 = unsafe {
+            UInt32::from_variable_unchecked(a.get_variable())
+        };
+        let b_uint32 = unsafe {
+            UInt32::from_variable_unchecked(b.get_variable())
+        };
+        let (diff, borrow) = a_uint32.overflowing_sub_with_borrow_in(cs, b_uint32, previous_borrow);
+        let equal = diff.is_zero(cs);
+        limbs_are_equal.push(equal);
+        previous_borrow = borrow;
+    }
+    let final_borrow = previous_borrow;
+    let eq = Boolean::multi_and(cs, &limbs_are_equal);
+
+    (eq, final_borrow)
+}

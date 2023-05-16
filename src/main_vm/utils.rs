@@ -89,7 +89,7 @@ pub(crate) fn split_pc<F: SmallField, CS: ConstraintSystem<F>>(
         }
     }
 
-    let (super_pc, _) = UInt16::from_variable_checked(cs, outputs[1]);
+    let super_pc = UInt16::from_variable_checked(cs, outputs[1]);
 
     use crate::tables::integer_to_boolean_mask::VMSubPCToBitmaskTable;
     let table_id = cs
@@ -258,8 +258,8 @@ pub fn resolve_memory_region_and_index_for_source<F: SmallField, CS: ConstraintS
         .boolean_for_src_mem_access(ImmMemHandlerFlags::UseStackWithPushPop);
 
     let absolute_mode = Boolean::multi_or(cs, &[use_code, use_stack_absolute]);
-    let (index_for_absolute, _, _) = register_low_value.overflowing_add(cs, &opcode_props.imm0);
-    let (index_for_relative, _, _) = current_sp.overflowing_sub(cs, &index_for_absolute);
+    let (index_for_absolute, _) = register_low_value.overflowing_add(cs, &opcode_props.imm0);
+    let (index_for_relative, _) = current_sp.overflowing_sub(cs, &index_for_absolute);
 
     // if we use absolute addressing then we just access reg + imm mod 2^16
     // if we use relative addressing then we access sp +/- (reg + imm), and if we push/pop then we update sp to such value
@@ -324,9 +324,9 @@ pub fn resolve_memory_region_and_index_for_dest<F: SmallField, CS: ConstraintSys
         .boolean_for_dst_mem_access(ImmMemHandlerFlags::UseStackWithPushPop);
 
     let absolute_mode = use_stack_absolute;
-    let (index_for_absolute, _, _) = register_low_value.overflowing_add(cs, &opcode_props.imm1);
-    let (index_for_relative_with_push, _, _) = current_sp.overflowing_add(cs, &index_for_absolute);
-    let (index_for_relative, _, _) = current_sp.overflowing_sub(cs, &index_for_absolute);
+    let (index_for_absolute, _) = register_low_value.overflowing_add(cs, &opcode_props.imm1);
+    let (index_for_relative_with_push, _) = current_sp.overflowing_add(cs, &index_for_absolute);
+    let (index_for_relative, _) = current_sp.overflowing_sub(cs, &index_for_absolute);
 
     // if we use absolute addressing then we just access reg + imm mod 2^16
     // if we use relative addressing then we access sp +/- (reg + imm), and if we push/pop then we update sp

@@ -173,8 +173,12 @@ use boojum::gadgets::queue::full_state_queue::{
     FullStateCircuitQueueWitness,
 };
 
-pub type DecommitQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
+pub type DecommitQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
     FullStateCircuitQueue<F, DecommitQuery<F>, AW, SW, CW, DECOMMIT_QUERY_PACKED_WIDTH, R>;
+
+
+pub type DecommitQueue<F, R> =
+    DecommitQueryQueue<F, 8, 12, 4, R>;
 
 pub type DecommitQueueWitness<F, const SW: usize> =
     FullStateCircuitQueueWitness<F, DecommitQuery<F>, SW, DECOMMIT_QUERY_PACKED_WIDTH>;

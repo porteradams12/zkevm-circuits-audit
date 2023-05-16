@@ -182,7 +182,7 @@ where
 
     // we also want unidirectional movement of returndata
     // check if fat_ptr.memory_page < ctx.base_page and throw if it's the case
-    let (_, uf, _) = common_abi_parts.fat_ptr.page.overflowing_sub(
+    let (_, uf) = common_abi_parts.fat_ptr.page.overflowing_sub(
         cs,
         draft_vm_state
             .callstack
@@ -249,13 +249,13 @@ where
 
     let heap_max_accessed = upper_bound.mask(cs, forwarding_data.use_heap);
     let heap_bound = current_callstack_entry.heap_upper_bound;
-    let (mut heap_growth, uf, _) = heap_max_accessed.overflowing_sub(cs, heap_bound);
+    let (mut heap_growth, uf) = heap_max_accessed.overflowing_sub(cs, heap_bound);
     heap_growth = heap_growth.mask_negated(cs, uf); // of we access in bounds then it's 0
     let grow_heap = Boolean::multi_and(cs, &[forwarding_data.use_heap, execute, is_far_return]);
 
     let aux_heap_max_accessed = upper_bound.mask(cs, forwarding_data.use_aux_heap);
     let aux_heap_bound = current_callstack_entry.aux_heap_upper_bound;
-    let (mut aux_heap_growth, uf, _) = aux_heap_max_accessed.overflowing_sub(cs, aux_heap_bound);
+    let (mut aux_heap_growth, uf) = aux_heap_max_accessed.overflowing_sub(cs, aux_heap_bound);
     aux_heap_growth = aux_heap_growth.mask_negated(cs, uf); // of we access in bounds then it's 0
     let grow_aux_heap =
         Boolean::multi_and(cs, &[forwarding_data.use_aux_heap, execute, is_far_return]);
@@ -265,7 +265,7 @@ where
 
     // subtract
 
-    let (ergs_left_after_growth, uf, _) = preliminary_ergs_left.overflowing_sub(cs, growth_cost);
+    let (ergs_left_after_growth, uf) = preliminary_ergs_left.overflowing_sub(cs, growth_cost);
 
     let mut non_local_frame_exceptions = ArrayVec::<Boolean<F>, 4>::new();
     non_local_frame_exceptions.push(exceptions_collapsed);
@@ -288,7 +288,7 @@ where
 
     // -----------------------------------------
 
-    let (new_ergs_left, _) =
+    let new_ergs_left =
         ergs_left_after_growth.add_no_overflow(cs, new_callstack_entry.ergs_remaining);
 
     new_callstack_entry.ergs_remaining = new_ergs_left;
@@ -337,7 +337,7 @@ where
         Num::conditionally_enforce_equal(cs, perform_revert, a, b);
     }
 
-    let (new_forward_queue_len_if_revert, _) = draft_vm_state
+    let new_forward_queue_len_if_revert = draft_vm_state
         .callstack
         .current_context
         .log_queue_forward_part_length
@@ -355,7 +355,7 @@ where
         Num::conditionally_enforce_equal(cs, should_perform_ret_ok, a, b);
     }
 
-    let (new_rollback_queue_len_if_ok, _) = new_callstack_entry
+    let new_rollback_queue_len_if_ok = new_callstack_entry
         .reverted_queue_segment_len
         .add_no_overflow(cs, current_callstack_entry.reverted_queue_segment_len);
 
