@@ -4,7 +4,6 @@ use super::*;
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
 use boojum::gadgets::{
-    poseidon::CircuitRoundFunction,
     traits::{selectable::Selectable, allocatable::{CSAllocatableExt}},
     num::Num,
     boolean::Boolean,
@@ -13,6 +12,7 @@ use boojum::gadgets::{
     u256::UInt256,
     u8::UInt8
 };
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use crate::fsm_input_output::{ClosedFormInputCompactForm, commit_variable_length_encodable_item};
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::base_structures::log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH};
@@ -522,7 +522,7 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
         let b_uint32 = unsafe {
             UInt32::from_variable_unchecked(b.get_variable())
         };
-        let (diff, borrow, _) = a_uint32.overflowing_sub_with_borrow_in(cs, b_uint32, previous_borrow);
+        let (diff, borrow) = a_uint32.overflowing_sub_with_borrow_in(cs, b_uint32, previous_borrow);
         let equal = diff.is_zero(cs);
         limbs_are_equal.push(equal);
         previous_borrow = borrow;

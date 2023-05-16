@@ -263,7 +263,7 @@ impl<F: SmallField> MemoryValue<F> {
         let [l0, l1, l2, l3, l4, l5, l6, l7, b] = outputs;
 
         let chunks =
-            [l0, l1, l2, l3, l4, l5, l6, l7].map(|el| UInt32::from_variable_checked(cs, el).0);
+            [l0, l1, l2, l3, l4, l5, l6, l7].map(|el| UInt32::from_variable_checked(cs, el));
         let is_ptr = Boolean::from_variable_checked(cs, b);
 
         Self {
@@ -297,7 +297,7 @@ impl<F: SmallField> MemoryValue<F> {
             );
         }
 
-        let chunks = outputs.map(|el| UInt32::from_variable_checked(cs, el).0);
+        let chunks = outputs.map(|el| UInt32::from_variable_checked(cs, el));
         let is_ptr = Boolean::allocated_constant(cs, false);
 
         Self {

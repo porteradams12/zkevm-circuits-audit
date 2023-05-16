@@ -148,7 +148,7 @@ pub(crate) fn enforce_mul_relation<F: SmallField, CS: ConstraintSystem<F>>(
             }
             // place end of chain
             if a_idx + 8 < 16 {
-                partial_result[a_idx+8] = partial_result[a_idx+8].add_no_overflow(cs, intermidiate_overflow).0;
+                partial_result[a_idx+8] = partial_result[a_idx+8].add_no_overflow(cs, intermidiate_overflow);
             } else {
                 let zero_num = Num::zero(cs);
                 Num::enforce_equal(cs, &zero_num, &intermidiate_overflow.into_num());

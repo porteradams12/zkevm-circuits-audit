@@ -65,7 +65,7 @@ pub struct PendingSponge<F: SmallField> {
 
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use crate::base_structures::vm_state::VmLocalState;
 
 // create a draft candidate for next VM state, as well as all the data required for
@@ -110,7 +110,7 @@ pub fn create_prestate<
 
     let one_u16 = UInt16::allocated_constant(cs, 1);
 
-    let (pc_plus_one, _, _) = current_pc.overflowing_add(cs, &one_u16);
+    let (pc_plus_one, _) = current_pc.overflowing_add(cs, &one_u16);
 
     let (super_pc, subpc_spread) = split_pc(cs, current_pc);
     let previous_super_pc = current_state.previous_super_pc;

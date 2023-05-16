@@ -23,7 +23,7 @@ use std::sync::{Arc, RwLock};
 use boojum::pairing::{CurveAffine, GenericCurveProjective};
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::queue::QueueState;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use crate::base_structures::log_query::*;
@@ -215,7 +215,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         };
 
         // we can fill the buffer as soon as it's length <= MAX - NEW_WORDS_PER_CYCLE
-        let (_, of, _) = initial_buffer_len.overflowing_sub(
+        let (_, of) = initial_buffer_len.overflowing_sub(
             cs,
             &buffer_len_bound,
         );

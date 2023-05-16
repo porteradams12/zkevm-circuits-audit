@@ -75,7 +75,7 @@ pub fn perform_initial_decoding<F: SmallField, CS: ConstraintSystem<F>>(
         );
     }
 
-    let (ergs_left, out_of_ergs_exception, _) = ergs_left.overflowing_sub(cs, masked_ergs_cost);
+    let (ergs_left, out_of_ergs_exception) = ergs_left.overflowing_sub(cs, masked_ergs_cost);
     let ergs_left = ergs_left.mask_negated(cs, out_of_ergs_exception); // it's 0 if we underflow
 
     let requires_kernel_mode = aux_bools[zkevm_opcode_defs::KERNER_MODE_FLAG_IDX];

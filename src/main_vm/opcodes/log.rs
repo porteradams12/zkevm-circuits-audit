@@ -10,7 +10,7 @@ use crate::base_structures::{
 
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::main_vm::opcodes::log::log_query::LogQueryWitness;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
@@ -142,7 +142,7 @@ pub(crate) fn apply_log<
 
     let l1_message_pubdata_bytes_constnt =
         UInt32::allocated_constant(cs, L1_MESSAGE_PUBDATA_BYTES as u32);
-    let (ergs_to_burn_for_l1_message, _) = draft_vm_state
+    let ergs_to_burn_for_l1_message = draft_vm_state
         .ergs_per_pubdata_byte
         .non_widening_mul(cs, &l1_message_pubdata_bytes_constnt);
 
@@ -219,7 +219,7 @@ pub(crate) fn apply_log<
     dependencies.push(should_apply.get_variable().into());
     dependencies.extend(Place::from_variables(log.flatten_as_variables()));
 
-    let (pubdata_refund, _) = UInt32::allocate_from_closure_and_dependencies(
+    let pubdata_refund = UInt32::allocate_from_closure_and_dependencies(
         cs,
         move |inputs: &[F]| {
             let is_write = inputs[0].as_u64();
@@ -243,9 +243,9 @@ pub(crate) fn apply_log<
 
     let initial_storage_write_pubdata_bytes =
         UInt32::allocated_constant(cs, INITIAL_STORAGE_WRITE_PUBDATA_BYTES as u32);
-    let (net_cost, _) = initial_storage_write_pubdata_bytes.sub_no_overflow(cs, pubdata_refund);
+    let net_cost = initial_storage_write_pubdata_bytes.sub_no_overflow(cs, pubdata_refund);
 
-    let (ergs_to_burn_for_rollup_storage_write, _) = draft_vm_state
+    let ergs_to_burn_for_rollup_storage_write = draft_vm_state
         .ergs_per_pubdata_byte
         .non_widening_mul(cs, &net_cost);
 
@@ -271,7 +271,7 @@ pub(crate) fn apply_log<
         &ergs_to_burn,
     );
 
-    let (ergs_remaining, uf, _) = opcode_carry_parts
+    let (ergs_remaining, uf) = opcode_carry_parts
         .preliminary_ergs_left
         .overflowing_sub(cs, ergs_to_burn);
     let not_enough_ergs_for_op = uf;
@@ -530,7 +530,7 @@ fn construct_hash_relations_for_log_and_new_queue_states<
         current_state[11],
     ];
 
-    use boojum::gadgets::poseidon::simulate_round_function;
+    use boojum::gadgets::round_function::simulate_round_function;
 
     let round_0_final =
         simulate_round_function::<_, _, 8, 12, 4, R>(cs, round_0_initial, *should_execute_either);

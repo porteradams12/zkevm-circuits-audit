@@ -31,7 +31,7 @@ use crate::base_structures::vm_state::{QUEUE_STATE_WIDTH, FULL_SPONGE_QUEUE_STAT
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::fsm_input_output::circuit_inputs::main_vm::VmCircuitWitness;
 use crate::main_vm::witness_oracle::{WitnessOracle, SynchronizedWitnessOracle};
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use crate::base_structures::log_query::LogQuery;
 use crate::base_structures::decommit_query::DecommitQuery;
@@ -203,14 +203,6 @@ where
 
     structured_input.observable_output = observable_output;
     structured_input.hidden_fsm_output = final_state;
-
-    // if let Some(circuit_result) = (structured_input.witness_hook(&*cs))() {
-    //     let comparison_lines = <VmLocalState<F> as PrettyComparison<F>>::find_diffs(&circuit_result.hidden_fsm_output, &closed_form_input.hidden_fsm_output);
-    //     if comparison_lines.is_empty() == false {
-    //         panic!("{}", comparison_lines.join("\n"));
-    //     }
-    //     assert_eq!(circuit_result, closed_form_input);
-    // }
 
     // if we generate witness then we can self-check 
     if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
