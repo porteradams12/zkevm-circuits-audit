@@ -101,8 +101,11 @@ use boojum::gadgets::queue::full_state_queue::{
     FullStateCircuitQueueWitness,
 };
 
-pub type RecursionQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
+pub type RecursionQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
     FullStateCircuitQueue<F, RecursionQuery<F>, AW, SW, CW, RECURSION_QUERY_PACKED_WIDTH, R>;
+
+pub type RecursionQueue<F, R> =
+    RecursionQueryQueue<F, 8, 12, 4, R>;
 
 pub type RecursionQueueWitness<F, const SW: usize> =
     FullStateCircuitQueueWitness<F, RecursionQuery<F>, SW, RECURSION_QUERY_PACKED_WIDTH>;

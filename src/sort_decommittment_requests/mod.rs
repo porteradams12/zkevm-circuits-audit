@@ -90,7 +90,7 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &initial_queue_from_passthrough_state,
         &initial_log_queue_state_from_fsm_state,
     );
-    let mut initial_queue = DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, state);
+    let mut initial_queue = DecommitQueue::<F, R>::from_state(cs, state);
 
     // passthrough must be trivial
     initial_queue_from_passthrough_state.enforce_trivial_head(cs);
@@ -129,7 +129,7 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &intermediate_sorted_queue_from_passthrough_state,
         &intermediate_sorted_queue_from_fsm_input_state
     );
-    let mut intermediate_sorted_queue = DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, state);
+    let mut intermediate_sorted_queue = DecommitQueue::<F, R>::from_state(cs, state);
 
     let sorted_queue_witness = FullStateCircuitQueueWitness::from_inner_witness(sorted_queue_witness);
     intermediate_sorted_queue.witness = Arc::new(sorted_queue_witness);
@@ -153,7 +153,7 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &empty_state,
         &final_sorted_queue_from_fsm_state,
     );
-    let mut final_sorted_queue = DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, state);
+    let mut final_sorted_queue = DecommitQueue::<F, R>::from_state(cs, state);
 
     let challenges = crate::utils::produce_fs_challenges::<F, CS, R, FULL_SPONGE_QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
         cs, 
@@ -266,9 +266,9 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
-    original_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
-    sorted_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
-    result_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
+    original_queue: &mut DecommitQueue<F, R>,
+    sorted_queue: &mut DecommitQueue<F, R>,
+    result_queue: &mut DecommitQueue<F, R>,
     mut lhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut rhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],

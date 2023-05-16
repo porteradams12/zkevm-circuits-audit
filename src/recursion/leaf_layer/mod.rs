@@ -89,7 +89,7 @@ where
         queue_state,
     } = input;
     let mut queue = 
-        RecursionQueue::<F, 8, 12, 4, R>::from_state(cs, queue_state);
+        RecursionQueue::<F, R>::from_state(cs, queue_state);
 
     let RecursionLeafParameters { circuit_type, vk_commitment } = params;
 
@@ -118,10 +118,9 @@ where
     // use this and deal with borrow checker
 
     let r = cs as *mut CS;
-    let tmp_cs = unsafe {&mut *r};
 
     let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
-        tmp_cs, 
+        cs,
         vk_fixed_parameters.parameters, 
         vk_fixed_parameters.lookup_parameters,
     );
@@ -130,6 +129,8 @@ where
 
     let builder = circuit_placeholder.configure_builder(builder);
     let verifier = builder.build(());
+
+    let cs = unsafe {&mut *r};
 
     for _ in 0..capacity {
         let witness = proof_witnesses.pop_front().unwrap_or(padding_proof.clone());

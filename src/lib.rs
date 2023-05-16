@@ -26,6 +26,7 @@ pub mod storage_validity_by_grand_product;
 pub mod tables;
 pub mod utils;
 pub mod recursion;
+pub mod scheduler;
 
 use boojum::pairing::ff;
 

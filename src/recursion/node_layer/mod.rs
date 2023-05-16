@@ -149,13 +149,12 @@ where
     // use this and deal with borrow checker
 
     let r = cs as *mut CS;
-    let tmp_cs = unsafe {&mut *r};
 
     assert_eq!(vk_fixed_parameters.parameters, C::geometry());
     assert_eq!(vk_fixed_parameters.lookup_parameters, C::lookup_parameters());
 
     let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
-        tmp_cs, 
+        cs,
         C::geometry(), 
         C::lookup_parameters(),
     );
@@ -164,6 +163,8 @@ where
 
     let builder = C::configure_builder(builder);
     let verifier = builder.build(());
+
+    let cs = unsafe {&mut *r};
 
     let subqueues = split_queue_state_into_n(
         cs,

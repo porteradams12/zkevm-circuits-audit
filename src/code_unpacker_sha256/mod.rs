@@ -82,7 +82,7 @@ where
     );
 
     let mut requests_queue = 
-        DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, requests_queue_state);
+        DecommitQueue::<F, R>::from_state(cs, requests_queue_state);
 
     use crate::code_unpacker_sha256::full_state_queue::FullStateCircuitQueueWitness;
     requests_queue.witness = Arc::new(
@@ -173,8 +173,8 @@ pub fn unpack_code_into_memory_inner<
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
-    memory_queue: &mut MemoryQueryQueue<F, 8, 12, 4, R>,
-    unpack_requests_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
+    memory_queue: &mut MemoryQueue<F, R>,
+    unpack_requests_queue: &mut DecommitQueue<F, R>,
     initial_state: CodeDecommittmentFSM<F>,
     code_word_witness: ConditionalWitnessAllocator::<F, UInt256<F>>,
     _round_function: &R,
