@@ -6,11 +6,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use ethereum_types::U256;
 use boojum::cs::Variable;
-
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
 use boojum::gadgets::{
-    poseidon::CircuitRoundFunction,
     traits::{
         selectable::Selectable, 
         allocatable::CSAllocatableExt, 
@@ -248,10 +247,10 @@ where
         let length_in_rounds = length_in_rounds.into_num().mul(cs, &half_num);
         // length is always a multiple of 2 since we decided so
 
-        let (length_in_rounds, _) = 
+        let length_in_rounds = 
             UInt16::from_variable_checked(cs, length_in_rounds.get_variable());
 
-        let (length_in_bits_may_be, _) = 
+        let length_in_bits_may_be = 
             unsafe {
                 UInt32::from_variable_unchecked(
                     length_in_words.get_variable()

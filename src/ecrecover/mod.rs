@@ -1,11 +1,11 @@
 use super::*;
+use arrayvec::ArrayVec;
 use crate::base_structures::log_query::*;
 use crate::base_structures::memory_query::*;
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
 use crate::demux_log_queue::StorageLogQueue;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::fsm_input_output::*;
-use arrayvec::ArrayVec;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::crypto_bigint::{Zero, U1024};
 use boojum::cs::gates::ConstantAllocatableCS;
@@ -18,12 +18,12 @@ use boojum::gadgets::keccak256::keccak256;
 use boojum::gadgets::non_native_field::implementations::*;
 use boojum::gadgets::non_native_field::traits::NonNativeField;
 use boojum::gadgets::num::Num;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
 use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u160::UInt160;
 use boojum::gadgets::u256::UInt256;
@@ -283,32 +283,32 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     let mut k2p =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
     
-    let k1_bits = k1.limbs.iter().map(|el| {
+    let k1_bits: Vec<_> = k1.limbs.iter().map(|el| {
         Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs)
     }).flatten().collect();
-    let k2_bits = k2.limbs.iter().map(|el| {
+    let k2_bits: Vec<_> = k2.limbs.iter().map(|el| {
         Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs)
     }).flatten().collect();
+    let bool_true = Boolean::allocated_constant(cs, true);
     k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
         let ((x, y), _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
-        // also needs cond selects
-        if k1.and(1) {
-            k1p.add_mixed(cs, &mut (point.x.clone(), point.y.clone()));
-        }
-        if k2.and(1) {
-            k2p.add_mixed(cs, &mut (point.x.clone(), point.y.clone()));
-        }
+    
+        let mut k1p_added = k1p.clone();
+        k1p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
+        let mut k2p_added = k2p.clone();
+        k2p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
+        
+        k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(cs, *k1, &k1p_added, &k1p);
+        k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(cs, k2, &k2p_added, &k2p);
         point.double(cs);
     });
 
-    // Also needs cond selects
-    if k1_neg {
-        k1p.negated(cs);
-    }
-    if k2_neg {
-        k2p.negated(cs);
-    }
+    let k1p_negated = k1p.negated(cs);
+    k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(cs, k1_neg, &k1p_negated, &k1p);
+    let k2p_negated = k2p.negated(cs);
+    k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(cs, k2_neg, &k2p_negated, &k2p);
 
+    // endomorphism
     k2p.x = k2p.x.mul(cs, &mut beta);
     k2p.convert_to_affine_or_default(cs, Secp256Affine::one());
     k1p.add_mixed(cs, &mut (k2p.x, k2p.y))
@@ -420,7 +420,6 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     for _ in 1..X_POWERS_ARR_LEN {
         let prev = t_powers.last_mut().unwrap();
         let next = prev.square(cs);
-        drop(prev);
         t_powers.push(next);
     }
 
@@ -636,7 +635,7 @@ where
             EcrecoverPrecompileCallParams::from_encoding(cs, request.key);
 
         let timestamp_to_use_for_read = request.timestamp;
-        let (timestamp_to_use_for_write, _) =
+        let timestamp_to_use_for_write =
             timestamp_to_use_for_read.add_no_overflow(cs, one_u32);
 
         Num::conditionally_enforce_equal(
@@ -681,8 +680,7 @@ where
 
             precompile_call_params.input_offset = precompile_call_params
                 .input_offset
-                .add_no_overflow(cs, one_u32)
-                .0;
+                .add_no_overflow(cs, one_u32);
         }
 
         let [message_hash_as_u256, v_as_u256, r_as_u256, s_as_u256] = read_values;
@@ -716,8 +714,7 @@ where
 
         precompile_call_params.output_offset = precompile_call_params
             .output_offset
-            .add_no_overflow(cs, one_u32)
-            .0;
+            .add_no_overflow(cs, one_u32);
 
         let _ = memory_queue.push(cs, success_query, should_process);
 

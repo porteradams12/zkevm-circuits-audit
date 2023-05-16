@@ -2,7 +2,7 @@ use boojum::gadgets::u160::UInt160;
 use boojum::gadgets::u256::{decompose_u256_as_u32x8, UInt256};
 use crate::base_structures::register::VMRegister;
 use crate::base_structures::vm_state::{FULL_SPONGE_QUEUE_STATE_WIDTH, QUEUE_STATE_WIDTH, VmLocalState};
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::base_structures::vm_state::callstack::FullExecutionContext;
 use crate::base_structures::vm_state::callstack::Callstack;

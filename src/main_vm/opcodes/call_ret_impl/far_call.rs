@@ -12,7 +12,7 @@ use crate::base_structures::{
 
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::poseidon::CircuitRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecordWitness;
@@ -26,6 +26,7 @@ use boojum::cs::traits::cs::DstBuffer;
 use crate::base_structures::decommit_query::DecommitQuery;
 use crate::base_structures::decommit_query::DecommitQueryWitness;
 use crate::main_vm::opcodes::call_ret_impl::far_call::log_query::LogQueryWitness;
+use boojum::gadgets::traits::allocatable::CSAllocatable;
 
 const FORCED_ERGS_FOR_MSG_VALUE_SIMUALTOR: bool = false;
 
@@ -52,7 +53,7 @@ pub(crate) struct FarCallData<F: SmallField> {
     pub(crate) new_memory_pages_counter: UInt32<F>,
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 
 pub(crate) struct FarCallPartialABI<F: SmallField> {
@@ -88,7 +89,7 @@ impl<F: SmallField> FarCallPartialABI<F> {
     }
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 
 pub(crate) struct CommonCallRetABI<F: SmallField> {
@@ -97,7 +98,7 @@ pub(crate) struct CommonCallRetABI<F: SmallField> {
     pub(crate) ptr_validation_data: PtrValidationData<F>,
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 
 pub(crate) struct CallRetForwardingMode<F: SmallField> {
@@ -106,7 +107,7 @@ pub(crate) struct CallRetForwardingMode<F: SmallField> {
     pub(crate) forward_fat_pointer: Boolean<F>,
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 pub(crate) struct FatPtrInABI<F: SmallField> {
     pub(crate) offset: UInt32<F>,
@@ -137,7 +138,7 @@ impl<F: SmallField> Selectable<F> for FatPtrInABI<F> {
     }
 }
 
-#[derive(Derivative)]
+#[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 pub(crate) struct PtrValidationData<F: SmallField> {
     pub(crate) generally_invalid: Boolean<F>, // common invariants
@@ -162,19 +163,12 @@ impl<F: SmallField> FatPtrInABI<F> {
 
         let non_zero_offset_if_should_be_fresh = Boolean::multi_and(cs, &[offset_is_non_zero, as_fresh]);
 
-        let (end_non_inclusive, out_of_bounds, _) = start.overflowing_add(cs, length);
-
-        // check that we do not have overflows in addressable range
-        let is_addresable = out_of_bounds.negated(cs);
+        let (end_non_inclusive, slice_u32_range_overflow) = start.overflowing_add(cs, length);
 
         // offset <= length, that captures the empty slice (0, 0)
-        let (_, uf, _) = length.overflowing_sub(cs, offset);
-        let is_in_bounds = uf.negated(cs);
+        let (_, is_invalid_as_slice) = length.overflowing_sub(cs, offset);
 
-        let is_out_of_bounds = is_in_bounds.negated(cs);
-        let is_non_addressable = is_addresable.negated(cs);
-
-        let ptr_is_invalid = Boolean::multi_or(cs, &[non_zero_offset_if_should_be_fresh, out_of_bounds, is_out_of_bounds, is_non_addressable]);
+        let ptr_is_invalid = Boolean::multi_or(cs, &[non_zero_offset_if_should_be_fresh, slice_u32_range_overflow, is_invalid_as_slice]);
 
         let offset = offset.mask_negated(cs, ptr_is_invalid);
         let page = page.mask_negated(cs, ptr_is_invalid);
@@ -190,7 +184,7 @@ impl<F: SmallField> FatPtrInABI<F> {
 
         let validation_data = PtrValidationData {
             generally_invalid: ptr_is_invalid,
-            is_non_addressable,
+            is_non_addressable: slice_u32_range_overflow,
         };
 
         (new, end_non_inclusive, validation_data)
@@ -220,8 +214,8 @@ impl<F: SmallField> FatPtrInABI<F> {
     pub(crate) fn readjust<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> Self {
         // if we have prevalidated everything, then we KNOW that "length + start" doesn't overflow and is within addressable bound,
         // and that offset < length, so overflows here can be ignored
-        let (new_start, _) = self.start.add_no_overflow(cs, self.offset);
-        let (new_length, _) = self.length.sub_no_overflow(cs, self.offset);
+        let new_start = self.start.add_no_overflow(cs, self.offset);
+        let new_length = self.length.sub_no_overflow(cs, self.offset);
 
         let zero_u32 = UInt32::zero(cs);
 
@@ -418,6 +412,13 @@ where
     far_call_abi.system_call =
         Boolean::multi_and(cs, &[far_call_abi.system_call, target_is_kernel]);
 
+    if crate::config::CIRCUIT_VERSOBE {
+        if execute.witness_hook(&*cs)().unwrap_or(false) {
+            dbg!(forwarding_data.witness_hook(&*cs)().unwrap());
+            dbg!(far_call_abi.witness_hook(&*cs)().unwrap());
+        }
+    }
+
     // the same as we use for LOG
     let timestamp_to_use_for_decommittment_request =
         common_opcode_state.timestamp_for_first_decommit_or_precompile_read;
@@ -426,7 +427,7 @@ where
     // increment next counter
     let new_base_page = draft_vm_state.memory_page_counter;
     let memory_pages_per_far_call = UInt32::allocated_constant(cs, NEW_MEMORY_PAGES_PER_FAR_CALL);
-    let (new_memory_pages_counter, _) = draft_vm_state
+    let new_memory_pages_counter = draft_vm_state
         .memory_page_counter
         .add_no_overflow(cs, memory_pages_per_far_call);
 
@@ -570,7 +571,7 @@ where
 
     // exceptions, along with `bytecode_hash_is_trivial` indicate whether we will or will decommit code
     // into memory, or will just use UNMAPPED_PAGE
-    let mut exceptions = ArrayVec::<Boolean<F>, 4>::new();
+    let mut exceptions = ArrayVec::<Boolean<F>, 5>::new();
     exceptions.push(code_format_exception);
     exceptions.push(call_now_in_construction_kernel);
 
@@ -582,6 +583,10 @@ where
     let fat_ptr_expected_exception =
         Boolean::multi_and(cs, &[forward_fat_pointer, src0_is_integer]);
     exceptions.push(fat_ptr_expected_exception);
+
+    // add pointer validation cases
+    exceptions.push(common_abi_parts.ptr_validation_data.generally_invalid);
+    exceptions.push(common_abi_parts.ptr_validation_data.is_non_addressable);
 
     let do_not_forward_ptr = forward_fat_pointer.negated(cs);
 
@@ -596,24 +601,7 @@ where
     // }
 
     let fat_ptr = common_abi_parts.fat_ptr;
-    let upper_bound = common_abi_parts.upper_bound;
-    // first mask to 0 if exceptions happened
-    let upper_bound = upper_bound.mask_negated(cs, exceptions_collapsed);
-    // then compute to penalize for out of memory access attemp
-    let memory_region_is_not_addressable = common_abi_parts.ptr_validation_data.is_non_addressable;
-
-    let fat_ptr = fat_ptr.mask_into_empty(cs, exceptions_collapsed);
-    // also mask upped bound since we do not recompute
-    let upper_bound = upper_bound.mask_negated(cs, exceptions_collapsed);
-    // and penalize if pointer is fresh and not addressable
-    let penalize_heap_overflow =
-        Boolean::multi_and(cs, &[memory_region_is_not_addressable, do_not_forward_ptr]);
-    let u32_max = UInt32::allocated_constant(cs, u32::MAX);
-
-    let upper_bound =
-        UInt32::conditionally_select(cs, penalize_heap_overflow, &u32_max, &upper_bound);
-
-    // now we can modify fat ptr that is prevalidated
+    // we readjust before heap resize
 
     let fat_ptr_adjusted_if_forward = fat_ptr.readjust(cs);
 
@@ -638,11 +626,37 @@ where
         &fat_ptr_for_heaps,
     );
 
-    // potentially pay for memory growth
+    // and mask in case of exceptions
+
+    let final_fat_ptr = final_fat_ptr.mask_into_empty(cs, exceptions_collapsed);
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if execute.witness_hook(&*cs)().unwrap_or(false) {
+            dbg!(final_fat_ptr.witness_hook(&*cs)().unwrap());
+        }
+    }
+
+    // now we can resize memory
+
+    let upper_bound = common_abi_parts.upper_bound;
+    // first mask to 0 if exceptions happened
+    let upper_bound = upper_bound.mask_negated(cs, exceptions_collapsed);
+    // then compute to penalize for out of memory access attemp
+    let memory_region_is_not_addressable = common_abi_parts.ptr_validation_data.is_non_addressable;
+
+    // and penalize if pointer is fresh and not addressable
+    let penalize_heap_overflow =
+        Boolean::multi_and(cs, &[memory_region_is_not_addressable, do_not_forward_ptr]);
+    let u32_max = UInt32::allocated_constant(cs, u32::MAX);
+
+    let upper_bound =
+        UInt32::conditionally_select(cs, penalize_heap_overflow, &u32_max, &upper_bound);
+
+    // potentially pay for memory growth for heap and aux heap
 
     let heap_max_accessed = upper_bound.mask(cs, forwarding_data.use_heap);
     let heap_bound = current_callstack_entry.heap_upper_bound;
-    let (mut heap_growth, uf, _) = heap_max_accessed.overflowing_sub(cs, heap_bound);
+    let (mut heap_growth, uf) = heap_max_accessed.overflowing_sub(cs, heap_bound);
     heap_growth = heap_growth.mask_negated(cs, uf); // if we access in bounds then it's 0
     let new_heap_upper_bound =
         UInt32::conditionally_select(cs, uf, &heap_bound, &heap_max_accessed);
@@ -650,7 +664,7 @@ where
 
     let aux_heap_max_accessed = upper_bound.mask(cs, forwarding_data.use_aux_heap);
     let aux_heap_bound = current_callstack_entry.aux_heap_upper_bound;
-    let (mut aux_heap_growth, uf, _) = aux_heap_max_accessed.overflowing_sub(cs, aux_heap_bound);
+    let (mut aux_heap_growth, uf) = aux_heap_max_accessed.overflowing_sub(cs, aux_heap_bound);
     aux_heap_growth = aux_heap_growth.mask_negated(cs, uf); // if we access in bounds then it's 0
     let new_aux_heap_upper_bound =
         UInt32::conditionally_select(cs, uf, &aux_heap_bound, &aux_heap_max_accessed);
@@ -666,7 +680,7 @@ where
     //     }
     // }
 
-    let (ergs_left_after_growth, uf, _) = opcode_carry_parts
+    let (ergs_left_after_growth, uf) = opcode_carry_parts
         .preliminary_ergs_left
         .overflowing_sub(cs, growth_cost);
 
@@ -710,13 +724,13 @@ where
         let additive_cost = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_ADDITIVE_COST);
         let max_pubdata_bytes = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_PUBDATA_BYTES_TO_PREPAY);
         
-        let (pubdata_cost, _) = max_pubdata_bytes.non_widening_mul(cs, &draft_vm_state.ergs_per_pubdata_byte);
-        let (cost, _) = pubdata_cost.add_no_overflow(cs, additive_cost);
+        let pubdata_cost = max_pubdata_bytes.non_widening_mul(cs, &draft_vm_state.ergs_per_pubdata_byte);
+        let cost = pubdata_cost.add_no_overflow(cs, additive_cost);
 
         cost.mask(cs, require_extra)
     };
 
-    let (ergs_left_after_extra_costs, uf, _) = ergs_left_after_growth
+    let (ergs_left_after_extra_costs, uf) = ergs_left_after_growth
         .overflowing_sub(cs, callee_stipend);
     let ergs_left_after_extra_costs = ergs_left_after_extra_costs.mask_negated(cs, uf); // if not enough - set to 0
     let callee_stipend = callee_stipend.mask_negated(cs, uf); // also set to 0 if we were not able to take it
@@ -758,6 +772,12 @@ where
     );
 
     let exception = Boolean::multi_or(cs, &[exception, not_enough_ergs_to_decommit]);
+
+    if crate::config::CIRCUIT_VERSOBE {
+        if execute.witness_hook(&*cs)().unwrap_or(false) {
+            dbg!(exception.witness_hook(&*cs)().unwrap());
+        }
+    }
 
     // on call-like path we continue the forward queue, but have to allocate the rollback queue state from witness
     let call_timestamp = draft_vm_state.timestamp;
@@ -805,12 +825,6 @@ where
 
     let (ergs_div_by_64, _) = preliminary_ergs_left.div_by_constant(cs, 64);
 
-    // if crate::config::CIRCUIT_VERSOBE {
-    //     if execute.witness_hook(&*cs)().unwrap() {
-    //         dbg!(ergs_div_by_64.witness_hook(&*cs)().unwrap());
-    //     }
-    // }
-
     let constant_63 = UInt32::allocated_constant(cs, 63);
     // NOTE: max passable is 63 / 64 * preliminary_ergs_left, that is itself u32, so it's safe to just
     // mul as field elements
@@ -824,9 +838,9 @@ where
     let leftover = unsafe { UInt32::from_variable_unchecked(leftover.get_variable()) };
     let ergs_to_pass = far_call_abi.ergs_passed;
 
-    let (remaining_from_max_passable, uf, _) = max_passable.overflowing_sub(cs, ergs_to_pass);
+    let (remaining_from_max_passable, uf) = max_passable.overflowing_sub(cs, ergs_to_pass);
     // this one can overflow IF one above underflows, but we are not interested in it's overflow value
-    let (leftover_and_remaining_if_no_uf, _of, _) =
+    let (leftover_and_remaining_if_no_uf, _of) =
         leftover.overflowing_add(cs, remaining_from_max_passable);
 
     let ergs_to_pass = UInt32::conditionally_select(cs, uf, &max_passable, &ergs_to_pass);
@@ -836,7 +850,7 @@ where
 
     let remaining_ergs_if_pass = remaining_for_this_context;
     let passed_ergs_if_pass = ergs_to_pass;
-    let (passed_ergs_if_pass, _) = passed_ergs_if_pass.add_no_overflow(cs, callee_stipend);
+    let passed_ergs_if_pass = passed_ergs_if_pass.add_no_overflow(cs, callee_stipend);
 
     current_callstack_entry.ergs_remaining = remaining_ergs_if_pass;
 
@@ -1260,7 +1274,7 @@ fn construct_hash_relations_code_hash_read<
         current_state[11],
     ];
 
-    use boojum::gadgets::poseidon::simulate_round_function;
+    use boojum::gadgets::round_function::simulate_round_function;
 
     let round_0_final =
         simulate_round_function::<_, _, 8, 12, 4, R>(cs, round_0_initial, boolean_true);
@@ -1388,10 +1402,10 @@ where
     let num_words_in_bytecode =
         unsafe { UInt32::from_variable_unchecked(num_words_in_bytecode.get_variable()) };
 
-    let (cost_of_decommittment, _) =
+    let cost_of_decommittment =
         cost_of_decommit_per_word.non_widening_mul(cs, &num_words_in_bytecode);
 
-    let (ergs_after_decommit_may_be, uf, _) =
+    let (ergs_after_decommit_may_be, uf) =
         ergs_remaining.overflowing_sub(cs, cost_of_decommittment);
 
     let not_enough_ergs_to_decommit = uf;
@@ -1435,7 +1449,7 @@ where
     ));
 
     // we always access witness, as even for writes we have to get a claimed read value!
-    let (suggested_page, _) = UInt32::allocate_from_closure_and_dependencies(
+    let suggested_page = UInt32::allocate_from_closure_and_dependencies(
         cs,
         move |inputs: &[F]| {
             let should_decommit = inputs[0].as_u64();
@@ -1489,7 +1503,7 @@ where
         current_decommittment_queue_tail[11].get_variable(),
     ];
 
-    use boojum::gadgets::poseidon::simulate_round_function;
+    use boojum::gadgets::round_function::simulate_round_function;
 
     // NOTE: since we do merged call/ret, we simulate proper relations here always,
     // because we will do join enforcement on call/ret

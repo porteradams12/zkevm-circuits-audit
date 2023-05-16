@@ -59,7 +59,6 @@ pub(crate) fn apply_add_sub<F: SmallField, CS: ConstraintSystem<F>>(
         &subtraction_result_unchecked,
     );
     let result = to_enforce.map(|el| UInt32::from_variable_checked(cs, el.get_variable()));
-    let result = result.map(|el| el.0);
 
     // now we need to enforce relation
     // we enforce a + b = c + 2^N * of,
