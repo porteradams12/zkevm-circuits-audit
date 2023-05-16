@@ -305,16 +305,9 @@ where
             &initial_state_uint32,
             &state.sha256_inner_state,
         );
-        state.length_in_bits = UInt32::conditionally_select(
-            cs,
-            state.state_get_from_queue,
-            &length_in_bits_may_be,
-            &state.length_in_bits,
-        );
 
         // we decommit if we either decommit or just got a new request
-        let t = state.state_decommit.or(cs, state.state_get_from_queue);
-        state.state_decommit = t;
+        state.state_decommit = state.state_decommit.or(cs, state.state_get_from_queue);
         state.state_get_from_queue = boolean_false;
 
         // even though it's not that useful, we will do it in a checked way for ease of witness
@@ -338,7 +331,10 @@ where
         let code_word_0_be_bytes = code_word_0.to_be_bytes(cs);
 
         // NOTE: we have to enforce a sequence of access to witness, so we always wait for code_word_0 to be resolved
-        let code_word_1 = code_word_witness.conditionally_allocate_biased(cs, process_second_word, code_word_0.inner[0].get_variable());
+        let code_word_1 = code_word_witness.conditionally_allocate_biased(
+            cs,
+            process_second_word,
+            code_word_0.inner[0].get_variable());
         let code_word_1_be_bytes = code_word_1.to_be_bytes(cs);
 
         // perform two writes. It's never a "pointer" type
@@ -483,4 +479,384 @@ fn decompose_uint32_to_uint16s<F: SmallField, CS: ConstraintSystem<F>>(
         UInt16::from_le_bytes(cs, [byte_0, byte_1]),
         UInt16::from_le_bytes(cs, [byte_2, byte_3])
     ]
+}
+
+#[cfg(test)]
+mod tests { 
+    use crate::base_structures::decommit_query;
+
+    use super::*;
+    use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
+    use boojum::cs::implementations::reference_cs::{
+        CSDevelopmentAssembly,
+    };
+    use boojum::cs::toolboxes::gate_config::{GatePlacementStrategy};
+    use boojum::cs::traits::configurable_cs::ConfigurableCS;
+    use boojum::cs::CSGeometry;
+    use boojum::cs::*;
+    use boojum::field::goldilocks::GoldilocksField;
+    use boojum::gadgets::tables::*;
+    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::worker::Worker;
+    use ethereum_types::{Address, U256};
+    use boojum::gadgets::u160::UInt160;
+    use boojum::gadgets::u256::UInt256;
+    use boojum::gadgets::u8::UInt8;
+    use boojum::gadgets::traits::allocatable::CSPlaceholder;
+    use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
+    type F = GoldilocksField;
+
+    #[test]
+    fn test_code_unpacker_inner() {
+        // Create a constraint system with proper configuration
+        let geometry = CSGeometry {
+            num_columns_under_copy_permutation: 100,
+            num_witness_columns: 0,
+            num_constant_columns: 8,
+            max_allowed_constraint_degree: 4,
+        };
+
+        let owned_cs = CSDevelopmentAssembly::<F, _, _>::new_for_geometry(
+            geometry,
+            1 << 26,
+            1 << 20
+        );
+
+        // let owned_cs = owned_cs.allow_lookup(
+        //     LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+        //         width: 3,
+        //         num_repetitions: 8,
+        //         share_table_id: true,
+        //     },
+        // );
+
+        let owned_cs = owned_cs.allow_lookup(
+            LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                width: 4,
+                num_repetitions: 8,
+                share_table_id: true,
+            },
+        );
+        let owned_cs = ConstantsAllocatorGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = BooleanConstraintGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = UIntXAddGate::<32>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = UIntXAddGate::<16>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = SelectionGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = ZeroCheckGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns,false);
+        let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
+        let owned_cs = NopGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
+
+        let mut owned_cs = owned_cs.freeze();
+
+        let table = create_maj4_table();
+        owned_cs.add_lookup_table::<Maj4Table, 4>(table);
+
+        let table = create_tri_xor_table();
+        owned_cs.add_lookup_table::<TriXor4Table, 4>(table);
+
+        let table = create_ch4_table();
+        owned_cs.add_lookup_table::<Ch4Table, 4>(table);
+
+        let table = create_4bit_chunk_split_table::<F, 1>();
+        owned_cs.add_lookup_table::<chunk4bits::Split4BitChunkTable::<1>, 4>(table);
+        let table = create_4bit_chunk_split_table::<F, 2>();
+        owned_cs.add_lookup_table::<chunk4bits::Split4BitChunkTable::<2>, 4>(table);
+
+        let cs = &mut owned_cs;
+
+        // Create inputs for the inner function
+        let execute = Boolean::allocated_constant(cs, true);
+        let mut memory_queue = MemoryQueryQueue::<F, 8, 12, 4, Poseidon2Goldilocks>::empty(cs);
+        let mut decommit_queue = DecommitQueue::<F, 8, 12, 4, Poseidon2Goldilocks>::empty(cs);
+
+
+        let decommit_queue_witness = create_request_queue_witness(cs);
+        for el in decommit_queue_witness {
+            decommit_queue.push(cs, el, execute);
+        }
+
+        let round_function = Poseidon2Goldilocks;
+        let limit = 16;
+
+        let default_state = CodeDecommittmentFSM::placeholder(cs);
+
+        let word_witness = create_witness_allocator(cs);
+
+        // Run the inner function
+        let final_state = unpack_code_into_memory_inner(
+            cs,
+            &mut memory_queue,
+            &mut decommit_queue,
+            default_state,
+            word_witness,
+            &round_function,
+            limit
+        );
+
+        // Check the corectness
+        cs.print_gate_stats();
+
+        cs.pad_and_shrink();
+        let worker = Worker::new();
+        assert!(owned_cs.check_if_satisfied(&worker));
+
+        dbg!(final_state);
+    }
+
+    fn create_witness_allocator<CS: ConstraintSystem<F>>(cs: &mut CS) -> ConditionalWitnessAllocator::<F, UInt256<F>> {
+        let str_witness = [
+            "1766847064778396883786768274127037193463854637992579046408942445291110457",
+            "20164191265753785488708351879363656296986696452890681959140868413",
+            "230371115084700836133063546338735802439952161310848373590933373335",
+            "315943403191476362254281516594763167672429992099855389200211772263",
+            "2588391838226565201098400008033996167521966238460106068954150751699824",
+            "211454133716954493758258064291659686758464834211097193222448873537",
+            "755661767828730679150831008859380024863962510235974769491784599863434",
+            "792722291272121268575835624931127487546448993321488813145330852157",
+            "422901469332729376614825971396751231447294514335432723148645467189",
+            "1725759105948670702159993994396013188152302135650842820951922845941817",
+            "14404925315129564325488546414599286071787685034596420832328728893",
+            "105318844962770555588522034545405007512793608572268457634281029689",
+            "809009025005867921013546649078805150441502566947026555373812841472317",
+            "105319039552922728847306638821735002815060289446290876141406257209",
+            "211036116403988059590520874377734556453268914677076498415914844236",
+            "1860236630555339893722514217592548129137355495764522944782381539722297",
+            "7764675265080516174154537029624996607702824353047648753753695920848961",
+            "166085834804801355241996194532094100761080533058945135475412415734372892697",
+            "210624740264657758079982132082095218827023230710668103574628597825",
+            "6588778667853837091013175373259869215603100833946083743887393845",
+            "970663392666895392257512002784069674802928967218673951998329152864412",
+            "107163641223087021704532235449659860614865516518490400358586646684",
+            "212475932891644255176568460416224004946153631397142661140395918382",
+            "2588266777670668978723371609412889835982022923910173388865216276661294",
+            "2588155298151653810924065765928146445685410508309586403046357418901504",
+            "53919893334301279589334030174039261347274288845081144962207220498432",
+            "1461501637330902918203684832716283019655932542975",
+            "432420386565659656852420866394968145599",
+            "432420386565659656852420866394968145600",
+            "35408467139433450592217433187231851964531694900788300625387963629091585785856",
+            "79228162514264337610723819524",
+            "4294967295",
+            "0",
+        ];
+
+        let code_words_witness = str_witness
+            .map(|el| {
+                U256::from_dec_str(el).unwrap()
+            });
+
+        let code_words_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
+            witness_source: Arc::new(RwLock::new(code_words_witness.into()))
+        };
+
+        code_words_allocator
+
+        // let mut unsorted_querie = vec![];
+        // let bool_false = Boolean::allocated_constant(cs, false);
+        // let bool_true = Boolean::allocated_constant(cs, true);
+        // let zero_8 = UInt8::allocated_constant(cs, 0);
+        // let one_8 = UInt8::allocated_constant(cs, 1);
+        // let zero_32 = UInt32::allocated_constant(cs, 0);
+
+        // let q = LogQuery::<F> {
+        //     address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
+        //     key: UInt256::allocated_constant(cs, U256::from_dec_str("962072674308").unwrap()),
+        //     read_value: UInt256::allocated_constant(
+        //         cs,
+        //         U256::from_dec_str(
+        //             "0",
+        //         )
+        //         .unwrap(),
+        //     ),
+        //     written_value: UInt256::allocated_constant(
+        //         cs,
+        //         U256::from_dec_str(
+        //             "32776",
+        //         )
+        //         .unwrap(),
+        //     ),
+        //     rw_flag: bool_true,
+        //     aux_byte: one_8,
+        //     rollback: bool_false,
+        //     is_service: bool_true,
+        //     shard_id: zero_8,
+        //     tx_number_in_block: zero_32,
+        //     timestamp: UInt32::allocated_constant(cs, 9441),
+        // };
+
+        // unsorted_querie.push(q);
+
+        // let q = LogQuery::<F> {
+        //     address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
+        //     key: UInt256::allocated_constant(cs, U256::from_dec_str("26331131646299181274004581916076390273434308111684230560370784413089286382145").unwrap()),
+        //     read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        //     written_value: UInt256::allocated_constant(cs, U256::from_dec_str("32769").unwrap()),
+        //     rw_flag: bool_true,
+        //     aux_byte: one_8,
+        //     rollback: bool_false,
+        //     is_service: bool_false,
+        //     shard_id: zero_8,
+        //     tx_number_in_block: zero_32,
+        //     timestamp: UInt32::allocated_constant(cs, 9597),
+        // };
+        // unsorted_querie.push(q);
+
+        // let q = LogQuery::<F> {
+        //     address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
+        //     key: UInt256::allocated_constant(cs, U256::from_dec_str("39698723498166066574330386068075452510013183019908537087846976369872031173837").unwrap()),
+        //     read_value: UInt256::allocated_constant(
+        //         cs,
+        //         U256::from_dec_str(
+        //             "0",
+        //         )
+        //         .unwrap(),
+        //     ),
+        //     written_value: UInt256::allocated_constant(
+        //         cs,
+        //         U256::from_dec_str(
+        //             "32",
+        //         )
+        //         .unwrap(),
+        //     ),
+        //     rw_flag: bool_true,
+        //     aux_byte: one_8,
+        //     rollback: bool_false,
+        //     is_service: bool_false,
+        //     shard_id: zero_8,
+        //     tx_number_in_block: zero_32,
+        //     timestamp: UInt32::allocated_constant(cs, 9677),
+        // };
+        // unsorted_querie.push(q);
+
+        // let q = LogQuery::<F> {
+        //     address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
+        //     key: UInt256::allocated_constant(cs, U256::from_dec_str("154").unwrap()),
+        //     read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+        //     written_value: UInt256::allocated_constant(cs, U256::from_dec_str("34572686050049115524117736286529744084162467349680365734578449291092091566196").unwrap()),
+        //     rw_flag: bool_true,
+        //     aux_byte: one_8,
+        //     rollback: bool_false,
+        //     is_service: bool_false,
+        //     shard_id: zero_8,
+        //     tx_number_in_block: zero_32,
+        //     timestamp: UInt32::allocated_constant(cs, 9725),
+        // };
+        // unsorted_querie.push(q);
+
+        // unsorted_querie
+    }
+
+    fn create_request_queue_witness<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<DecommitQuery<F>> {
+        let code_hash = 
+            U256::from_dec_str("452313746998214869734508634865817576060841700842481516984674100922521850987")
+            .unwrap();
+
+        let witness = DecommitQueryWitness::<F> {
+            code_hash,
+            page: 2368,
+            is_first: true,
+            timestamp: 40973,
+        };
+
+        let result = DecommitQuery::allocate(cs, witness);
+
+        vec![result]
+
+    //     let mut sorted_querie = vec![];
+    //     let bool_false = Boolean::allocated_constant(cs, false);
+    //     let bool_true = Boolean::allocated_constant(cs, true);
+    //     let zero_8 = UInt8::allocated_constant(cs, 0);
+    //     let one_8 = UInt8::allocated_constant(cs, 1);
+    //     let zero_32 = UInt32::allocated_constant(cs, 0);
+
+    //     let q = LogQuery::<F> {
+    //         address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
+    //         key: UInt256::allocated_constant(cs, U256::from_dec_str("962072674308").unwrap()),
+    //         read_value: UInt256::allocated_constant(
+    //             cs,
+    //             U256::from_dec_str(
+    //                 "0",
+    //             )
+    //             .unwrap(),
+    //         ),
+    //         written_value: UInt256::allocated_constant(
+    //             cs,
+    //             U256::from_dec_str(
+    //                 "32776",
+    //             )
+    //             .unwrap(),
+    //         ),
+    //         rw_flag: bool_true,
+    //         aux_byte: one_8,
+    //         rollback: bool_false,
+    //         is_service: bool_true,
+    //         shard_id: zero_8,
+    //         tx_number_in_block: zero_32,
+    //         timestamp: UInt32::allocated_constant(cs, 9441),
+    //     };
+
+    //     sorted_querie.push(q);
+
+    //     let q = LogQuery::<F> {
+    //         address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
+    //         key: UInt256::allocated_constant(cs, U256::from_dec_str("26331131646299181274004581916076390273434308111684230560370784413089286382145").unwrap()),
+    //         read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+    //         written_value: UInt256::allocated_constant(cs, U256::from_dec_str("32769").unwrap()),
+    //         rw_flag: bool_true,
+    //         aux_byte: one_8,
+    //         rollback: bool_false,
+    //         is_service: bool_false,
+    //         shard_id: zero_8,
+    //         tx_number_in_block: zero_32,
+    //         timestamp: UInt32::allocated_constant(cs, 9597),
+    //     };
+    //     sorted_querie.push(q);
+
+    //     let q = LogQuery::<F> {
+    //         address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
+    //         key: UInt256::allocated_constant(cs, U256::from_dec_str("39698723498166066574330386068075452510013183019908537087846976369872031173837").unwrap()),
+    //         read_value: UInt256::allocated_constant(
+    //             cs,
+    //             U256::from_dec_str(
+    //                 "0",
+    //             )
+    //             .unwrap(),
+    //         ),
+    //         written_value: UInt256::allocated_constant(
+    //             cs,
+    //             U256::from_dec_str(
+    //                 "32",
+    //             )
+    //             .unwrap(),
+    //         ),
+    //         rw_flag: bool_true,
+    //         aux_byte: one_8,
+    //         rollback: bool_false,
+    //         is_service: bool_false,
+    //         shard_id: zero_8,
+    //         tx_number_in_block: zero_32,
+    //         timestamp: UInt32::allocated_constant(cs, 9677),
+    //     };
+    //     sorted_querie.push(q);
+
+    //     let q = LogQuery::<F> {
+    //         address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
+    //         key: UInt256::allocated_constant(cs, U256::from_dec_str("154").unwrap()),
+    //         read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
+    //         written_value: UInt256::allocated_constant(cs, U256::from_dec_str("34572686050049115524117736286529744084162467349680365734578449291092091566196").unwrap()),
+    //         rw_flag: bool_true,
+    //         aux_byte: one_8,
+    //         rollback: bool_false,
+    //         is_service: bool_false,
+    //         shard_id: zero_8,
+    //         tx_number_in_block: zero_32,
+    //         timestamp: UInt32::allocated_constant(cs, 9725),
+    //     };
+    //     sorted_querie.push(q);
+
+    //     sorted_querie
+    }
 }
