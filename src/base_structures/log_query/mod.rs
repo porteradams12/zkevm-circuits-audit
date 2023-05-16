@@ -6,7 +6,7 @@ use boojum::gadgets::u256::{recompose_u256_as_u32x8, UInt256};
 use boojum::gadgets::u32::UInt32;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::traits::cs::DstBuffer;
-use boojum::cs::{Variable, Witness};
+use boojum::cs::Variable;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
 use boojum::gadgets::traits::castable::WitnessCastable;

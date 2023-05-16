@@ -110,7 +110,7 @@ pub fn create_prestate<
 
     let one_u16 = UInt16::allocated_constant(cs, 1);
 
-    let (pc_plus_one, _, _) = current_pc.overflowing_add(cs, &one_u16);
+    let (pc_plus_one, _) = current_pc.overflowing_add(cs, &one_u16);
 
     let (super_pc, subpc_spread) = split_pc(cs, current_pc);
     let previous_super_pc = current_state.previous_super_pc;

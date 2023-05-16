@@ -38,9 +38,9 @@ fn u64_as_u32x2_conditionally_increment<F: SmallField, CS: ConstraintSystem<F>>(
     should_increment: &Boolean<F>,
 ) -> [UInt32<F>; 2] {
     let one_u32 = UInt32::allocated_constant(cs, 1u32);
-    let (incremented_low, carry, _) = input[0].overflowing_add(cs, one_u32);
+    let (incremented_low, carry) = input[0].overflowing_add(cs, one_u32);
     let carry_as_u32 = unsafe { UInt32::from_variable_unchecked(carry.get_variable()) };
-    let (incremented_high, _) = input[1].add_no_overflow(cs, carry_as_u32);
+    let incremented_high = input[1].add_no_overflow(cs, carry_as_u32);
 
     let selected = Selectable::conditionally_select(
         cs,
