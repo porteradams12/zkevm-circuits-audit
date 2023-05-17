@@ -90,7 +90,6 @@ pub fn scheduler_function<
 F: SmallField,
 CS: ConstraintSystem<F> + 'static,
 R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-C: CircuitBuilder<F>,
 H: RecursiveTreeHasher<F, Num<F>>,
 EXT: FieldExtension<2, BaseField = F>,
 TR: RecursiveTranscript<F, CompatibleCap = <H::NonCircuitSimulator as TreeHasher<F>>::Output, CircuitReflection = CTR>,
@@ -101,6 +100,7 @@ POW: RecursivePoWRunner<F>,
     mut witness: SchedulerCircuitInstanceWitness<F, H, EXT>,
     round_function: &R,
     config: SchedulerConfig<F, H::NonCircuitSimulator, EXT>,
+    verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
     transcript_params: TR::TransciptParameters,
 )
 where 
@@ -745,19 +745,9 @@ where
     // create verifier
     let r = cs as *mut CS;
 
-    assert_eq!(config.vk_fixed_parameters.parameters, C::geometry());
-    assert_eq!(config.vk_fixed_parameters.lookup_parameters, C::lookup_parameters());
+    assert_eq!(config.vk_fixed_parameters.parameters, verifier_builder.geometry());
 
-    use boojum::gadgets::recursion::recursive_verifier_builder::CsRecursiveVerifierBuilder;
-    let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
-        cs,
-        C::geometry(),
-    );
-    use boojum::cs::cs_builder::new_builder;
-    let builder = new_builder::<_, F>(builder_impl);
-
-    let builder = C::configure_builder(builder);
-    let verifier = builder.build(());
+    let verifier = verifier_builder.create_recursive_verifier(cs);
 
     let cs = unsafe {&mut *r};
 

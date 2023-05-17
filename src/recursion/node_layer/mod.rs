@@ -64,7 +64,6 @@ pub fn node_layer_recursion_entry_point<
 F: SmallField,
 CS: ConstraintSystem<F> + 'static,
 R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-C: CircuitBuilder<F>,
 H: RecursiveTreeHasher<F, Num<F>>,
 EXT: FieldExtension<2, BaseField = F>,
 TR: RecursiveTranscript<F, CompatibleCap = <H::NonCircuitSimulator as TreeHasher<F>>::Output, CircuitReflection = CTR>,
@@ -75,6 +74,7 @@ POW: RecursivePoWRunner<F>,
     witness: RecursionNodeInstanceWitness<F, H, EXT>,
     round_function: &R,
     config: NodeLayerRecursionConfig<F, H::NonCircuitSimulator, EXT>,
+    verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
     transcript_params: TR::TransciptParameters,
 )
 where 
@@ -144,24 +144,24 @@ where
 
     let mut proof_witnesses = proof_witnesses;
 
-    use boojum::gadgets::recursion::recursive_verifier_builder::CsRecursiveVerifierBuilder;
-
     // use this and deal with borrow checker
 
     let r = cs as *mut CS;
 
-    assert_eq!(vk_fixed_parameters.parameters, C::geometry());
-    assert_eq!(vk_fixed_parameters.lookup_parameters, C::lookup_parameters());
+    assert_eq!(vk_fixed_parameters.parameters, verifier_builder.geometry());
 
-    let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
-        cs,
-        C::geometry(), 
-    );
-    use boojum::cs::cs_builder::new_builder;
-    let builder = new_builder::<_, F>(builder_impl);
+    let verifier = verifier_builder.create_recursive_verifier(cs);
 
-    let builder = C::configure_builder(builder);
-    let verifier = builder.build(());
+    // use boojum::gadgets::recursion::recursive_verifier_builder::CsRecursiveVerifierBuilder;
+    // let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
+    //     cs,
+    //     vk_fixed_parameters.parameters, 
+    // );
+    // use boojum::cs::cs_builder::new_builder;
+    // let builder = new_builder::<_, F>(builder_impl);
+
+    // let builder = e.configure_builder(builder);
+    // let verifier = builder.build(());
 
     let cs = unsafe {&mut *r};
 
