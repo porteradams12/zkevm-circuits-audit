@@ -522,14 +522,6 @@ mod tests {
             1 << 20
         );
 
-        // let owned_cs = owned_cs.allow_lookup(
-        //     LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
-        //         width: 3,
-        //         num_repetitions: 8,
-        //         share_table_id: true,
-        //     },
-        // );
-
         let owned_cs = owned_cs.allow_lookup(
             LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
                 width: 4,
@@ -597,6 +589,19 @@ mod tests {
         );
 
         // Check the corectness
+        let boolean_true = Boolean::allocated_constant(cs, true);
+        let no_decommits_left = decommit_queue.is_empty(cs);
+        no_decommits_left.conditionally_enforce_true(cs, boolean_true);
+
+        let final_memory_queue_state = compute_memory_queue_state(cs);
+        for (lhs, rhs) in final_memory_queue_state
+            .tail.tail.iter()
+            .zip(
+                memory_queue.tail.iter()
+            ) {
+                Num::enforce_equal(cs, lhs, rhs);
+            }
+
         cs.print_gate_stats();
 
         cs.pad_and_shrink();
@@ -605,7 +610,59 @@ mod tests {
     }
 
     fn create_witness_allocator<CS: ConstraintSystem<F>>(cs: &mut CS) -> ConditionalWitnessAllocator::<F, UInt256<F>> {
-        let str_witness = [
+        let code_words_witness = get_byte_code_witness();
+
+        let code_words_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
+            witness_source: Arc::new(RwLock::new(code_words_witness.into()))
+        };
+
+        code_words_allocator
+    }
+
+    fn create_request_queue_witness<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<DecommitQuery<F>> {
+        let code_hash = get_code_hash_witness();
+
+        let witness = DecommitQueryWitness::<F> {
+            code_hash,
+            page: 2368,
+            is_first: true,
+            timestamp: 40973,
+        };
+
+        let result = DecommitQuery::allocate(cs, witness);
+
+        vec![result]
+    }
+
+    fn compute_memory_queue_state<CS: ConstraintSystem<F>>(cs: &mut CS) -> QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH> {
+        let boolean_true = Boolean::allocate(cs, true);
+        let mut memory_queue = MemoryQueryQueue::<F, 8, 12, 4, Poseidon2Goldilocks>::empty(cs);
+
+        for (index, byte_code) in get_byte_code_witness().into_iter().enumerate() {
+            let code_word = byte_code;
+
+            let witness = MemoryQueryWitness::<F> {
+                timestamp: 40973,
+                memory_page: 2368,
+                index: index as u32,
+                rw_flag: true,
+                value: code_word,
+                is_ptr: false,
+            };
+
+            let mem_query = MemoryQuery::allocate(cs, witness);
+            memory_queue.push(cs, mem_query, boolean_true);
+        }
+
+        memory_queue.into_state()
+    }
+
+    fn get_code_hash_witness() -> U256 {
+        U256::from_dec_str("452313746998214869734508634865817576060841700842481516984674100922521850987").unwrap()
+    }
+
+    fn get_byte_code_witness() -> [U256; 33] {
+        [
             "1766847064778396883786768274127037193463854637992579046408942445291110457",
             "20164191265753785488708351879363656296986696452890681959140868413",
             "230371115084700836133063546338735802439952161310848373590933373335",
@@ -639,34 +696,8 @@ mod tests {
             "79228162514264337610723819524",
             "4294967295",
             "0",
-        ];
-
-        let code_words_witness = str_witness
-            .map(|el| {
-                U256::from_dec_str(el).unwrap()
-            });
-
-        let code_words_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
-            witness_source: Arc::new(RwLock::new(code_words_witness.into()))
-        };
-
-        code_words_allocator
-    }
-
-    fn create_request_queue_witness<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<DecommitQuery<F>> {
-        let code_hash = 
-            U256::from_dec_str("452313746998214869734508634865817576060841700842481516984674100922521850987")
-            .unwrap();
-
-        let witness = DecommitQueryWitness::<F> {
-            code_hash,
-            page: 2368,
-            is_first: true,
-            timestamp: 40973,
-        };
-
-        let result = DecommitQuery::allocate(cs, witness);
-
-        vec![result]
+        ].map(|el| {
+            U256::from_dec_str(el).unwrap()
+        })
     }
 }
