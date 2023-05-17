@@ -570,8 +570,7 @@ mod tests {
         // Create inputs for the inner function
         let execute = Boolean::allocated_constant(cs, true);
         let mut memory_queue = MemoryQueryQueue::<F, 8, 12, 4, Poseidon2Goldilocks>::empty(cs);
-        let mut decommit_queue = DecommitQueue::<F, 8, 12, 4, Poseidon2Goldilocks>::empty(cs);
-
+        let mut decommit_queue = DecommitQueue::<F, Poseidon2Goldilocks>::empty(cs);
 
         let decommit_queue_witness = create_request_queue_witness(cs);
         for el in decommit_queue_witness {
@@ -579,9 +578,10 @@ mod tests {
         }
 
         let round_function = Poseidon2Goldilocks;
-        let limit = 16;
+        let limit = 40;
 
-        let default_state = CodeDecommittmentFSM::placeholder(cs);
+        let mut starting_fsm_state = CodeDecommittmentFSM::placeholder(cs);
+        starting_fsm_state.state_get_from_queue = Boolean::allocated_constant(cs, true);
 
         let word_witness = create_witness_allocator(cs);
 
@@ -590,7 +590,7 @@ mod tests {
             cs,
             &mut memory_queue,
             &mut decommit_queue,
-            default_state,
+            starting_fsm_state,
             word_witness,
             &round_function,
             limit
@@ -602,8 +602,6 @@ mod tests {
         cs.pad_and_shrink();
         let worker = Worker::new();
         assert!(owned_cs.check_if_satisfied(&worker));
-
-        dbg!(final_state);
     }
 
     fn create_witness_allocator<CS: ConstraintSystem<F>>(cs: &mut CS) -> ConditionalWitnessAllocator::<F, UInt256<F>> {
@@ -653,100 +651,6 @@ mod tests {
         };
 
         code_words_allocator
-
-        // let mut unsorted_querie = vec![];
-        // let bool_false = Boolean::allocated_constant(cs, false);
-        // let bool_true = Boolean::allocated_constant(cs, true);
-        // let zero_8 = UInt8::allocated_constant(cs, 0);
-        // let one_8 = UInt8::allocated_constant(cs, 1);
-        // let zero_32 = UInt32::allocated_constant(cs, 0);
-
-        // let q = LogQuery::<F> {
-        //     address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
-        //     key: UInt256::allocated_constant(cs, U256::from_dec_str("962072674308").unwrap()),
-        //     read_value: UInt256::allocated_constant(
-        //         cs,
-        //         U256::from_dec_str(
-        //             "0",
-        //         )
-        //         .unwrap(),
-        //     ),
-        //     written_value: UInt256::allocated_constant(
-        //         cs,
-        //         U256::from_dec_str(
-        //             "32776",
-        //         )
-        //         .unwrap(),
-        //     ),
-        //     rw_flag: bool_true,
-        //     aux_byte: one_8,
-        //     rollback: bool_false,
-        //     is_service: bool_true,
-        //     shard_id: zero_8,
-        //     tx_number_in_block: zero_32,
-        //     timestamp: UInt32::allocated_constant(cs, 9441),
-        // };
-
-        // unsorted_querie.push(q);
-
-        // let q = LogQuery::<F> {
-        //     address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
-        //     key: UInt256::allocated_constant(cs, U256::from_dec_str("26331131646299181274004581916076390273434308111684230560370784413089286382145").unwrap()),
-        //     read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
-        //     written_value: UInt256::allocated_constant(cs, U256::from_dec_str("32769").unwrap()),
-        //     rw_flag: bool_true,
-        //     aux_byte: one_8,
-        //     rollback: bool_false,
-        //     is_service: bool_false,
-        //     shard_id: zero_8,
-        //     tx_number_in_block: zero_32,
-        //     timestamp: UInt32::allocated_constant(cs, 9597),
-        // };
-        // unsorted_querie.push(q);
-
-        // let q = LogQuery::<F> {
-        //     address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
-        //     key: UInt256::allocated_constant(cs, U256::from_dec_str("39698723498166066574330386068075452510013183019908537087846976369872031173837").unwrap()),
-        //     read_value: UInt256::allocated_constant(
-        //         cs,
-        //         U256::from_dec_str(
-        //             "0",
-        //         )
-        //         .unwrap(),
-        //     ),
-        //     written_value: UInt256::allocated_constant(
-        //         cs,
-        //         U256::from_dec_str(
-        //             "32",
-        //         )
-        //         .unwrap(),
-        //     ),
-        //     rw_flag: bool_true,
-        //     aux_byte: one_8,
-        //     rollback: bool_false,
-        //     is_service: bool_false,
-        //     shard_id: zero_8,
-        //     tx_number_in_block: zero_32,
-        //     timestamp: UInt32::allocated_constant(cs, 9677),
-        // };
-        // unsorted_querie.push(q);
-
-        // let q = LogQuery::<F> {
-        //     address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
-        //     key: UInt256::allocated_constant(cs, U256::from_dec_str("154").unwrap()),
-        //     read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
-        //     written_value: UInt256::allocated_constant(cs, U256::from_dec_str("34572686050049115524117736286529744084162467349680365734578449291092091566196").unwrap()),
-        //     rw_flag: bool_true,
-        //     aux_byte: one_8,
-        //     rollback: bool_false,
-        //     is_service: bool_false,
-        //     shard_id: zero_8,
-        //     tx_number_in_block: zero_32,
-        //     timestamp: UInt32::allocated_constant(cs, 9725),
-        // };
-        // unsorted_querie.push(q);
-
-        // unsorted_querie
     }
 
     fn create_request_queue_witness<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<DecommitQuery<F>> {
@@ -764,99 +668,5 @@ mod tests {
         let result = DecommitQuery::allocate(cs, witness);
 
         vec![result]
-
-    //     let mut sorted_querie = vec![];
-    //     let bool_false = Boolean::allocated_constant(cs, false);
-    //     let bool_true = Boolean::allocated_constant(cs, true);
-    //     let zero_8 = UInt8::allocated_constant(cs, 0);
-    //     let one_8 = UInt8::allocated_constant(cs, 1);
-    //     let zero_32 = UInt32::allocated_constant(cs, 0);
-
-    //     let q = LogQuery::<F> {
-    //         address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
-    //         key: UInt256::allocated_constant(cs, U256::from_dec_str("962072674308").unwrap()),
-    //         read_value: UInt256::allocated_constant(
-    //             cs,
-    //             U256::from_dec_str(
-    //                 "0",
-    //             )
-    //             .unwrap(),
-    //         ),
-    //         written_value: UInt256::allocated_constant(
-    //             cs,
-    //             U256::from_dec_str(
-    //                 "32776",
-    //             )
-    //             .unwrap(),
-    //         ),
-    //         rw_flag: bool_true,
-    //         aux_byte: one_8,
-    //         rollback: bool_false,
-    //         is_service: bool_true,
-    //         shard_id: zero_8,
-    //         tx_number_in_block: zero_32,
-    //         timestamp: UInt32::allocated_constant(cs, 9441),
-    //     };
-
-    //     sorted_querie.push(q);
-
-    //     let q = LogQuery::<F> {
-    //         address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
-    //         key: UInt256::allocated_constant(cs, U256::from_dec_str("26331131646299181274004581916076390273434308111684230560370784413089286382145").unwrap()),
-    //         read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
-    //         written_value: UInt256::allocated_constant(cs, U256::from_dec_str("32769").unwrap()),
-    //         rw_flag: bool_true,
-    //         aux_byte: one_8,
-    //         rollback: bool_false,
-    //         is_service: bool_false,
-    //         shard_id: zero_8,
-    //         tx_number_in_block: zero_32,
-    //         timestamp: UInt32::allocated_constant(cs, 9597),
-    //     };
-    //     sorted_querie.push(q);
-
-    //     let q = LogQuery::<F> {
-    //         address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
-    //         key: UInt256::allocated_constant(cs, U256::from_dec_str("39698723498166066574330386068075452510013183019908537087846976369872031173837").unwrap()),
-    //         read_value: UInt256::allocated_constant(
-    //             cs,
-    //             U256::from_dec_str(
-    //                 "0",
-    //             )
-    //             .unwrap(),
-    //         ),
-    //         written_value: UInt256::allocated_constant(
-    //             cs,
-    //             U256::from_dec_str(
-    //                 "32",
-    //             )
-    //             .unwrap(),
-    //         ),
-    //         rw_flag: bool_true,
-    //         aux_byte: one_8,
-    //         rollback: bool_false,
-    //         is_service: bool_false,
-    //         shard_id: zero_8,
-    //         tx_number_in_block: zero_32,
-    //         timestamp: UInt32::allocated_constant(cs, 9677),
-    //     };
-    //     sorted_querie.push(q);
-
-    //     let q = LogQuery::<F> {
-    //         address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32781)),
-    //         key: UInt256::allocated_constant(cs, U256::from_dec_str("154").unwrap()),
-    //         read_value: UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap()),
-    //         written_value: UInt256::allocated_constant(cs, U256::from_dec_str("34572686050049115524117736286529744084162467349680365734578449291092091566196").unwrap()),
-    //         rw_flag: bool_true,
-    //         aux_byte: one_8,
-    //         rollback: bool_false,
-    //         is_service: bool_false,
-    //         shard_id: zero_8,
-    //         tx_number_in_block: zero_32,
-    //         timestamp: UInt32::allocated_constant(cs, 9725),
-    //     };
-    //     sorted_querie.push(q);
-
-    //     sorted_querie
     }
 }
