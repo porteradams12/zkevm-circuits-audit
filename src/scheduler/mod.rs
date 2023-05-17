@@ -82,8 +82,6 @@ pub const QUEUE_FINAL_STATE_COMMITMENT_LENGTH: usize = 4;
 pub struct SchedulerConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
     pub proof_config: ProofConfig,
     pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
-    pub leaf_layer_capacity: usize,
-    pub node_layer_capacity: usize,
     pub padding_proof: Proof<F, H, EXT>,
     pub capacity: usize,
 }
@@ -547,40 +545,40 @@ where
     // we can potentially skip some circuits
     let mut skip_flags = [None; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
     // we can skip everything except VM
-    skip_flags[BaseLayerCircuitType::DecommitmentsFilter as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::DecommitmentsFilter as u8 as usize) - 1] = Some(
         decommittments_sorter_circuit_input.initial_queue_state.tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::Decommiter as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::Decommiter as u8 as usize) - 1] = Some(
         code_decommitter_circuit_input.sorted_requests_queue_initial_state.tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::LogDemultiplexer as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::LogDemultiplexer as u8 as usize) - 1] = Some(
         log_demux_circuit_input.initial_log_queue_state.tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::KeccakPrecompile as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::KeccakPrecompile as u8 as usize) - 1] = Some(
         log_demuxer_observable_output.keccak256_access_queue_state.tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::Sha256Precompile as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::Sha256Precompile as u8 as usize) - 1] = Some(
         log_demuxer_observable_output.sha256_access_queue_state.tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::EcrecoverPrecompile as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::EcrecoverPrecompile as u8 as usize) - 1] = Some(
         log_demuxer_observable_output.ecrecover_access_queue_state.tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::RamValidation as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::RamValidation as u8 as usize) - 1] = Some(
         ram_validation_circuit_input.unsorted_queue_initial_state.tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::StorageFilter as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::StorageFilter as u8 as usize) - 1] = Some(
         storage_queues_state[0].tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::StorageApplicator as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::StorageApplicator as u8 as usize) - 1] = Some(
         filtered_storage_queues_state[0].tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::EventsRevertsFilter as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::EventsRevertsFilter as u8 as usize) - 1] = Some(
         log_demuxer_observable_output.events_access_queue_state.tail.length.is_zero(cs)
     );
-    skip_flags[BaseLayerCircuitType::L1MessagesRevertsFilter as u8 as usize] = Some(
+    skip_flags[(BaseLayerCircuitType::L1MessagesRevertsFilter as u8 as usize) - 1] = Some(
         log_demuxer_observable_output.l1messages_access_queue_state.tail.length.is_zero(cs)
     );
-    // skip_flags[BaseLayerCircuitType::L1MessagesHasher as u8 as usize] = Some(
+    // skip_flags[(BaseLayerCircuitType::L1MessagesHasher as u8 as usize) - 1] = Some(
     //     log_demuxer_observable_output.events_access_queue_state.tail.length.is_zero(cs)
     // );
 
