@@ -292,12 +292,10 @@ pub(crate) fn apply_mul_div<
     };
 
     let apply_any = Boolean::multi_or(cs, &[should_apply_mul, should_apply_div]);
-    let result_0 = result_0.map(|el| el.0);
     let dst0 = VMRegister {
         is_pointer: Boolean::allocated_constant(cs, false),
         value: UInt256 {inner: result_0}
     };
-    let result_1 = result_1.map(|el| el.0);
     let dst1 = VMRegister {
         is_pointer: Boolean::allocated_constant(cs, false),
         value: UInt256 {inner: result_1}

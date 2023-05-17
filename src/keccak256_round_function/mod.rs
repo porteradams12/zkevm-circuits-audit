@@ -215,7 +215,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         };
 
         // we can fill the buffer as soon as it's length <= MAX - NEW_WORDS_PER_CYCLE
-        let (_, of, _) = initial_buffer_len.overflowing_sub(
+        let (_, of) = initial_buffer_len.overflowing_sub(
             cs,
             &buffer_len_bound,
         );

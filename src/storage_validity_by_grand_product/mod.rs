@@ -329,13 +329,6 @@ where
     );
     let mut final_sorted_queue = StorageLogQueue::<F, R>::from_state(cs, state);
 
-    // we can always ensure this
-    UInt32::equals(
-        cs,
-        &unsorted_queue.length,
-        &intermediate_sorted_queue.length,
-    );
-
     // get challenges for permutation argument
     let challenges = crate::utils::produce_fs_challenges::<
         F,
@@ -562,6 +555,11 @@ where
 {
     assert!(limit <= u32::MAX as usize);
 
+    let unsorted_queue_length = Num::from_variable(original_queue.length.get_variable());
+    let intermediate_sorted_queue_length = Num::from_variable(intermediate_sorted_queue.length.get_variable());
+
+    Num::enforce_equal(cs,  &unsorted_queue_length, &intermediate_sorted_queue_length);
+
     // we can recreate it here, there are two cases:
     // - we are 100% empty, but it's the only circuit in this case
     // - otherwise we continue, and then it's not trivial
@@ -672,7 +670,7 @@ where
         previous_key_is_greater.conditionally_enforce_false(cs, not_item_is_trivial);
 
         // if keys are the same then timestamps are sorted
-        let (_, previous_timestamp_is_less, _) = previous_timestamp.overflowing_sub(cs, timestamp);
+        let (_, previous_timestamp_is_less) = previous_timestamp.overflowing_sub(cs, timestamp);
         // enforce if keys are the same and not trivial
         let must_enforce = keys_are_equal.and(cs, not_item_is_trivial);
         previous_timestamp_is_less.conditionally_enforce_true(cs, must_enforce);
@@ -812,7 +810,9 @@ where
             // check consistency
             let read_is_equal_to_current =
                 UInt256::equals(cs, &this_cell_current_value, &record.read_value);
-            read_is_equal_to_current.conditionally_enforce_true(cs, non_trivial_read_of_same_cell);
+            // we ALWAYS ensure read consistency on write (but not rollback) and on plain read
+            let check_read_consistency = Boolean::multi_or(cs, &[non_trivial_read_of_same_cell, write_no_rollback]);
+            read_is_equal_to_current.conditionally_enforce_true(cs, check_read_consistency);
 
             // decide to update
             this_cell_current_value = UInt256::conditionally_select(
@@ -958,7 +958,7 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
     let mut borrow = boolean_false;
 
     for i in 0..N {
-        let (diff, new_borrow, _) = b[i].overflowing_sub_with_borrow_in(cs, a[i], borrow);
+        let (diff, new_borrow) = b[i].overflowing_sub_with_borrow_in(cs, a[i], borrow);
         borrow = new_borrow;
         equals[i] = diff.is_zero(cs);
     }

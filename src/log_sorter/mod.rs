@@ -522,7 +522,7 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
         let b_uint32 = unsafe {
             UInt32::from_variable_unchecked(b.get_variable())
         };
-        let (diff, borrow, _) = a_uint32.overflowing_sub_with_borrow_in(cs, b_uint32, previous_borrow);
+        let (diff, borrow) = a_uint32.overflowing_sub_with_borrow_in(cs, b_uint32, previous_borrow);
         let equal = diff.is_zero(cs);
         limbs_are_equal.push(equal);
         previous_borrow = borrow;

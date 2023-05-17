@@ -122,7 +122,7 @@ pub(crate) fn apply_uma<
 
     let heap_max_accessed = max_accessed.mask(cs, access_heap);
     let heap_bound = draft_vm_state.callstack.current_context.saved_context.heap_upper_bound;
-    let (mut heap_growth, uf, _) =
+    let (mut heap_growth, uf) =
         heap_max_accessed.overflowing_sub(cs, heap_bound);
     heap_growth = heap_growth.mask_negated(cs, uf); // of we access in bounds then it's 0
     let new_heap_upper_bound =
@@ -131,7 +131,7 @@ pub(crate) fn apply_uma<
 
     let aux_heap_max_accessed = max_accessed.mask(cs, access_aux_heap);
     let aux_heap_bound = draft_vm_state.callstack.current_context.saved_context.aux_heap_upper_bound;
-    let (mut aux_heap_growth, uf, _) =
+    let (mut aux_heap_growth, uf) =
         aux_heap_max_accessed.overflowing_sub(cs, aux_heap_bound);
     aux_heap_growth = aux_heap_growth.mask_negated(cs, uf); // of we access in bounds then it's 0
     let new_aux_heap_upper_bound =
@@ -182,7 +182,7 @@ pub(crate) fn apply_uma<
     growth_cost =
         UInt32::conditionally_select(cs, exception_heap_deref_out_of_bounds, &uint32_max, &growth_cost);
 
-    let (ergs_left_after_growth, uf, _) = opcode_carry_parts
+    let (ergs_left_after_growth, uf) = opcode_carry_parts
         .preliminary_ergs_left
         .overflowing_sub(cs, growth_cost);
 
@@ -238,7 +238,7 @@ pub(crate) fn apply_uma<
     let a_cell_idx = cell_idx;
     let one_uint32 = UInt32::allocated_constant(cs, 1);
     // wrap around
-    let (b_cell_idx, _of, _) = a_cell_idx.overflowing_add(cs, one_uint32);
+    let (b_cell_idx, _of) = a_cell_idx.overflowing_add(cs, one_uint32);
 
     let a_memory_loc = MemoryLocation {
         page: mem_page,
@@ -964,7 +964,7 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
 
         // we need to check whether we will or not deref the fat pointer.
         // we only dereference if offset < length (or offset - length < 0)
-        let (_, offset_is_strictly_in_slice, _) = offset.overflowing_sub(cs, length);
+        let (_, offset_is_strictly_in_slice) = offset.overflowing_sub(cs, length);
         let offset_is_beyond_the_slice = offset_is_strictly_in_slice.negated(cs);
         let skip_if_legitimate_fat_ptr = Boolean::multi_and(cs, &[offset_is_beyond_the_slice, is_fat_ptr]);
 
@@ -972,12 +972,12 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
         let formal_start = start.mask(cs, is_fat_ptr); 
         // by prevalidating fat pointer we know that there is no overflow here,
         // so we ignore the information
-        let (absolute_address, _of, _) =
+        let (absolute_address, _of) =
             formal_start.overflowing_add(cs, offset);
 
         let u32_constant_32 = UInt32::allocated_constant(cs, 32);
 
-        let (incremented_offset, is_non_addressable, _) =
+        let (incremented_offset, is_non_addressable) =
             offset.overflowing_add(cs, u32_constant_32);
 
         // check that we agree in logic with out-of-circuit comparisons
@@ -1004,7 +1004,7 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
         );
 
         // only necessary for fat pointer deref: now many bytes we zero-out beyond the end of fat pointer
-        let (mut bytes_out_of_bound, uf, _) =
+        let (mut bytes_out_of_bound, uf) =
             incremented_offset.overflowing_sub(cs, length);
 
         bytes_out_of_bound = bytes_out_of_bound.mask_negated(cs, skip_memory_access);

@@ -129,7 +129,7 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
     let potentially_new_ergs_for_pubdata = common_opcode_state.src0_view.u32x8_view[0];
 
     let one_u32 = UInt32::allocated_constant(cs, 1);
-    let (incremented_tx_number, _of, _) = draft_vm_state
+    let (incremented_tx_number, _of) = draft_vm_state
         .tx_number_in_block
         .overflowing_add(cs, one_u32);
 
