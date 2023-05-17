@@ -50,7 +50,7 @@ use boojum::cs::implementations::prover::ProofConfig;
 use boojum::cs::oracle::TreeHasher;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::cs::traits::circuit::CircuitParametersForVerifier;
+use boojum::cs::traits::circuit::*;
 use boojum::gadgets::recursion::recursive_transcript::*;
 use boojum::gadgets::recursion::recursive_tree_hasher::*;
 use boojum::gadgets::recursion::circuit_pow::RecursivePoWRunner;
@@ -90,7 +90,7 @@ pub fn scheduler_function<
 F: SmallField,
 CS: ConstraintSystem<F> + 'static,
 R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-C: CircuitParametersForVerifier<F>,
+C: CircuitBuilder<F>,
 H: RecursiveTreeHasher<F, Num<F>>,
 EXT: FieldExtension<2, BaseField = F>,
 TR: RecursiveTranscript<F, CompatibleCap = <H::NonCircuitSimulator as TreeHasher<F>>::Output, CircuitReflection = CTR>,
@@ -751,8 +751,7 @@ where
     use boojum::gadgets::recursion::recursive_verifier_builder::CsRecursiveVerifierBuilder;
     let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
         cs,
-        C::geometry(), 
-        C::lookup_parameters(),
+        C::geometry(),
     );
     use boojum::cs::cs_builder::new_builder;
     let builder = new_builder::<_, F>(builder_impl);

@@ -122,7 +122,6 @@ where
     let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
         cs,
         vk_fixed_parameters.parameters, 
-        vk_fixed_parameters.lookup_parameters,
     );
     use boojum::cs::cs_builder::new_builder;
     let builder = new_builder::<_, F>(builder_impl);

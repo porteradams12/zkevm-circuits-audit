@@ -58,13 +58,13 @@ pub struct NodeLayerRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldE
     pub padding_proof: Proof<F, H, EXT>
 }
 
-use boojum::cs::traits::circuit::CircuitParametersForVerifier;
+use boojum::cs::traits::circuit::*;
 
 pub fn node_layer_recursion_entry_point<
 F: SmallField,
 CS: ConstraintSystem<F> + 'static,
 R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-C: CircuitParametersForVerifier<F>,
+C: CircuitBuilder<F>,
 H: RecursiveTreeHasher<F, Num<F>>,
 EXT: FieldExtension<2, BaseField = F>,
 TR: RecursiveTranscript<F, CompatibleCap = <H::NonCircuitSimulator as TreeHasher<F>>::Output, CircuitReflection = CTR>,
@@ -156,7 +156,6 @@ where
     let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
         cs,
         C::geometry(), 
-        C::lookup_parameters(),
     );
     use boojum::cs::cs_builder::new_builder;
     let builder = new_builder::<_, F>(builder_impl);
