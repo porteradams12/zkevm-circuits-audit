@@ -11,6 +11,7 @@ use crate::base_structures::{
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
+use boojum::gadgets::queue::queue_optimizer::SpongeOptimizer;
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
     boolean::Boolean,
@@ -220,6 +221,7 @@ pub fn demultiplex_storage_logs_inner<
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     assert!(limit <= u32::MAX as usize);
+    let mut optimizer = SpongeOptimizer::<F, R, 8, 12, 4, 7>::new(limit);
 
     let [
         rollup_storage_queue, 
@@ -276,28 +278,47 @@ pub fn demultiplex_storage_logs_inner<
         let execute_ecrecover_call =
             Boolean::multi_and(cs, &[is_precompile_aux_byte, is_ecrecover_address, execute]);
 
-        let bitmask = [
-            execute_rollup_storage,
-            execute_event,
-            execute_l1_message,
-            execute_keccak_call,
-            execute_sha256_call,
-            execute_ecrecover_call,
-        ];
-
-        // TODO: use optimizer
-        push_with_optimize(
-            cs,
-            [
-                rollup_storage_queue,
-                events_queue,
-                l1_messages_queue,
-                keccak_calls_queue,
-                sha256_calls_queue,
-                ecdsa_calls_queue,
-            ],
-            bitmask,
-            popped.0,
+        rollup_storage_queue.push_with_optimizer(
+            cs, 
+            popped.0, 
+            execute_rollup_storage, 
+            LogType::RollupStorage as usize, 
+            &mut optimizer
+        );
+        events_queue.push_with_optimizer(
+            cs, 
+            popped.0, 
+            execute_event, 
+            LogType::Events as usize, 
+            &mut optimizer
+        );
+        l1_messages_queue.push_with_optimizer(
+            cs, 
+            popped.0, 
+            execute_l1_message, 
+            LogType::L1Messages as usize, 
+            &mut optimizer
+        );
+        keccak_calls_queue.push_with_optimizer(
+            cs, 
+            popped.0, 
+            execute_keccak_call, 
+            LogType::KeccakCalls as usize, 
+            &mut optimizer
+        );
+        sha256_calls_queue.push_with_optimizer(
+            cs, 
+            popped.0, 
+            execute_sha256_call, 
+            LogType::Sha256Calls as usize, 
+            &mut optimizer
+        );
+        ecdsa_calls_queue.push_with_optimizer(
+            cs, 
+            popped.0, 
+            execute_ecrecover_call, 
+            LogType::ECRecoverCalls as usize, 
+            &mut optimizer
         );
 
         let expected_bitmask_bits = [
@@ -310,50 +331,8 @@ pub fn demultiplex_storage_logs_inner<
         let is_bitmask = check_if_bitmask_and_if_empty(cs, expected_bitmask_bits);
         is_bitmask.conditionally_enforce_true(cs, execute);
     }
-}
 
-pub fn push_with_optimize<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
-    EL: CircuitEncodableExt<F, N>,
-    const AW: usize,
-    const SW: usize,
-    const CW: usize,
-    const T: usize,
-    const N: usize,
-    R: CircuitRoundFunction<F, AW, SW, CW>,
-    const NUM_QUEUE: usize,
->(
-    cs: &mut CS,
-    mut queues: [&mut CircuitQueue<F, EL, AW, SW, CW, T, N, R>; NUM_QUEUE],
-    bitmask: [Boolean<F>; NUM_QUEUE],
-    value_encoding: EL,
-) where
-    [(); <EL as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-{
-    let mut states = queues.iter().map(|x| x.into_state());
-    let mut state = states.next().unwrap();
-
-    for (bit, next_state) in bitmask.iter().skip(1).zip(states) {
-        state = QueueState::conditionally_select(cs, *bit, &next_state, &state);
-    }
-
-    let mut exec_queue = CircuitQueue::<F, EL, AW, SW, CW, T, N, R>::from_raw_parts(
-        cs,
-        state.head,
-        state.tail.tail,
-        state.tail.length,
-    );
-
-    let boolean_true = Boolean::allocated_constant(cs, true);
-
-    exec_queue.push(cs, value_encoding, boolean_true);
-
-    for (bit, queue) in bitmask.into_iter().zip(queues.iter_mut()) {
-        queue.head = <[Num<F>; T]>::conditionally_select(cs, bit, &exec_queue.head, &queue.head);
-        queue.tail = <[Num<F>; T]>::conditionally_select(cs, bit, &exec_queue.tail, &queue.tail);
-        queue.length = UInt32::conditionally_select(cs, bit, &exec_queue.length, &queue.length);
-    }
+    optimizer.enforce(cs);
 }
 
 pub fn check_if_bitmask_and_if_empty<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(
