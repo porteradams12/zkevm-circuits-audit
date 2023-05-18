@@ -48,7 +48,7 @@ use boojum::field::FieldExtension;
 use boojum::cs::implementations::verifier::VerificationKeyCircuitGeometry;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug(bound = ""))]
 #[serde(bound = "H::Output: serde::Serialize + serde::de::DeserializeOwned")]
 pub struct NodeLayerRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
     pub proof_config: ProofConfig,
@@ -76,7 +76,7 @@ POW: RecursivePoWRunner<F>,
     config: NodeLayerRecursionConfig<F, H::NonCircuitSimulator, EXT>,
     verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
     transcript_params: TR::TransciptParameters,
-)
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
 where 
     [(); <RecursionQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
@@ -206,6 +206,8 @@ where
         let gate = PublicInputGate::new(el.get_variable());
         gate.add_to_cs(cs);
     }
+
+    input_commitment
 }
 
 pub(crate) fn split_first_n_from_queue_state<

@@ -939,10 +939,12 @@ mod test {
         assert_eq!(&recovered_address[12..], &eth_address[..]);
 
         dbg!(cs.next_available_row());
-        cs.print_gate_stats();
 
         cs.pad_and_shrink();
+
+        let mut cs = cs.into_assembly();
+        cs.print_gate_stats();
         let worker = Worker::new();
-        assert!(owned_cs.check_if_satisfied(&worker));
+        assert!(cs.check_if_satisfied(&worker));
     }
 }
