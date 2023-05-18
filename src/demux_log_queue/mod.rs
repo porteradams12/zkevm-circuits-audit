@@ -32,9 +32,7 @@ use crate::{
     fsm_input_output::{circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH, *},
 };
 
-use crate::base_structures::log_query::LogQueryQueue;
-
-pub type StorageLogQueue<F, R> = LogQueryQueue::<F, 8, 12, 4, R>;
+pub type StorageLogQueue<F, R> = CircuitQueue<F, LogQuery<F>, 8, 12, 4, 4, 20, R>;
 pub type StorageLogQueueWitness<F> = CircuitQueueWitness<F, LogQuery<F>, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH>;
 
 pub fn demultiplex_storage_logs_enty_point<

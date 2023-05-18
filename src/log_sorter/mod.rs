@@ -385,7 +385,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
             // decide if we should add the PREVIOUS into the queue
             // We add only if previous one is not trivial,
             // and it had a different key, and it wasn't rolled back
-            let negate_same_log = same_log.negated(cs);
+            let negate_same_log = same_log.and(cs, should_pop).negated(cs);
             let add_to_the_queue = Boolean::multi_and(
                 cs,
                 &[

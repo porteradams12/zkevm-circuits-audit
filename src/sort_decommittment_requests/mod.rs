@@ -256,10 +256,9 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     Num::enforce_equal(cs,  &unsorted_queue_length, &intermediate_sorted_queue_length);
 
     let no_work = original_queue.is_empty(cs);
-    // we can not have circuits that just do nothing
-    let bool_true = Boolean::allocated_constant(cs, true);
-    no_work.conditionally_enforce_false(cs, bool_true);
-    let mut previous_item_is_trivial = start_flag;
+    
+    no_work.conditionally_enforce_false(cs, start_flag);
+    let mut previous_item_is_trivial = no_work.or(cs, start_flag);
 
     // Simultaneously pop, prove sorting and resolve logic
 
