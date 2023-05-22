@@ -257,7 +257,6 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
 
     let no_work = original_queue.is_empty(cs);
     
-    no_work.conditionally_enforce_false(cs, start_flag);
     let mut previous_item_is_trivial = no_work.or(cs, start_flag);
 
     // Simultaneously pop, prove sorting and resolve logic
