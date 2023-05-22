@@ -52,30 +52,16 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     let mut structured_input =
         EventsDeduplicatorInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
 
-        let unsorted_queue_from_passthrough_state = QueueState {
-            head: structured_input
-                .observable_input
-                .initial_log_queue_state
-                .head,
-            tail: structured_input
-                .observable_input
-                .initial_log_queue_state
-                .tail,
-        };
+        let unsorted_queue_from_passthrough_state = structured_input
+            .observable_input
+            .initial_log_queue_state;
 
     // passthrough must be trivial
     unsorted_queue_from_passthrough_state.enforce_trivial_head(cs);
 
-    let unsorted_queue_from_fsm_input_state = QueueState {
-        head: structured_input
-            .hidden_fsm_input
-            .initial_unsorted_queue_state
-            .head,
-        tail: structured_input
-            .hidden_fsm_input
-            .initial_unsorted_queue_state
-            .tail,
-    };
+    let unsorted_queue_from_fsm_input_state = structured_input
+        .hidden_fsm_input
+        .initial_unsorted_queue_state;
 
     let state = QueueState::conditionally_select(
         cs,
@@ -84,42 +70,23 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &unsorted_queue_from_fsm_input_state
     );
 
-    let mut unsorted_queue = StorageLogQueue::<F, R>::from_raw_parts(
-        cs, 
-        state.head, 
-        state.tail.tail, 
-        state.tail.length
-    );
+    let mut unsorted_queue = StorageLogQueue::<F, R>::from_state(cs, state);
 
     use std::sync::Arc;
     let initial_queue_witness = CircuitQueueWitness::from_inner_witness(initial_queue_witness);
     unsorted_queue.witness = Arc::new(initial_queue_witness);
 
-    let intermediate_sorted_queue_from_passthrough_state = QueueState {
-        head: structured_input
+    let intermediate_sorted_queue_from_passthrough_state = structured_input
             .observable_input
-            .intermediate_sorted_queue_state
-            .head,
-        tail: structured_input
-            .observable_input
-            .intermediate_sorted_queue_state
-            .tail,
-    };
+            .intermediate_sorted_queue_state;
 
     // passthrough must be trivial
     intermediate_sorted_queue_from_passthrough_state.enforce_trivial_head(cs);
 
 
-    let intermediate_sorted_queue_from_fsm_state  = QueueState {
-        head: structured_input
+    let intermediate_sorted_queue_from_fsm_state  = structured_input
             .hidden_fsm_input
-            .intermediate_sorted_queue_state
-            .head,
-        tail: structured_input
-            .hidden_fsm_input
-            .intermediate_sorted_queue_state
-            .tail,
-    };
+            .intermediate_sorted_queue_state;
 
     let state = QueueState::conditionally_select(
         cs,
@@ -127,26 +94,14 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &intermediate_sorted_queue_from_passthrough_state,
         &intermediate_sorted_queue_from_fsm_state
     );
-    let mut intermediate_sorted_queue = StorageLogQueue::<F, R>::from_raw_parts(
-        cs, 
-        state.head, 
-        state.tail.tail, 
-        state.tail.length
-    );
+    let mut intermediate_sorted_queue = StorageLogQueue::<F, R>::from_state(cs, state);
     let intermediate_sorted_queue_witness = CircuitQueueWitness::from_inner_witness(intermediate_sorted_queue_witness);
     intermediate_sorted_queue.witness = Arc::new(intermediate_sorted_queue_witness);
 
 
-    let final_sorted_queue_from_fsm = QueueState {
-        head: structured_input
+    let final_sorted_queue_from_fsm = structured_input
             .hidden_fsm_input
-            .final_result_queue_state
-            .head,
-        tail: structured_input
-            .hidden_fsm_input
-            .final_result_queue_state
-            .tail,
-    };
+            .final_result_queue_state;
     let empty_state = QueueState::empty(cs);
 
     let final_sorted_state = QueueState::conditionally_select(
@@ -155,12 +110,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &empty_state,
         &final_sorted_queue_from_fsm
     );
-    let mut final_sorted_queue = StorageLogQueue::<F, R>::from_raw_parts(
-        cs, 
-        final_sorted_state.head, 
-        final_sorted_state.tail.tail, 
-        final_sorted_state.tail.length
-    );
+    let mut final_sorted_queue = StorageLogQueue::<F, R>::from_state(cs, final_sorted_state);
 
     // get challenges for permutation argument
     let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
@@ -215,7 +165,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         new_rhs,
         previous_key,
         previous_item,
-    ) = repack_and_prove_events_rollbacks_inner(
+    ) = repack_and_prove_events_rollbacks_inner::<_, _, R>(
         cs,
         initial_lhs,
         initial_rhs,
@@ -322,10 +272,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
         let sorted_is_empty = intermediate_sorted_queue.is_empty(cs);
         Boolean::enforce_equal(cs, &original_is_empty, &sorted_is_empty);
 
-        let original_is_not_empty = original_is_empty.negated(cs);
-        let sorted_is_not_empty = sorted_is_empty.negated(cs); 
-
-        let should_pop = Boolean::multi_and(cs, &[original_is_not_empty, sorted_is_not_empty]);
+        let should_pop = original_is_empty.negated(cs);
         let is_trivial = original_is_empty;
 
         let (_, original_encoding) = unsorted_queue.pop_front(
@@ -336,7 +283,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
         intermediate_sorted_queue.pop_front(cs, should_pop);
 
         // we also ensure that items are "write" unless it's a padding
-        sorted_item.rw_flag.conditionally_enforce_false(cs, original_is_empty);
+        sorted_item.rw_flag.conditionally_enforce_true(cs, should_pop);
 
         assert_eq!(original_encoding.len(), sorted_encoding.len());
         assert_eq!(lhs.len(), rhs.len());
@@ -345,6 +292,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
             .zip(lhs.iter_mut())
             .zip(rhs.iter_mut())
         {
+            // additive parts
             let mut lhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
             let mut rhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
 
@@ -353,10 +301,23 @@ pub fn repack_and_prove_events_rollbacks_inner<
                 .zip(sorted_encoding.iter())
                 .zip(challenges.iter())
             {
-                let left = Num::from_variable(*original_el).mul(cs, challenge);
-                lhs_contribution = lhs_contribution.add(cs, &left);
-                let right = Num::from_variable(*sorted_el).mul(cs, challenge);
-                rhs_contribution = rhs_contribution.add(cs, &right);
+                lhs_contribution = Num::fma(
+                    cs, 
+                    &Num::from_variable(*original_el),
+                    challenge, 
+                    &F::ONE, 
+                    &lhs_contribution, 
+                    &F::ONE
+                );
+
+                rhs_contribution = Num::fma(
+                    cs, 
+                    &Num::from_variable(*sorted_el),
+                    challenge, 
+                    &F::ONE, 
+                    &rhs_contribution, 
+                    &F::ONE
+                );
             }
 
             let new_lhs = lhs.mul(cs, &lhs_contribution);
@@ -368,7 +329,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
         // now ensure sorting
         {
             // sanity check - all such logs are "write into the sky"
-            sorted_item.rw_flag.conditionally_enforce_false(cs,  is_trivial);
+            sorted_item.rw_flag.conditionally_enforce_true(cs,  should_pop);
 
             // check if keys are equal and check a value
 
@@ -392,22 +353,18 @@ pub fn repack_and_prove_events_rollbacks_inner<
             let previous_is_not_rollback = previous_item.rollback.negated(cs);
             let enforce_sequential_rollback = Boolean::multi_and(cs, &[previous_is_not_rollback, sorted_item.rollback, should_pop]);
             keys_are_equal.conditionally_enforce_true(cs, enforce_sequential_rollback);
-            let same_log = keys_are_equal;
 
-            let mut tmp = vec![];
-            for (a, b) in sorted_item.written_value.inner.iter().zip(previous_item.written_value.inner.iter()){
-                let values_are_equal = UInt32::equals(cs, &a, &b);
-                tmp.push(values_are_equal);
-            }
+            let same_log = UInt32::equals(cs, &sorted_item.timestamp, &previous_item.timestamp);
 
-            let values_are_equal = Boolean::multi_and(cs, &tmp);
+            let values_are_equal = UInt256::equals(cs, &sorted_item.written_value, &previous_item.written_value);
+
             let negate_previous_is_trivial = previous_is_trivial.negated(cs);
             let should_enforce = Boolean::multi_and(cs, &[same_log, negate_previous_is_trivial]);
+
             values_are_equal.conditionally_enforce_true(cs, should_enforce);
 
-            let negate_trivial = is_trivial.negated(cs);
             let this_item_is_non_trivial_rollback =
-                Boolean::multi_and(cs, &[sorted_item.rollback, negate_trivial]);
+                Boolean::multi_and(cs, &[sorted_item.rollback, should_pop]);
             let negate_previous_item_rollback = previous_item.rollback.negated(cs);
             let prevous_item_is_non_trivial_write = Boolean::multi_and(
                 cs,
@@ -428,7 +385,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
             // decide if we should add the PREVIOUS into the queue
             // We add only if previous one is not trivial,
             // and it had a different key, and it wasn't rolled back
-            let negate_same_log = same_log.negated(cs);
+            let negate_same_log = same_log.and(cs, should_pop).negated(cs);
             let add_to_the_queue = Boolean::multi_and(
                 cs,
                 &[
@@ -532,4 +489,3 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
 
     (eq, final_borrow)
 }
-
