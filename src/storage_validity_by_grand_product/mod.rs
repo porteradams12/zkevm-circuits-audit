@@ -977,7 +977,6 @@ mod tests {
         CSDevelopmentAssembly, CSReferenceImplementation,
     };
     use boojum::cs::toolboxes::gate_config::{GatePlacementStrategy, NoGates};
-    use boojum::cs::traits::configurable_cs::ConfigurableCS;
     use boojum::cs::CSGeometry;
     use boojum::cs::EmptyToolbox;
     use boojum::cs::*;
@@ -988,19 +987,15 @@ mod tests {
     use ethereum_types::{Address, U256};
 
     type F = GoldilocksField;
+    type P = GoldilocksField;
 
-    fn create_cs<
-        P: boojum::field::traits::field_like::PrimeFieldLikeVectorized<Base = F>,
-        CFG: boojum::config::CSConfig,
-    >(
-        owned_cs: CSReferenceImplementation<F, P, CFG, NoGates, EmptyToolbox>,
-    ) -> CSReferenceImplementation<
-        F,
-        P,
-        CFG,
-        impl boojum::cs::toolboxes::gate_config::GateConfigurationHolder<F>,
-        impl boojum::cs::toolboxes::static_toolbox::StaticToolboxHolder,
-    > {
+    use boojum::cs::cs_builder::*;
+    use boojum::config::*;
+
+    fn configure<T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
+        builder: CsBuilder<T, F, GC, TB>
+    ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
+        let owned_cs = builder;
         let owned_cs = owned_cs.allow_lookup(
             LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
                 width: 3,
@@ -1008,56 +1003,50 @@ mod tests {
                 share_table_id: true,
             },
         );
-        let owned_cs = ConstantsAllocatorGate::configure_for_cs(
+        let owned_cs = ConstantsAllocatorGate::configure_builder(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
-        let owned_cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(
+        let owned_cs = FmaGateInBaseFieldWithoutConstant::configure_builder(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
-        let owned_cs = ReductionGate::<F, 4>::configure_for_cs(
+        let owned_cs = ReductionGate::<F, 4>::configure_builder(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
-        let owned_cs = BooleanConstraintGate::configure_for_cs(
+        let owned_cs = BooleanConstraintGate::configure_builder(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
-        let owned_cs = UIntXAddGate::<32>::configure_for_cs(
+        let owned_cs = UIntXAddGate::<32>::configure_builder(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
-        let owned_cs = UIntXAddGate::<16>::configure_for_cs(
+        let owned_cs = UIntXAddGate::<16>::configure_builder(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
-        let owned_cs = SelectionGate::configure_for_cs(
+        let owned_cs = SelectionGate::configure_builder(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
-        let owned_cs = ZeroCheckGate::configure_for_cs(
+        let owned_cs = ZeroCheckGate::configure_builder(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
             false,
         );
-        let owned_cs = DotProductGate::<4>::configure_for_cs(
+        let owned_cs = DotProductGate::<4>::configure_builder(
             owned_cs,
             GatePlacementStrategy::UseGeneralPurposeColumns,
         );
         let owned_cs =
-            MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_for_cs(
+            MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_builder(
                 owned_cs,
                 GatePlacementStrategy::UseGeneralPurposeColumns,
             );
         let owned_cs =
-            NopGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-
-        let mut owned_cs = owned_cs.freeze();
-
-        // add tables
-        let table = create_xor8_table();
-        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+            NopGate::configure_builder(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
 
         owned_cs
     }
@@ -1071,9 +1060,24 @@ mod tests {
             max_allowed_constraint_degree: 4,
         };
 
-        let owned_cs =
-            CSDevelopmentAssembly::<F, _, _>::new_for_geometry(geometry, 1 << 26, 1 << 20);
-        let mut owned_cs = create_cs(owned_cs);
+        use boojum::config::DevCSConfig;
+        use boojum::cs::cs_builder_reference::*;
+
+        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
+            geometry, 
+            1 << 26,
+            1 << 20
+        );
+        use boojum::cs::cs_builder::new_builder;
+        let builder = new_builder::<_, F>(builder_impl);
+
+        let builder = configure(builder);
+        let mut owned_cs = builder.build(());
+
+        // add tables
+        let table = create_xor8_table();
+        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+
         let cs = &mut owned_cs;
 
         let lhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
@@ -1146,126 +1150,10 @@ mod tests {
             limit,
         );
 
-        cs.print_gate_stats();
-
         cs.pad_and_shrink();
         let worker = Worker::new();
+        let mut owned_cs = owned_cs.into_assembly();
+        owned_cs.print_gate_stats();
         assert!(owned_cs.check_if_satisfied(&worker));
     }
-
-    // fn configure_cs<
-    //     F: SmallField,
-    //     P: boojum::field::traits::field_like::PrimeFieldLikeVectorized<Base = F>,
-    //     CFG: boojum::config::CSConfig,
-    // >(
-    //     cs: CSReferenceImplementation<F, P, CFG, NoGates, EmptyToolbox>,
-    // ) -> CSReferenceImplementation<
-    //     F,
-    //     P,
-    //     CFG,
-    //     impl boojum::cs::toolboxes::gate_config::GateConfigurationHolder<F>,
-    //     impl boojum::cs::toolboxes::static_toolbox::StaticToolboxHolder,
-    // >
-    // where
-    //     P::Context: boojum::field::traits::field_like::TrivialContext,
-    // {
-    //     let cs = cs.allow_lookup(
-    //         boojum::cs::LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
-    //             width: 3,
-    //             num_repetitions: 5,
-    //             share_table_id: true,
-    //         },
-    //     );
-
-    //     let cs = BooleanConstraintGate::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseSpecializedColumns {
-    //             num_repetitions: 1,
-    //             share_constants: false,
-    //         },
-    //     );
-    //     // let cs = U8x4FMAGate::configure_for_cs(cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 2, share_constants: false });
-
-    //     // let cs = cs.allow_lookup(
-    //     //     boojum::cs::LookupParameters::TableIdAsConstant { width: 3, share_table_id: true }
-    //     // );
-    //     // let cs = BooleanConstraintGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-    //     let cs = U8x4FMAGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-
-    //     let cs = ConstantsAllocatorGate::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseGeneralPurposeColumns,
-    //     );
-    //     let cs = DotProductGate::<4>::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseGeneralPurposeColumns,
-    //     );
-    //     let cs = ZeroCheckGate::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseGeneralPurposeColumns,
-    //         false,
-    //     );
-    //     let cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseGeneralPurposeColumns,
-    //     );
-    //     let cs = UIntXAddGate::<32>::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseGeneralPurposeColumns,
-    //     );
-    //     let cs = UIntXAddGate::<16>::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseGeneralPurposeColumns,
-    //     );
-    //     let cs = UIntXAddGate::<8>::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseGeneralPurposeColumns,
-    //     );
-    //     let cs =
-    //         SelectionGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-    //     let cs = ParallelSelectionGate::<4>::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseGeneralPurposeColumns,
-    //     );
-    //     let cs =
-    //         PublicInputGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-    //     let cs = ReductionGate::<_, 4>::configure_for_cs(
-    //         cs,
-    //         GatePlacementStrategy::UseGeneralPurposeColumns,
-    //     );
-    //     let cs = NopGate::configure_for_cs(cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-    //     let mut cs_owned = cs.freeze();
-
-    //     use crate::tables::*;
-    //     use boojum::gadgets::tables::binop_table::*;
-    //     let table = create_binop_table();
-    //     cs_owned.add_lookup_table::<BinopTable, 3>(table);
-
-    //     let subpc_to_mask_table = create_subpc_bitmask_table::<F>();
-    //     cs_owned.add_lookup_table::<VMSubPCToBitmaskTable, 3>(subpc_to_mask_table);
-
-    //     let opcode_decoding_table = create_opcodes_decoding_and_pricing_table::<F>();
-    //     cs_owned.add_lookup_table::<VMOpcodeDecodingTable, 3>(opcode_decoding_table);
-
-    //     let conditions_resolution_table = create_conditionals_resolution_table::<F>();
-    //     cs_owned.add_lookup_table::<VMConditionalResolutionTable, 3>(conditions_resolution_table);
-
-    //     let integer_to_bitmask_table = create_integer_to_bitmask_table::<F>(
-    //         15u32.next_power_of_two().trailing_zeros() as usize,
-    //         REG_IDX_TO_BITMASK_TABLE_NAME,
-    //     );
-    //     cs_owned.add_lookup_table::<RegisterIndexToBitmaskTable, 3>(integer_to_bitmask_table);
-
-    //     let shifts_table = create_shift_to_num_converter_table::<F>();
-    //     cs_owned.add_lookup_table::<BitshiftTable, 3>(shifts_table);
-
-    //     let uma_unaligned_access_table =
-    //         create_integer_to_bitmask_table::<F>(5, UMA_SHIFT_TO_BITMASK_TABLE_NAME);
-    //     cs_owned.add_lookup_table::<UMAShiftToBitmaskTable, 3>(uma_unaligned_access_table);
-
-    //     let uma_ptr_read_cleanup_table = create_uma_ptr_read_bitmask_table::<F>();
-    //     cs_owned.add_lookup_table::<UMAPtrReadCleanupTable, 3>(uma_ptr_read_cleanup_table);
-
-    //     cs_owned
-    // }
 }

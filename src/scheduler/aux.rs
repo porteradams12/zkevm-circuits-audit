@@ -43,7 +43,7 @@ use super::*;
 
 pub const NUM_CIRCUIT_TYPES_TO_SCHEDULE: usize = crate::recursion::NUM_BASE_LAYER_CIRCUITS;
 
-#[derive(Derivative)]
+#[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[repr(u8)]
 pub enum BaseLayerCircuitType {

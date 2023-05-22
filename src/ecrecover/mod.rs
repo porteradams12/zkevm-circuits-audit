@@ -942,7 +942,7 @@ mod test {
 
         cs.pad_and_shrink();
 
-        let mut cs = cs.into_assembly();
+        let mut cs = owned_cs.into_assembly();
         cs.print_gate_stats();
         let worker = Worker::new();
         assert!(cs.check_if_satisfied(&worker));

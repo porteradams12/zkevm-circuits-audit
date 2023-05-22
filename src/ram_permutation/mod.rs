@@ -270,7 +270,7 @@ where
             let comparison_key = [sorted_item.index, sorted_item.memory_page];
 
             // ensure sorting
-            let (keys_are_equal, previous_key_is_smaller) = unpacked_long_comparison(
+            let (_keys_are_equal, previous_key_is_smaller) = unpacked_long_comparison(
                 cs,
                 &sorting_key,
                 previous_sorting_key,

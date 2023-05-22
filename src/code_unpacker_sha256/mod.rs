@@ -491,7 +491,6 @@ mod tests {
         CSDevelopmentAssembly,
     };
     use boojum::cs::toolboxes::gate_config::{GatePlacementStrategy};
-    use boojum::cs::traits::configurable_cs::ConfigurableCS;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
@@ -504,7 +503,9 @@ mod tests {
     use boojum::gadgets::u8::UInt8;
     use boojum::gadgets::traits::allocatable::CSPlaceholder;
     use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
+
     type F = GoldilocksField;
+    type P = GoldilocksField;
 
     #[test]
     fn test_code_unpacker_inner() {
@@ -516,32 +517,46 @@ mod tests {
             max_allowed_constraint_degree: 4,
         };
 
-        let owned_cs = CSDevelopmentAssembly::<F, _, _>::new_for_geometry(
-            geometry,
+        use boojum::cs::cs_builder::*;
+
+        fn configure<T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
+            builder: CsBuilder<T, F, GC, TB>
+        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
+            let builder = builder.allow_lookup(
+                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                    width: 4,
+                    num_repetitions: 8,
+                    share_table_id: true,
+                },
+            );
+            let builder = ConstantsAllocatorGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ReductionGate::<F, 4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = BooleanConstraintGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = UIntXAddGate::<32>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = UIntXAddGate::<16>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = SelectionGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ZeroCheckGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns,false);
+            let builder = DotProductGate::<4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = NopGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+
+            builder
+        }
+
+        use boojum::config::DevCSConfig;
+        use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
+
+        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
+            geometry, 
             1 << 26,
             1 << 20
         );
+        use boojum::cs::cs_builder::new_builder;
+        let builder = new_builder::<_, F>(builder_impl);
 
-        let owned_cs = owned_cs.allow_lookup(
-            LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
-                width: 4,
-                num_repetitions: 8,
-                share_table_id: true,
-            },
-        );
-        let owned_cs = ConstantsAllocatorGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = FmaGateInBaseFieldWithoutConstant::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = BooleanConstraintGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = UIntXAddGate::<32>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = UIntXAddGate::<16>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = SelectionGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = ZeroCheckGate::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns,false);
-        let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_for_cs(owned_cs,GatePlacementStrategy::UseGeneralPurposeColumns);
-        let owned_cs = NopGate::configure_for_cs(owned_cs, GatePlacementStrategy::UseGeneralPurposeColumns);
-
-        let mut owned_cs = owned_cs.freeze();
+        let builder = configure(builder);
+        let mut owned_cs = builder.build(());
 
         let table = create_maj4_table();
         owned_cs.add_lookup_table::<Maj4Table, 4>(table);
@@ -602,10 +617,10 @@ mod tests {
                 Num::enforce_equal(cs, lhs, rhs);
             }
 
-        cs.print_gate_stats();
-
         cs.pad_and_shrink();
         let worker = Worker::new();
+        let mut owned_cs = owned_cs.into_assembly();
+        owned_cs.print_gate_stats();
         assert!(owned_cs.check_if_satisfied(&worker));
     }
 
