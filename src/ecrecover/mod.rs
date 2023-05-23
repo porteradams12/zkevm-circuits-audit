@@ -1,11 +1,11 @@
 use super::*;
-use arrayvec::ArrayVec;
 use crate::base_structures::log_query::*;
 use crate::base_structures::memory_query::*;
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
 use crate::demux_log_queue::StorageLogQueue;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::fsm_input_output::*;
+use arrayvec::ArrayVec;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::crypto_bigint::{Zero, U1024};
 use boojum::cs::gates::ConstantAllocatableCS;
@@ -21,13 +21,14 @@ use boojum::gadgets::num::Num;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
 use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u160::UInt160;
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
+use boojum::gadgets::u512::UInt512;
 use boojum::gadgets::u8::UInt8;
 use boojum::pairing::GenericCurveAffine;
 use boojum::pairing::{CurveAffine, GenericCurveProjective};
@@ -209,22 +210,52 @@ fn convert_uint256_to_field_element<
     element
 }
 
+fn convert_field_element_to_uint256<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    P: boojum::pairing::ff::PrimeField,
+    const N: usize,
+>(
+    cs: &mut CS,
+    mut elem: NonNativeFieldOverU16<F, P, N>,
+    params: &Arc<NonNativeFieldOverU16Params<P, N>>,
+) -> UInt256<F> {
+    let mut limbs = [UInt32::<F>::zero(cs); 8];
+    unsafe {
+        for (dst, src) in limbs.iter_mut().zip(elem.limbs.array_chunks_mut::<2>()) {
+            let low = UInt16::from_variable_unchecked(src[0]).to_le_bytes(cs);
+            let high = UInt16::from_variable_unchecked(src[1]).to_le_bytes(cs);
+            let mut bytes = [UInt8::<F>::zero(cs); 4];
+            [low, high]
+                .iter()
+                .flatten()
+                .enumerate()
+                .for_each(|(i, el)| bytes[i] = *el);
+            *dst = UInt32::from_le_bytes(cs, bytes);
+        }
+    }
+
+    UInt256 { inner: limbs }
+}
+
 fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     mut point: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>,
-    scalar: Secp256ScalarNNField<F>,
+    mut scalar: Secp256ScalarNNField<F>,
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
+    println!("{:?}", scalar.witness_hook(cs)().unwrap());
     let scalar_params = Arc::new(secp256k1_scalar_field_params());
-    let scalar_from_hex_str = |s: &str| -> Secp256ScalarNNField<F> {
+    let scalar_from_hex_str = |cs: &mut CS, s: &str| -> Secp256ScalarNNField<F> {
         let v = U256::from_str_radix(s, 16).unwrap();
         let v = UInt256::allocated_constant(cs, v);
         convert_uint256_to_field_element(cs, &v, &scalar_params)
     };
     let pow_2_128 = U256::from_dec_str("340282366920938463463374607431768211456").unwrap();
-    let pow_2_128 = UInt256::allocated_constant(cs, pow_2_128);
-    let pow_2_128 = convert_uint256_to_field_element(cs, &pow_2_128, &scalar_params);
-    let modulus =
-        scalar_from_hex_str("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
+    let pow_2_128 = UInt512::allocated_constant(cs, (pow_2_128, U256::zero()));
+    let mut modulus = scalar_from_hex_str(
+        cs,
+        "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+    );
 
     let base_params = Arc::new(secp256k1_base_field_params());
     let beta = U256::from_str_radix(
@@ -232,86 +263,133 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         16,
     )
     .unwrap();
-    let beta = UInt256::allocated_constant(cs, beta);
-    let beta = convert_uint256_to_field_element(cs, &beta, &base_params);
+    let v = UInt256::allocated_constant(cs, beta);
+    let mut beta = convert_uint256_to_field_element(cs, &v, &base_params);
 
-    let (k1_neg, mut k1, k2_neg, mut k2) = {
-        let mut two_inverse = scalar_from_hex_str("2").inverse_unchecked(cs);
-        let a1 = scalar_from_hex_str("0x3086d221a7d46bcde86c90e49284eb15");
-        let b1 = scalar_from_hex_str("0xe4437ed6010e88286f547fa90abfe4c3");
-        let a2 = scalar_from_hex_str("0x114ca50f7a8e2f3f657c1108d9d44cfd8");
-        let b2 = a1;
-        let c1 = b2
-            .add(cs, &mut scalar.mul(cs, &mut two_inverse))
-            .mul(cs, &mut modulus.inverse_unchecked(cs));
-        let c2 = b1
-            .add(cs, &mut scalar.mul(cs, &mut two_inverse))
-            .mul(cs, &mut modulus.inverse_unchecked(cs));
-        let k1 = scalar
-            .sub(cs, &mut c1)
-            .mul(cs, &mut a1)
-            .sub(cs, &mut c2)
-            .mul(cs, &mut a2);
-        let k2 = c1
-            .negated(cs)
-            .mul(cs, &mut b1.negated(cs))
-            .sub(cs, &mut c2)
-            .mul(cs, &mut b2);
-        // NOTING THIS NOW: it's likely you'll have to actually build out both codepaths and then use cond select to make this work
-        let k1_neg = Boolean::allocated_constant(cs, false);
-        if (k1.tracker.add(&pow_2_128.tracker))
-            .overflow_over_representation(&k1.params.modulus_u1024.as_ref(), k1.params.repr_bits())
-            > 0
-        {
-            k1 = k1.negated(cs);
-            k1_neg = k1_neg.negated(cs);
-        }
-        let k2_neg = Boolean::allocated_constant(cs, false);
-        if (k2.tracker.add(&pow_2_128.tracker))
-            .overflow_over_representation(&k2.params.modulus_u1024.as_ref(), k2.params.repr_bits())
-            > 0
-        {
-            k2 = k2.negated(cs);
-            k2_neg = k1_neg.negated(cs);
-        }
+    /*let (k1_neg, mut k1, k2_neg, mut k2) = */
+    {
+        let u256_from_hex_str = |cs: &mut CS, s: &str| -> UInt256<F> {
+            let v = U256::from_str_radix(s, 16).unwrap();
+            UInt256::allocated_constant(cs, v)
+        };
 
-        (k1_neg, k1, k2_neg, k2)
-    };
+        let mut one = scalar_from_hex_str(cs, "1");
+        let mut two_inverse = scalar_from_hex_str(cs, "2").inverse_unchecked(cs);
+        let mut mod_inverse = modulus.inverse_unchecked(cs);
+        let mut mod_minus_one_over_two = modulus.sub(cs, &mut one).mul(cs, &mut two_inverse);
+        let a1 = u256_from_hex_str(cs, "0x3086d221a7d46bcde86c90e49284eb15");
+        let b1 = u256_from_hex_str(cs, "0xe4437ed6010e88286f547fa90abfe4c3");
+        let a2 = u256_from_hex_str(cs, "0x114ca50f7a8e2f3f657c1108d9d44cfd8");
+        let b2 = a1.clone();
+        // TODO: convert scalar to UInt256
+        let k = convert_field_element_to_uint256(cs, scalar, &scalar_params);
+        let b2_times_k = k.widening_mul(cs, &b2);
+        let (b2_times_k_plus_2_128, _) = b2_times_k.overflowing_add(cs, &pow_2_128); // overflow should be
+                                                                                     // impossible here
+        let c1 = b2_times_k_plus_2_128.to_high(cs);
+        println!("{:?}", c1.witness_hook(cs)().unwrap());
+        let b1_times_k = k.widening_mul(cs, &b1);
+        let b1_times_k = b1_times_k.overflowing_add(cs, &pow_2_128); // overflow should be
+                                                                     // impossible here
+        let c2 = b1_times_k.0.to_high(cs);
+        println!("{:?}", c1.witness_hook(cs)().unwrap());
 
-    let mut k1p =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
-    let mut k2p =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
-    
-    let k1_bits: Vec<_> = k1.limbs.iter().map(|el| {
-        Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs)
-    }).flatten().collect();
-    let k2_bits: Vec<_> = k2.limbs.iter().map(|el| {
-        Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs)
-    }).flatten().collect();
-    let bool_true = Boolean::allocated_constant(cs, true);
-    k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
-        let ((x, y), _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
-    
-        let mut k1p_added = k1p.clone();
-        k1p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
-        let mut k2p_added = k2p.clone();
-        k2p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
-        
-        k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(cs, *k1, &k1p_added, &k1p);
-        k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(cs, k2, &k2p_added, &k2p);
-        point.double(cs);
-    });
+        /*
+            let mut k1 = scalar
+                .sub(cs, &mut c1)
+                .mul(cs, &mut a1)
+                .sub(cs, &mut c2)
+                .mul(cs, &mut a2);
+            let mut b1_negated = b1.negated(cs);
+            let mut k2 = c1
+                .negated(cs)
+                .mul(cs, &mut b1_negated)
+                .sub(cs, &mut c2)
+                .mul(cs, &mut b2);
 
-    let k1p_negated = k1p.negated(cs);
-    k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(cs, k1_neg, &k1p_negated, &k1p);
-    let k2p_negated = k2p.negated(cs);
-    k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(cs, k2_neg, &k2p_negated, &k2p);
+            let pos = Boolean::allocated_constant(cs, false);
+            let neg = Boolean::allocated_constant(cs, true);
+            let overflow = Boolean::allocated_constant(
+                cs,
+                (k1.tracker.add(&pow_2_128.tracker)).overflow_over_representation(
+                    &k1.params.modulus_u1024.as_ref(),
+                    k1.params.repr_bits(),
+                ) > 0,
+            );
+            let k1_neg = Boolean::conditionally_select(cs, overflow, &neg, &pos);
+            let overflow = Boolean::allocated_constant(
+                cs,
+                (k2.tracker.add(&pow_2_128.tracker)).overflow_over_representation(
+                    &k2.params.modulus_u1024.as_ref(),
+                    k2.params.repr_bits(),
+                ) > 0,
+            );
+            let k2_neg = Boolean::conditionally_select(cs, overflow, &neg, &pos);
 
-    // endomorphism
-    k2p.x = k2p.x.mul(cs, &mut beta);
-    k2p.convert_to_affine_or_default(cs, Secp256Affine::one());
-    k1p.add_mixed(cs, &mut (k2p.x, k2p.y))
+            println!("{:?}", k1_neg.witness_hook(cs)().unwrap());
+            println!("{:?}", k1.witness_hook(cs)().unwrap());
+            println!("{:?}", k2_neg.witness_hook(cs)().unwrap());
+            println!("{:?}", k2.witness_hook(cs)().unwrap());
+            (k1_neg, k1, k2_neg, k2)
+        };
+
+        let mut k1p =
+            SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
+        let mut k2p =
+            SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
+
+        let k1_bits: Vec<_> = k1
+            .limbs
+            .iter()
+            .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
+            .flatten()
+            .collect();
+        let k2_bits: Vec<_> = k2
+            .limbs
+            .iter()
+            .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
+            .flatten()
+            .collect();
+        let bool_true = Boolean::allocated_constant(cs, true);
+        k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
+            let ((x, y), _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
+
+            let mut k1p_added = k1p.clone();
+            k1p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
+            let mut k2p_added = k2p.clone();
+            k2p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
+
+            k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+                cs, *k1, &k1p_added, &k1p,
+            );
+            k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+                cs, k2, &k2p_added, &k2p,
+            );
+            point.double(cs);
+        });
+
+        let k1p_negated = k1p.negated(cs);
+        k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+            cs,
+            k1_neg,
+            &k1p_negated,
+            &k1p,
+        );
+        let k2p_negated = k2p.negated(cs);
+        k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+            cs,
+            k2_neg,
+            &k2p_negated,
+            &k2p,
+        );
+
+        // endomorphism
+        k2p.x = k2p.x.mul(cs, &mut beta);
+        k2p.convert_to_affine_or_default(cs, Secp256Affine::one());
+        k1p.add_mixed(cs, &mut (k2p.x, k2p.y))
+            */
+    }
+    unimplemented!()
 }
 
 fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
@@ -485,15 +563,46 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
 
     let mut recovered_point =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(cs, x, y);
-    // now we do multiexponentiation
-    let s_times_x = wnaf_scalar_mul(cs, recovered_point, s_by_r_inv);
+    // now we do multiplication
+    let mut s_times_x = wnaf_scalar_mul(cs, recovered_point, s_by_r_inv);
 
-    let hash_times_g = Secp256FixedBaseMulGate::new(message_hash_by_r_inv);
-    let q_acc = s_times_x.sub_mixed(cs, hash_times_g);
+    // let hash_times_g = Secp256FixedBaseMulGate::new(message_hash_by_r_inv);
+    let mut q_acc =
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
+    let generator = Secp256Affine::one();
+    let (x, y) = generator.into_xy_unchecked();
+    let x = Secp256BaseNNField::allocated_constant(cs, x, base_field_params);
+    let y = Secp256BaseNNField::allocated_constant(cs, y, base_field_params);
+    let mut generator = (x, y);
+
+    let message_hash_by_r_inv_lsb_bits: Vec<_> = message_hash_by_r_inv
+        .limbs
+        .iter()
+        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
+        .flatten()
+        .collect();
+
+    for (cycle, hash_bit) in message_hash_by_r_inv_lsb_bits.into_iter().rev().enumerate() {
+        if cycle != 0 {
+            q_acc = q_acc.double(cs);
+        }
+        let q_plus_x = q_acc.add_mixed(cs, &mut generator);
+        let mut q_acc: SWProjectivePoint<
+            F,
+            Secp256Affine,
+            NonNativeFieldOverU16<F, Secp256Fq, 17>,
+        > = Selectable::conditionally_select(cs, hash_bit, &q_plus_x, &q_acc);
+    }
+
+    q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
+    let mut q_acc = s_times_x.sub_mixed(cs, &mut (q_acc.x, q_acc.y));
 
     let ((mut q_x, mut q_y), is_infinity) =
         q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
     exception_flags.push(is_infinity);
+    exception_flags
+        .iter()
+        .for_each(|v| println!("{:?}", v.witness_hook(cs)().unwrap()));
     let any_exception = Boolean::multi_or(cs, &exception_flags[..]);
 
     q_x.normalize(cs);
@@ -635,8 +744,7 @@ where
             EcrecoverPrecompileCallParams::from_encoding(cs, request.key);
 
         let timestamp_to_use_for_read = request.timestamp;
-        let timestamp_to_use_for_write =
-            timestamp_to_use_for_read.add_no_overflow(cs, one_u32);
+        let timestamp_to_use_for_write = timestamp_to_use_for_read.add_no_overflow(cs, one_u32);
 
         Num::conditionally_enforce_equal(
             cs,
@@ -883,6 +991,10 @@ mod test {
                     num_repetitions: 8,
                     share_table_id: true,
                 },
+            );
+            let builder = U8x4FMAGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
             );
             let builder = ConstantsAllocatorGate::configure_builder(
                 builder,
