@@ -270,10 +270,6 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             UInt256::allocated_constant(cs, v)
         };
 
-        let mut one = scalar_from_hex_str(cs, "1");
-        let mut two_inverse = scalar_from_hex_str(cs, "2").inverse_unchecked(cs);
-        let mut mod_inverse = modulus.inverse_unchecked(cs);
-        let mut mod_minus_one_over_two = modulus.sub(cs, &mut one).mul(cs, &mut two_inverse);
         let a1 = u256_from_hex_str(cs, "0x3086d221a7d46bcde86c90e49284eb15");
         let b1 = u256_from_hex_str(cs, "0xe4437ed6010e88286f547fa90abfe4c3");
         let a2 = u256_from_hex_str(cs, "0x114ca50f7a8e2f3f657c1108d9d44cfd8");
@@ -309,10 +305,8 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         let low_pow_2_128 = pow_2_128.to_low();
         let neg = Boolean::allocated_constant(cs, true);
         let pos = Boolean::allocated_constant(cs, false);
-        println!("{:?}", k1_u256.witness_hook(cs)().unwrap());
-        println!("{:?}", k2_u256.witness_hook(cs)().unwrap());
         let (_res, mut k1_neg) = k1_u256.overflowing_sub(cs, &low_pow_2_128);
-        k1_neg.negated(cs);
+        k1_neg = k1_neg.negated(cs);
         let k1_negated = k1.negated(cs);
         let k1 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
             cs,
@@ -321,7 +315,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             &k1,
         );
         let (_res, mut k2_neg) = k2_u256.overflowing_sub(cs, &low_pow_2_128);
-        k2_neg.negated(cs);
+        k2_neg = k2_neg.negated(cs);
         let k2_negated = k2.negated(cs);
         let k2 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
             cs,
@@ -342,18 +336,6 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     let mut k2p =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
 
-    // let k1_bits = k1
-    //     .inner
-    //     .into_iter()
-    //     .map(|el| el.into_num().spread_into_bits::<_, 32>(cs))
-    //     .flatten()
-    //     .collect::<Vec<_>>();
-    // let k2_bits = k2
-    //     .inner
-    //     .into_iter()
-    //     .map(|el| el.into_num().spread_into_bits::<_, 32>(cs))
-    //     .flatten()
-    //     .collect::<Vec<_>>();
     let k1_bits: Vec<_> = k1
         .limbs
         .iter()
