@@ -218,7 +218,6 @@ fn convert_field_element_to_uint256<
 >(
     cs: &mut CS,
     mut elem: NonNativeFieldOverU16<F, P, N>,
-    params: &Arc<NonNativeFieldOverU16Params<P, N>>,
 ) -> UInt256<F> {
     let mut limbs = [UInt32::<F>::zero(cs); 8];
     unsafe {
@@ -243,7 +242,6 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     mut point: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>,
     mut scalar: Secp256ScalarNNField<F>,
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
-    println!("{:?}", scalar.witness_hook(cs)().unwrap());
     let scalar_params = Arc::new(secp256k1_scalar_field_params());
     let scalar_from_hex_str = |cs: &mut CS, s: &str| -> Secp256ScalarNNField<F> {
         let v = U256::from_str_radix(s, 16).unwrap();
@@ -266,8 +264,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     let v = UInt256::allocated_constant(cs, beta);
     let mut beta = convert_uint256_to_field_element(cs, &v, &base_params);
 
-    /*let (k1_neg, mut k1, k2_neg, mut k2) = */
-    {
+    let (k1_neg, mut k1, k2_neg, mut k2) = {
         let u256_from_hex_str = |cs: &mut CS, s: &str| -> UInt256<F> {
             let v = U256::from_str_radix(s, 16).unwrap();
             UInt256::allocated_constant(cs, v)
@@ -281,115 +278,131 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         let b1 = u256_from_hex_str(cs, "0xe4437ed6010e88286f547fa90abfe4c3");
         let a2 = u256_from_hex_str(cs, "0x114ca50f7a8e2f3f657c1108d9d44cfd8");
         let b2 = a1.clone();
-        // TODO: convert scalar to UInt256
-        let k = convert_field_element_to_uint256(cs, scalar, &scalar_params);
+
+        let k = convert_field_element_to_uint256(cs, scalar.clone());
+
         let b2_times_k = k.widening_mul(cs, &b2);
-        let (b2_times_k_plus_2_128, _) = b2_times_k.overflowing_add(cs, &pow_2_128); // overflow should be
-                                                                                     // impossible here
-        let c1 = b2_times_k_plus_2_128.to_high(cs);
-        println!("{:?}", c1.witness_hook(cs)().unwrap());
+        let b2_times_k = b2_times_k.overflowing_add(cs, &pow_2_128);
+        let c1 = b2_times_k.0.to_high();
+
         let b1_times_k = k.widening_mul(cs, &b1);
-        let b1_times_k = b1_times_k.overflowing_add(cs, &pow_2_128); // overflow should be
-                                                                     // impossible here
-        let c2 = b1_times_k.0.to_high(cs);
-        println!("{:?}", c1.witness_hook(cs)().unwrap());
+        let b1_times_k = b1_times_k.overflowing_add(cs, &pow_2_128);
+        let c2 = b1_times_k.0.to_high();
 
-        /*
-            let mut k1 = scalar
-                .sub(cs, &mut c1)
-                .mul(cs, &mut a1)
-                .sub(cs, &mut c2)
-                .mul(cs, &mut a2);
-            let mut b1_negated = b1.negated(cs);
-            let mut k2 = c1
-                .negated(cs)
-                .mul(cs, &mut b1_negated)
-                .sub(cs, &mut c2)
-                .mul(cs, &mut b2);
+        let mut a1 = convert_uint256_to_field_element(cs, &a1, &scalar_params);
+        let mut b1 = convert_uint256_to_field_element(cs, &b1, &scalar_params);
+        let mut a2 = convert_uint256_to_field_element(cs, &a2, &scalar_params);
+        let mut b2 = a1.clone();
+        let mut c1 = convert_uint256_to_field_element(cs, &c1, &scalar_params);
+        let mut c2 = convert_uint256_to_field_element(cs, &c2, &scalar_params);
 
-            let pos = Boolean::allocated_constant(cs, false);
-            let neg = Boolean::allocated_constant(cs, true);
-            let overflow = Boolean::allocated_constant(
-                cs,
-                (k1.tracker.add(&pow_2_128.tracker)).overflow_over_representation(
-                    &k1.params.modulus_u1024.as_ref(),
-                    k1.params.repr_bits(),
-                ) > 0,
-            );
-            let k1_neg = Boolean::conditionally_select(cs, overflow, &neg, &pos);
-            let overflow = Boolean::allocated_constant(
-                cs,
-                (k2.tracker.add(&pow_2_128.tracker)).overflow_over_representation(
-                    &k2.params.modulus_u1024.as_ref(),
-                    k2.params.repr_bits(),
-                ) > 0,
-            );
-            let k2_neg = Boolean::conditionally_select(cs, overflow, &neg, &pos);
+        let mut c1_times_a1 = c1.mul(cs, &mut a1);
+        let mut c2_times_a2 = c2.mul(cs, &mut a2);
+        let mut k1 = scalar.sub(cs, &mut c1_times_a1).sub(cs, &mut c2_times_a2);
+        k1.normalize(cs);
+        let mut c2_times_b2 = c2.mul(cs, &mut b2);
+        let mut k2 = c1.mul(cs, &mut b1).sub(cs, &mut c2_times_b2);
+        k2.normalize(cs);
 
-            println!("{:?}", k1_neg.witness_hook(cs)().unwrap());
-            println!("{:?}", k1.witness_hook(cs)().unwrap());
-            println!("{:?}", k2_neg.witness_hook(cs)().unwrap());
-            println!("{:?}", k2.witness_hook(cs)().unwrap());
-            (k1_neg, k1, k2_neg, k2)
-        };
-
-        let mut k1p =
-            SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
-        let mut k2p =
-            SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
-
-        let k1_bits: Vec<_> = k1
-            .limbs
-            .iter()
-            .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
-            .flatten()
-            .collect();
-        let k2_bits: Vec<_> = k2
-            .limbs
-            .iter()
-            .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
-            .flatten()
-            .collect();
-        let bool_true = Boolean::allocated_constant(cs, true);
-        k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
-            let ((x, y), _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
-
-            let mut k1p_added = k1p.clone();
-            k1p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
-            let mut k2p_added = k2p.clone();
-            k2p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
-
-            k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
-                cs, *k1, &k1p_added, &k1p,
-            );
-            k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
-                cs, k2, &k2p_added, &k2p,
-            );
-            point.double(cs);
-        });
-
-        let k1p_negated = k1p.negated(cs);
-        k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+        let k1_u256 = convert_field_element_to_uint256(cs, k1.clone());
+        let k2_u256 = convert_field_element_to_uint256(cs, k2.clone());
+        let low_pow_2_128 = pow_2_128.to_low();
+        let neg = Boolean::allocated_constant(cs, true);
+        let pos = Boolean::allocated_constant(cs, false);
+        println!("{:?}", k1_u256.witness_hook(cs)().unwrap());
+        println!("{:?}", k2_u256.witness_hook(cs)().unwrap());
+        let (_res, mut k1_neg) = k1_u256.overflowing_sub(cs, &low_pow_2_128);
+        k1_neg.negated(cs);
+        let k1_negated = k1.negated(cs);
+        let k1 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
             cs,
             k1_neg,
-            &k1p_negated,
-            &k1p,
+            &k1_negated,
+            &k1,
         );
-        let k2p_negated = k2p.negated(cs);
-        k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+        let (_res, mut k2_neg) = k2_u256.overflowing_sub(cs, &low_pow_2_128);
+        k2_neg.negated(cs);
+        let k2_negated = k2.negated(cs);
+        let k2 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
             cs,
             k2_neg,
-            &k2p_negated,
-            &k2p,
+            &k2_negated,
+            &k2,
         );
 
-        // endomorphism
-        k2p.x = k2p.x.mul(cs, &mut beta);
-        k2p.convert_to_affine_or_default(cs, Secp256Affine::one());
-        k1p.add_mixed(cs, &mut (k2p.x, k2p.y))
-            */
-    }
-    unimplemented!()
+        println!("{:?}", k1_neg.witness_hook(cs)().unwrap());
+        println!("{:?}", k1.witness_hook(cs)().unwrap());
+        println!("{:?}", k2_neg.witness_hook(cs)().unwrap());
+        println!("{:?}", k2.witness_hook(cs)().unwrap());
+        (k1_neg, k1, k2_neg, k2)
+    };
+
+    let mut k1p =
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
+    let mut k2p =
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
+
+    // let k1_bits = k1
+    //     .inner
+    //     .into_iter()
+    //     .map(|el| el.into_num().spread_into_bits::<_, 32>(cs))
+    //     .flatten()
+    //     .collect::<Vec<_>>();
+    // let k2_bits = k2
+    //     .inner
+    //     .into_iter()
+    //     .map(|el| el.into_num().spread_into_bits::<_, 32>(cs))
+    //     .flatten()
+    //     .collect::<Vec<_>>();
+    let k1_bits: Vec<_> = k1
+        .limbs
+        .iter()
+        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
+        .flatten()
+        .collect();
+    let k2_bits: Vec<_> = k2
+        .limbs
+        .iter()
+        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
+        .flatten()
+        .collect();
+    let bool_true = Boolean::allocated_constant(cs, true);
+    k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
+        let ((x, y), _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
+
+        let mut k1p_added = k1p.clone();
+        k1p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
+        let mut k2p_added = k2p.clone();
+        k2p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
+
+        k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+            cs, *k1, &k1p_added, &k1p,
+        );
+        k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+            cs, k2, &k2p_added, &k2p,
+        );
+        point.double(cs);
+    });
+
+    let k1p_negated = k1p.negated(cs);
+    k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+        cs,
+        k1_neg,
+        &k1p_negated,
+        &k1p,
+    );
+    let k2p_negated = k2p.negated(cs);
+    k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
+        cs,
+        k2_neg,
+        &k2p_negated,
+        &k2p,
+    );
+
+    // endomorphism
+    k2p.x = k2p.x.mul(cs, &mut beta);
+    k2p.convert_to_affine_or_default(cs, Secp256Affine::one());
+    k1p.add_mixed(cs, &mut (k2p.x, k2p.y))
 }
 
 fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
