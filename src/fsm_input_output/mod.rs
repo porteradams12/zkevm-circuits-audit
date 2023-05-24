@@ -104,7 +104,6 @@ where
 
 pub const CLOSED_FORM_COMMITTMENT_LENGTH: usize = 4;
 
-
 impl<
     F: SmallField,
     T: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
@@ -220,7 +219,6 @@ pub fn commit_variable_length_encodable_item<
     item: &T,
     _round_function: &R
 ) -> [Num<F>; N] {
-    // we use length specialization here
     let expected_length = item.encoding_length();
 
     let mut buffer = Vec::with_capacity(expected_length);

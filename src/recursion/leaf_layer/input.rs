@@ -57,7 +57,7 @@ impl<F: SmallField> CSPlaceholder<F> for RecursionLeafInput<F> {
 }
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug, Default(bound = "RecursionLeafInputWitness<F>: Default"))]
+#[derivative(Clone, Debug(bound = ""), Default(bound = "RecursionLeafInputWitness<F>: Default"))]
 #[serde(bound = "<H::CircuitOutput as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned")]
 pub struct RecursionLeafInstanceWitness<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, BaseField = F>> {
     pub input: RecursionLeafInputWitness<F>,

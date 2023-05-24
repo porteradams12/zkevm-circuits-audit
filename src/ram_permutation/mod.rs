@@ -151,18 +151,12 @@ where
         &observable_input
             .non_deterministic_bootloader_memory_snapshot_length,
     );
+    num_nondeterministic_writes_equal.conditionally_enforce_true(cs, completed);
 
-    structured_input
-        .hidden_fsm_output
-        .num_nondeterministic_writes = num_nondeterministic_writes;
-
-    structured_input
-        .hidden_fsm_output
-        .current_unsorted_queue_state = unsorted_queue.into_state();
-
-    structured_input
-        .hidden_fsm_output
-        .current_sorted_queue_state = sorted_queue.into_state();
+    // form the final state
+    structured_input.hidden_fsm_output.num_nondeterministic_writes = num_nondeterministic_writes;
+    structured_input.hidden_fsm_output.current_unsorted_queue_state = unsorted_queue.into_state();
+    structured_input.hidden_fsm_output.current_sorted_queue_state = sorted_queue.into_state();
 
     structured_input.hidden_fsm_output.lhs_accumulator = lhs;
     structured_input.hidden_fsm_output.rhs_accumulator = rhs;
@@ -171,8 +165,6 @@ where
     structured_input.hidden_fsm_output.previous_full_key = previous_full_key;
     structured_input.hidden_fsm_output.previous_value = previous_value;
     structured_input.hidden_fsm_output.previous_is_ptr = previous_is_ptr;
-
-    num_nondeterministic_writes_equal.conditionally_enforce_true(cs, completed);
 
     structured_input.completion_flag = completed;
 
@@ -224,15 +216,12 @@ where
 
         // this is an exotic way so synchronize popping from both queues
         // in asynchronous resolution
-        let can_pop_unsorted = unsorted_is_empty.negated(cs);
-        let can_pop_sorted: Boolean<F> = sorted_is_empty.negated(cs);
-        Boolean::enforce_equal(cs, &can_pop_unsorted, &can_pop_sorted);
-        let can_pop = Boolean::multi_and(cs, &[can_pop_unsorted, can_pop_sorted]);
+        Boolean::enforce_equal(cs, &unsorted_is_empty, &sorted_is_empty);
+        let can_pop = unsorted_is_empty.negated(cs);
 
         // we do not need any information about unsorted element other than it's encoding
         let (_, unsorted_item_encoding) =
             unsorted_queue.pop_front(cs, can_pop);
-        // let unsorted_item_encoding = unsorted_queue.pop_first_encoding_only(cs, &can_pop, round_function);
         let (sorted_item, sorted_item_encoding) =
             sorted_queue.pop_front(cs, can_pop);
 
@@ -272,6 +261,7 @@ where
                 &num_nondeterministic_writes
             );
         }
+        
         // check RAM ordering
         {
             // either continue the argument or do nothing
@@ -280,19 +270,15 @@ where
             let comparison_key = [sorted_item.index, sorted_item.memory_page];
 
             // ensure sorting
-            let (keys_are_equal, previous_key_is_greater) = unpacked_long_comparison(
+            let (_keys_are_equal, previous_key_is_smaller) = unpacked_long_comparison(
                 cs,
-                previous_sorting_key,
                 &sorting_key,
+                previous_sorting_key,
             );
 
             // we can not have previous sorting key even to be >= than our current key
 
-            // keys_are_in_ascending_order = !previous_key_is_greater and !keys_are_equal
-            let keys_are_in_ascending_order = {
-                let keys_are_not_in_ascending_order = keys_are_equal.or(cs, previous_key_is_greater);
-                keys_are_not_in_ascending_order.negated(cs)
-            };
+            let keys_are_in_ascending_order = previous_key_is_smaller;
 
             if _cycle != 0 {
                 keys_are_in_ascending_order.conditionally_enforce_true(cs, can_pop);

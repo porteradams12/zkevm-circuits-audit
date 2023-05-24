@@ -63,26 +63,12 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         closed_form_input.clone()
     );
 
-    let initial_queue_from_passthrough_state = QueueState {
-        head: structured_input
+    let initial_queue_from_passthrough_state = structured_input
             .observable_input
-            .initial_queue_state
-            .head,
-        tail: structured_input
-            .observable_input
-            .initial_queue_state
-            .tail,
-    };
-    let initial_log_queue_state_from_fsm_state = QueueState {
-        head: structured_input
+            .initial_queue_state;
+    let initial_log_queue_state_from_fsm_state = structured_input
             .hidden_fsm_input
-            .initial_queue_state
-            .head,
-        tail: structured_input
-            .hidden_fsm_input
-            .initial_queue_state
-            .tail,
-    };
+            .initial_queue_state;
 
     let state = QueueState::conditionally_select(
         cs,
@@ -90,7 +76,7 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &initial_queue_from_passthrough_state,
         &initial_log_queue_state_from_fsm_state,
     );
-    let mut initial_queue = DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, state);
+    let mut initial_queue = DecommitQueue::<F, R>::from_state(cs, state);
 
     // passthrough must be trivial
     initial_queue_from_passthrough_state.enforce_trivial_head(cs);
@@ -99,26 +85,12 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
     let initial_queue_witness = FullStateCircuitQueueWitness::from_inner_witness(initial_queue_witness);
     initial_queue.witness = Arc::new(initial_queue_witness);
 
-    let intermediate_sorted_queue_from_passthrough_state = QueueState {
-        head: structured_input
+    let intermediate_sorted_queue_from_passthrough_state = structured_input
             .observable_input
-            .sorted_queue_initial_state
-            .head,
-        tail: structured_input
-            .observable_input
-            .sorted_queue_initial_state
-            .tail,
-    };
-    let intermediate_sorted_queue_from_fsm_input_state = QueueState {
-        head: structured_input
+            .sorted_queue_initial_state;
+    let intermediate_sorted_queue_from_fsm_input_state = structured_input
             .hidden_fsm_input
-            .sorted_queue_state
-            .head,
-        tail: structured_input
-            .hidden_fsm_input
-            .sorted_queue_state
-            .tail,
-    };
+            .sorted_queue_state;
 
     // it must be trivial
     intermediate_sorted_queue_from_passthrough_state.enforce_trivial_head(cs);
@@ -129,23 +101,16 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &intermediate_sorted_queue_from_passthrough_state,
         &intermediate_sorted_queue_from_fsm_input_state
     );
-    let mut intermediate_sorted_queue = DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, state);
+    let mut intermediate_sorted_queue = DecommitQueue::<F, R>::from_state(cs, state);
 
     let sorted_queue_witness = FullStateCircuitQueueWitness::from_inner_witness(sorted_queue_witness);
     intermediate_sorted_queue.witness = Arc::new(sorted_queue_witness);
 
     let empty_state = QueueState::empty(cs);
 
-    let final_sorted_queue_from_fsm_state = QueueState {
-        head: structured_input
+    let final_sorted_queue_from_fsm_state = structured_input
             .hidden_fsm_input
-            .final_queue_state
-            .head,
-        tail: structured_input
-            .hidden_fsm_input
-            .final_queue_state
-            .tail,
-    };
+            .final_queue_state;
     
     let state = QueueState::conditionally_select(
         cs,
@@ -153,7 +118,7 @@ where [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         &empty_state,
         &final_sorted_queue_from_fsm_state,
     );
-    let mut final_sorted_queue = DecommitQueue::<F, 8, 12, 4, R>::from_state(cs, state);
+    let mut final_sorted_queue = DecommitQueue::<F, R>::from_state(cs, state);
 
     let challenges = crate::utils::produce_fs_challenges::<F, CS, R, FULL_SPONGE_QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
         cs, 
@@ -266,9 +231,9 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
-    original_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
-    sorted_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
-    result_queue: &mut DecommitQueue<F, 8, 12, 4, R>,
+    original_queue: &mut DecommitQueue<F, R>,
+    sorted_queue: &mut DecommitQueue<F, R>,
+    result_queue: &mut DecommitQueue<F, R>,
     mut lhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut rhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
@@ -291,8 +256,7 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     Num::enforce_equal(cs,  &unsorted_queue_length, &intermediate_sorted_queue_length);
 
     let no_work = original_queue.is_empty(cs);
-    // we can not have circuits that just do nothing
-    no_work.conditionally_enforce_false(cs, start_flag);
+    
     let mut previous_item_is_trivial = no_work.or(cs, start_flag);
 
     // Simultaneously pop, prove sorting and resolve logic
@@ -327,10 +291,23 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
                 .zip(sorted_encoding.iter())
                 .zip(challenges.iter())
             {
-                let left = Num::from_variable(*original_el).mul(cs, challenge);
-                lhs_contribution = lhs_contribution.add(cs, &left);
-                let right = Num::from_variable(*sorted_el).mul(cs, challenge);
-                rhs_contribution = rhs_contribution.add(cs, &right);
+                lhs_contribution = Num::fma(
+                    cs, 
+                    &Num::from_variable(*original_el),
+                    challenge, 
+                    &F::ONE, 
+                    &lhs_contribution, 
+                    &F::ONE
+                );
+
+                rhs_contribution = Num::fma(
+                    cs, 
+                    &Num::from_variable(*sorted_el),
+                    challenge, 
+                    &F::ONE, 
+                    &rhs_contribution, 
+                    &F::ONE
+                );
             }
 
             let new_lhs = lhs.mul(cs, &lhs_contribution);

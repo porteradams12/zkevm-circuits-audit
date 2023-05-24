@@ -30,7 +30,7 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
 use boojum::config::*;
-use boojum::cs::traits::circuit::Circuit;
+use boojum::cs::traits::circuit::{Circuit, ErasedBuilderForRecursiveVerifier};
 
 use super::*;
 
@@ -46,7 +46,7 @@ use boojum::field::FieldExtension;
 use boojum::cs::implementations::verifier::VerificationKeyCircuitGeometry;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
-#[derivative(Clone, Debug)]
+#[derivative(Clone, Debug(bound = ""))]
 #[serde(bound = "H::Output: serde::Serialize + serde::de::DeserializeOwned")]
 pub struct LeafLayerRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
     pub proof_config: ProofConfig,
@@ -59,7 +59,6 @@ pub fn leaf_layer_recursion_entry_point<
 F: SmallField,
 CS: ConstraintSystem<F> + 'static,
 R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-C: Circuit<F>,
 H: RecursiveTreeHasher<F, Num<F>>,
 EXT: FieldExtension<2, BaseField = F>,
 TR: RecursiveTranscript<F, CompatibleCap = <H::NonCircuitSimulator as TreeHasher<F>>::Output, CircuitReflection = CTR>,
@@ -70,9 +69,9 @@ POW: RecursivePoWRunner<F>,
     witness: RecursionLeafInstanceWitness<F, H, EXT>,
     round_function: &R,
     config: LeafLayerRecursionConfig<F, H::NonCircuitSimulator, EXT>,
-    circuit_placeholder: C,
+    verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
     transcript_params: TR::TransciptParameters,
-)
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
 where 
     [(); <RecursionQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
@@ -89,7 +88,7 @@ where
         queue_state,
     } = input;
     let mut queue = 
-        RecursionQueue::<F, 8, 12, 4, R>::from_state(cs, queue_state);
+        RecursionQueue::<F, R>::from_state(cs, queue_state);
 
     let RecursionLeafParameters { circuit_type, vk_commitment } = params;
 
@@ -113,23 +112,26 @@ where
         padding_proof 
     } = config;
 
-    use boojum::gadgets::recursion::recursive_verifier_builder::CsRecursiveVerifierBuilder;
-
     // use this and deal with borrow checker
 
     let r = cs as *mut CS;
-    let tmp_cs = unsafe {&mut *r};
 
-    let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
-        tmp_cs, 
-        vk_fixed_parameters.parameters, 
-        vk_fixed_parameters.lookup_parameters,
-    );
-    use boojum::cs::cs_builder::new_builder;
-    let builder = new_builder::<_, F>(builder_impl);
+    assert_eq!(vk_fixed_parameters.parameters, verifier_builder.geometry());
 
-    let builder = circuit_placeholder.configure_builder(builder);
-    let verifier = builder.build(());
+    let verifier = verifier_builder.create_recursive_verifier(cs);
+
+    // use boojum::gadgets::recursion::recursive_verifier_builder::CsRecursiveVerifierBuilder;
+    // let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
+    //     cs,
+    //     vk_fixed_parameters.parameters, 
+    // );
+    // use boojum::cs::cs_builder::new_builder;
+    // let builder = new_builder::<_, F>(builder_impl);
+
+    // let builder = e.configure_builder(builder);
+    // let verifier = builder.build(());
+
+    let cs = unsafe {&mut *r};
 
     for _ in 0..capacity {
         let witness = proof_witnesses.pop_front().unwrap_or(padding_proof.clone());
@@ -180,4 +182,6 @@ where
         let gate = PublicInputGate::new(el.get_variable());
         gate.add_to_cs(cs);
     }
+
+    input_commitment
 }
