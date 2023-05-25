@@ -1,7 +1,6 @@
 use arrayvec::ArrayVec;
 
 use boojum::{
-    cs::gates::{ConstantAllocatableCS, UIntXAddGate},
     gadgets::{u256::UInt256, traits::castable::WitnessCastable},
 };
 use crate::base_structures::{register::VMRegister, vm_state::ArithmeticFlagsPort};

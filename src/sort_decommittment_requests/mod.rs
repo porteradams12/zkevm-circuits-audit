@@ -14,7 +14,7 @@ use boojum::gadgets::{
     queue::*
 };
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::gadgets::traits::encodable::CircuitEncodable;
+
 use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use crate::storage_validity_by_grand_product::unpacked_long_comparison;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;

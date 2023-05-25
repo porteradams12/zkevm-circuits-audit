@@ -1,5 +1,5 @@
 use super::*;
-use cs_derive::*;
+
 use boojum::serde_utils::BigArraySerde;
 use crate::base_structures::vm_state::*;
 use boojum::gadgets::queue::*;

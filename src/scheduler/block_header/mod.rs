@@ -1,39 +1,38 @@
 use super::*;
-use boojum::cs::implementations::proof::Proof;
-use boojum::cs::implementations::verifier::VerificationKey;
+
+
 use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
-use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueRawWitness;
+
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
     boolean::Boolean,
-    queue::*,
     traits::{
         allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
         witnessable::WitnessHookable,
     },
 };
 use cs_derive::*;
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
-use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputDataWitness;
-use crate::base_structures::recursion_query::*;
-use crate::base_structures::vm_state::*;
-use crate::code_unpacker_sha256::input::CodeDecommitterOutputDataWitness;
-use crate::demux_log_queue::input::LogDemuxerInputOutputWitness;
-use crate::fsm_input_output::circuit_inputs::main_vm::VmOutputDataWitness;
-use crate::log_sorter::input::EventsDeduplicatorOutputDataWitness;
-use crate::sort_decommittment_requests::input::CodeDecommittmentsDeduplicatorInputOutputWitness;
-use crate::storage_application::input::StorageApplicationOutputDataWitness;
-use crate::storage_validity_by_grand_product::input::StorageDeduplicatorOutputDataWitness;
-use crate::fsm_input_output::ClosedFormInputCompactFormWitness;
-use boojum::gadgets::num::Num;
-use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
-use std::collections::VecDeque;
-use derivative::*;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 use boojum::serde_utils::BigArraySerde;
-use boojum::field::FieldExtension;
+
 use boojum::gadgets::keccak256;
 
 pub const NUM_SHARDS: usize = 2;

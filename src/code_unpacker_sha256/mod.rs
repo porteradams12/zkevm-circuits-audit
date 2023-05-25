@@ -1,43 +1,36 @@
 pub mod input;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
+
 use input::*;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use ethereum_types::U256;
-use boojum::cs::Variable;
+
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
 use boojum::gadgets::{
     traits::{
         selectable::Selectable, 
-        allocatable::CSAllocatableExt, 
-        allocatable::CSAllocatable,
-        encodable::CircuitEncodableExt
+        allocatable::CSAllocatableExt
     },
     num::Num,
     boolean::Boolean,
-    u8::UInt8,
     u16::UInt16,
     u32::UInt32,
-    u160::*,
     u256::UInt256,
     queue::*
 };
 use boojum::gadgets::sha256::round_function::round_function_over_uint32;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::base_structures::{
-    vm_state::*, 
-    log_query::{LogQuery,LOG_QUERY_PACKED_WIDTH},
     decommit_query::*,
     memory_query::*,
 };
 
-use zkevm_opcode_defs::system_params::*;
+
 
 use crate::{
-    demux_log_queue::input::*,
     fsm_input_output::{*, circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH} 
 };
 

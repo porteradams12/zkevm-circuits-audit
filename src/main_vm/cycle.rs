@@ -8,8 +8,8 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::CSGeometry;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
-use boojum::gadgets::traits::selectable::MultiSelectable;
-use boojum::gadgets::u256::{UInt256, recompose_u256_as_u32x8};
+
+use boojum::gadgets::u256::{UInt256};
 use crate::base_structures::decommit_query::DecommitQuery;
 use crate::base_structures::log_query::LogQuery;
 use crate::base_structures::memory_query::{self, MemoryQuery};

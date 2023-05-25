@@ -1,6 +1,6 @@
 use super::*;
 use self::ethereum_types::U256;
-use boojum::cs::gates::fma_gate_without_constant::*;
+
 use boojum::gadgets::u256::{UInt256, decompose_u256_as_u32x8};
 use crate::base_structures::vm_state::ArithmeticFlagsPort;
 use crate::base_structures::register::VMRegister;

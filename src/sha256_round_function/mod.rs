@@ -1,11 +1,11 @@
 use super::*;
-use arrayvec::ArrayVec;
-use boojum::cs::gates::ConstantAllocatableCS;
+
+
 use boojum::field::SmallField;
-use boojum::gadgets::curves::sw_projective::SWProjectivePoint;
-use boojum::gadgets::keccak256::keccak256;
+
+
 use boojum::gadgets::traits::witnessable::WitnessHookable;
-use boojum::gadgets::u16::UInt16;
+
 use cs_derive::*;
 use boojum::gadgets::u32::UInt32;
 use boojum::cs::traits::cs::ConstraintSystem;
@@ -13,13 +13,13 @@ use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::non_native_field::traits::NonNativeField;
-use boojum::gadgets::non_native_field::implementations::*;
+
 use ethereum_types::U256;
-use boojum::crypto_bigint::{U1024, Zero};
+use boojum::crypto_bigint::{Zero};
 use boojum::gadgets::num::Num;
 use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
-use std::collections::VecDeque;
+
 use std::sync::{Arc, RwLock};
 use boojum::pairing::{CurveAffine, GenericCurveProjective};
 use boojum::gadgets::u8::UInt8;

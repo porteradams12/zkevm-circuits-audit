@@ -1,5 +1,4 @@
 use boojum::{
-    cs::gates::reduction_by_powers_gate,
     gadgets::u256::UInt256,
 };
 

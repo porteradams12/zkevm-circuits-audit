@@ -8,7 +8,7 @@ use crate::base_structures::precompile_input_outputs::*;
 use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::gadgets::queue::*;
 use crate::base_structures::vm_state::*;
-use crate::base_structures::log_query::*;
+
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
@@ -29,7 +29,7 @@ impl<F: SmallField> CSPlaceholder<F> for EcrecoverCircuitFSMInputOutput<F> {
     }
 }
 
-use crate::fsm_input_output::*;
+
 
 pub type EcrecoverCircuitInputOutput<F> = ClosedFormInput<
     F,

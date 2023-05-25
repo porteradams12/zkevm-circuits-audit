@@ -696,7 +696,7 @@ where
     );
     structured_input.observable_output = observable_output;
 
-    use boojum::gadgets::traits::witnessable::WitnessHookable;
+    
 
     // self-check
     structured_input.hook_compare_witness(cs, &closed_form_input);

@@ -1,10 +1,8 @@
 use boojum::{
-    cs::gates::reduction_by_powers_gate,
-    gadgets::{u256::UInt256, traits::{selectable::MultiSelectable, castable::WitnessCastable}},
+    gadgets::{u256::UInt256, traits::{castable::WitnessCastable}},
 };
 use cs_derive::CSAllocatable;
 use crate::base_structures::{
-    log_query::{self, LogQuery, LOG_QUERY_PACKED_WIDTH, ROLLBACK_PACKING_FLAG_VARIABLE_IDX},
     register::VMRegister,
 };
 

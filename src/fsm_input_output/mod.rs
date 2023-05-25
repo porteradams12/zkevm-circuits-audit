@@ -1,7 +1,7 @@
 use super::*;
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use cs_derive::*;
-use boojum::algebraic_props::round_function;
+
 use boojum::cs::gates::ConstantAllocatableCS;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
 use boojum::cs::traits::cs::ConstraintSystem;

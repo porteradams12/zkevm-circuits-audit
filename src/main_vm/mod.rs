@@ -1,13 +1,13 @@
 use super::*;
 
-use crate::config::*;
+
 use boojum::cs::gates::PublicInputGate;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::{Place, Variable};
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::queue::{QueueState, QueueTailState};
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
+
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;

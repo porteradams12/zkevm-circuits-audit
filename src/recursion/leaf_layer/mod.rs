@@ -6,21 +6,19 @@ use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 use boojum::gadgets::recursion::recursive_transcript::RecursiveTranscript;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
+
 
 use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
-use ethereum_types::U256;
-use boojum::cs::Variable;
+use std::sync::{Arc};
+
+
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
 use boojum::gadgets::{
     traits::{
-        selectable::Selectable, 
         allocatable::CSAllocatableExt, 
-        allocatable::CSAllocatable,
-        encodable::CircuitEncodableExt
+        allocatable::CSAllocatable
     },
     num::Num,
     boolean::Boolean,

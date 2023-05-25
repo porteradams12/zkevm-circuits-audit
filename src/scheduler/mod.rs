@@ -9,40 +9,39 @@ use self::input::*;
 pub mod aux;
 
 use boojum::cs::implementations::proof::Proof;
-use boojum::cs::implementations::verifier::VerificationKey;
-use boojum::cs::{traits::cs::ConstraintSystem, Variable};
+
+use boojum::cs::{traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
-use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueRawWitness;
+
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
-use boojum::gadgets::u256::UInt256;
+
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
     boolean::Boolean,
     queue::*,
     traits::{
-        allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
-        witnessable::WitnessHookable,
+        allocatable::*, selectable::Selectable,
     },
 };
-use cs_derive::*;
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
+
+
 use crate::base_structures::decommit_query::DecommitQuery;
 use crate::base_structures::decommit_query::DecommitQueue;
 use crate::base_structures::memory_query::MemoryQuery;
 use crate::base_structures::memory_query::MemoryQueue;
-use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputDataWitness;
+
 use crate::base_structures::recursion_query::*;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::recursion::VK_COMMITMENT_LENGTH;
 use crate::scheduler::aux::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
-use std::collections::VecDeque;
-use std::f32::consts::E;
-use derivative::*;
-use boojum::serde_utils::BigArraySerde;
+
+
+
+
 use boojum::field::FieldExtension;
 use boojum::gadgets::keccak256;
 use boojum::cs::implementations::verifier::VerificationKeyCircuitGeometry;
@@ -56,7 +55,7 @@ use boojum::gadgets::recursion::recursive_tree_hasher::*;
 use boojum::gadgets::recursion::circuit_pow::RecursivePoWRunner;
 use std::collections::HashMap;
 use crate::base_structures::precompile_input_outputs::*;
-use crate::base_structures::recursion_query::*;
+
 use crate::base_structures::vm_state::*;
 use crate::code_unpacker_sha256::input::*;
 use crate::demux_log_queue::input::*;

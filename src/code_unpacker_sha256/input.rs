@@ -6,13 +6,11 @@ use boojum::cs::{
     Variable
 };
 use crate::base_structures::{vm_state::*, 
-    log_query::{LogQuery,LOG_QUERY_PACKED_WIDTH}, 
 };
 use boojum::gadgets::{
     queue::*,
     traits::{allocatable::*, selectable::Selectable, encodable::CircuitVarLengthEncodable, witnessable::WitnessHookable},
     boolean::Boolean,
-    num::Num,
     u16::UInt16,
     u32::UInt32,
     u256::UInt256,

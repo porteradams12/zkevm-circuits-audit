@@ -1,18 +1,18 @@
-use crate::base_structures::recursion_query::{RecursionQuery, RecursionQueue};
+use crate::base_structures::recursion_query::{RecursionQuery};
 use crate::fsm_input_output::commit_variable_length_encodable_item;
 use boojum::cs::implementations::proof::Proof;
 use boojum::cs::implementations::prover::ProofConfig;
-use boojum::gadgets::queue;
+
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 use boojum::gadgets::recursion::recursive_transcript::RecursiveTranscript;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
+
 
 use std::collections::VecDeque;
-use std::sync::{Arc, RwLock};
-use ethereum_types::U256;
-use boojum::cs::Variable;
+
+
+
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
 use boojum::field::SmallField;
@@ -20,8 +20,7 @@ use boojum::gadgets::{
     traits::{
         selectable::Selectable, 
         allocatable::CSAllocatableExt, 
-        allocatable::CSAllocatable,
-        encodable::CircuitEncodableExt
+        allocatable::CSAllocatable
     },
     num::Num,
     boolean::Boolean,
@@ -29,7 +28,7 @@ use boojum::gadgets::{
 };
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
-use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
+
 use boojum::config::*;
 use boojum::cs::traits::circuit::Circuit;
 use boojum::gadgets::u32::UInt32;

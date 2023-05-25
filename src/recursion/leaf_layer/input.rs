@@ -6,7 +6,6 @@ use boojum::field::SmallField;
 use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueRawWitness;
 use boojum::gadgets::{
     boolean::Boolean,
-    queue::*,
     traits::{
         allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
         witnessable::WitnessHookable,
@@ -17,7 +16,7 @@ use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use crate::base_structures::recursion_query::*;
 use crate::base_structures::vm_state::*;
 use boojum::gadgets::num::Num;
-use derivative::*;
+
 use boojum::serde_utils::BigArraySerde;
 use boojum::field::FieldExtension;
 

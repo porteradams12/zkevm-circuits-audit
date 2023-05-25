@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use super::*;
-use cs_derive::*;
+
 use boojum::cs::Variable;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
 use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
@@ -9,7 +9,7 @@ use crate::base_structures::precompile_input_outputs::*;
 use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::gadgets::queue::*;
 use crate::base_structures::vm_state::*;
-use crate::base_structures::log_query::*;
+
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::gadgets::boolean::Boolean;
@@ -74,7 +74,7 @@ impl<F: SmallField> CSPlaceholder<F> for Keccak256RoundFunctionFSMInputOutput<F>
     }
 }
 
-use crate::fsm_input_output::*;
+
 
 pub type Keccak256RoundFunctionCircuitInputOutput<F> = ClosedFormInput<
     F,

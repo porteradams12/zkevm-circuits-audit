@@ -18,10 +18,9 @@ use boojum::gadgets::{
     num::Num,
     queue::*,
     traits::{
-        allocatable::CSAllocatableExt, encodable::CircuitEncodableExt, selectable::Selectable,
+        allocatable::CSAllocatableExt, selectable::Selectable,
     },
     u160::*,
-    u32::UInt32,
 };
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
