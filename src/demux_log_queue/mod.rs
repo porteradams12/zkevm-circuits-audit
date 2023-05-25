@@ -275,44 +275,44 @@ pub fn demultiplex_storage_logs_inner<
         let execute_ecrecover_call =
             Boolean::multi_and(cs, &[is_precompile_aux_byte, is_ecrecover_address, execute]);
 
-        rollup_storage_queue.push_with_optimizer(
+        rollup_storage_queue.push_encoding_with_optimizer_without_changing_witness(
             cs, 
-            popped.0, 
+            popped.1, 
             execute_rollup_storage, 
             LogType::RollupStorage as usize, 
             &mut optimizer
         );
-        events_queue.push_with_optimizer(
+        events_queue.push_encoding_with_optimizer_without_changing_witness(
             cs, 
-            popped.0, 
+            popped.1, 
             execute_event, 
             LogType::Events as usize, 
             &mut optimizer
         );
-        l1_messages_queue.push_with_optimizer(
+        l1_messages_queue.push_encoding_with_optimizer_without_changing_witness(
             cs, 
-            popped.0, 
+            popped.1, 
             execute_l1_message, 
             LogType::L1Messages as usize, 
             &mut optimizer
         );
-        keccak_calls_queue.push_with_optimizer(
+        keccak_calls_queue.push_encoding_with_optimizer_without_changing_witness(
             cs, 
-            popped.0, 
+            popped.1, 
             execute_keccak_call, 
             LogType::KeccakCalls as usize, 
             &mut optimizer
         );
-        sha256_calls_queue.push_with_optimizer(
+        sha256_calls_queue.push_encoding_with_optimizer_without_changing_witness(
             cs, 
-            popped.0, 
+            popped.1, 
             execute_sha256_call, 
             LogType::Sha256Calls as usize, 
             &mut optimizer
         );
-        ecdsa_calls_queue.push_with_optimizer(
+        ecdsa_calls_queue.push_encoding_with_optimizer_without_changing_witness(
             cs, 
-            popped.0, 
+            popped.1, 
             execute_ecrecover_call, 
             LogType::ECRecoverCalls as usize, 
             &mut optimizer
