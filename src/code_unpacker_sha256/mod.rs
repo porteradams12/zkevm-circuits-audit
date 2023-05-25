@@ -2,37 +2,27 @@ pub mod input;
 
 use input::*;
 
+use ethereum_types::U256;
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
-use ethereum_types::U256;
 
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
-use boojum::field::SmallField;
-use boojum::gadgets::{
-    traits::{
-        selectable::Selectable, 
-        allocatable::CSAllocatableExt
-    },
-    num::Num,
-    boolean::Boolean,
-    u16::UInt16,
-    u32::UInt32,
-    u256::UInt256,
-    queue::*
-};
-use boojum::gadgets::sha256::round_function::round_function_over_uint32;
+use crate::base_structures::{decommit_query::*, memory_query::*};
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use crate::base_structures::{
-    decommit_query::*,
-    memory_query::*,
+use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
+use boojum::field::SmallField;
+use boojum::gadgets::sha256::round_function::round_function_over_uint32;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
+use boojum::gadgets::{
+    boolean::Boolean,
+    num::Num,
+    queue::*,
+    traits::{allocatable::CSAllocatableExt, selectable::Selectable},
+    u16::UInt16,
+    u256::UInt256,
+    u32::UInt32,
 };
 
-
-
-use crate::{
-    fsm_input_output::{*, circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH} 
-};
+use crate::fsm_input_output::{circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH, *};
 
 use crate::storage_application::ConditionalWitnessAllocator;
 
@@ -46,7 +36,7 @@ pub fn unpack_code_into_memory_entry_point<
     round_function: &R,
     limit: usize,
 ) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
-where 
+where
     [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); UInt256::<F>::INTERNAL_STRUCT_LEN]:,
@@ -71,30 +61,24 @@ where
             .sorted_requests_queue_initial_state,
         &structured_input
             .hidden_fsm_input
-            .decommittment_requests_queue_state
+            .decommittment_requests_queue_state,
     );
 
-    let mut requests_queue = 
-        DecommitQueue::<F, R>::from_state(cs, requests_queue_state);
+    let mut requests_queue = DecommitQueue::<F, R>::from_state(cs, requests_queue_state);
 
     use crate::code_unpacker_sha256::full_state_queue::FullStateCircuitQueueWitness;
-    requests_queue.witness = Arc::new(
-        FullStateCircuitQueueWitness::from_inner_witness(sorted_requests_queue_witness)
-    );
+    requests_queue.witness = Arc::new(FullStateCircuitQueueWitness::from_inner_witness(
+        sorted_requests_queue_witness,
+    ));
 
     let memory_queue_state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
-        &structured_input
-            .observable_input
-            .memory_queue_initial_state,
-        &structured_input
-            .hidden_fsm_input
-            .memory_queue_state
+        &structured_input.observable_input.memory_queue_initial_state,
+        &structured_input.hidden_fsm_input.memory_queue_state,
     );
 
-    let mut memory_queue = 
-        MemoryQueryQueue::<F, 8, 12, 4, R>::from_state(cs, memory_queue_state);
+    let mut memory_queue = MemoryQueryQueue::<F, 8, 12, 4, R>::from_state(cs, memory_queue_state);
 
     use boojum::gadgets::traits::allocatable::CSPlaceholder;
     let mut starting_fsm_state = CodeDecommittmentFSM::placeholder(cs);
@@ -108,7 +92,7 @@ where
     );
 
     let code_words_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
-        witness_source: Arc::new(RwLock::new(code_words))
+        witness_source: Arc::new(RwLock::new(code_words)),
     };
 
     let final_state = unpack_code_into_memory_inner(
@@ -128,13 +112,12 @@ where
     structured_input.completion_flag = done;
     structured_input.observable_output = CodeDecommitterOutputData::placeholder(cs);
 
-    structured_input.observable_output.memory_queue_final_state =
-        QueueState::conditionally_select(
-            cs,
-            structured_input.completion_flag,
-            &final_memory_state,
-            &structured_input.observable_output.memory_queue_final_state,
-        );
+    structured_input.observable_output.memory_queue_final_state = QueueState::conditionally_select(
+        cs,
+        structured_input.completion_flag,
+        &final_memory_state,
+        &structured_input.observable_output.memory_queue_final_state,
+    );
 
     structured_input.hidden_fsm_output.internal_fsm = final_state;
     structured_input
@@ -153,7 +136,7 @@ where
         let gate = PublicInputGate::new(el.get_variable());
         gate.add_to_cs(cs);
     }
-    
+
     input_commitment
 }
 
@@ -169,11 +152,11 @@ pub fn unpack_code_into_memory_inner<
     memory_queue: &mut MemoryQueue<F, R>,
     unpack_requests_queue: &mut DecommitQueue<F, R>,
     initial_state: CodeDecommittmentFSM<F>,
-    code_word_witness: ConditionalWitnessAllocator::<F, UInt256<F>>,
+    code_word_witness: ConditionalWitnessAllocator<F, UInt256<F>>,
     _round_function: &R,
     limit: usize,
 ) -> CodeDecommittmentFSM<F>
-where 
+where
     [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); UInt256::<F>::INTERNAL_STRUCT_LEN]:,
@@ -216,13 +199,11 @@ where
 
         let chunks = decompose_uint32_to_uint16s(cs, &hash.inner[7]);
 
-        let version_hash_matches = UInt16::equals(
-            cs,
-            &chunks[1],
-            &versioned_hash_top_16_bits,
-        );
+        let version_hash_matches = UInt16::equals(cs, &chunks[1], &versioned_hash_top_16_bits);
 
-        state.state_get_from_queue.conditionally_enforce_true(cs, version_hash_matches);
+        state
+            .state_get_from_queue
+            .conditionally_enforce_true(cs, version_hash_matches);
 
         let uint_16_one = UInt16::allocated_constant(cs, 1);
         let length_in_words = chunks[0];
@@ -233,22 +214,17 @@ where
             &uint_16_one,
         );
 
-        let length_in_rounds = unsafe {
-            length_in_words.increment_unchecked(cs)
-        };
+        let length_in_rounds = unsafe { length_in_words.increment_unchecked(cs) };
 
         let length_in_rounds = length_in_rounds.into_num().mul(cs, &half_num);
         // length is always a multiple of 2 since we decided so
 
-        let length_in_rounds = 
-            UInt16::from_variable_checked(cs, length_in_rounds.get_variable());
+        let length_in_rounds = UInt16::from_variable_checked(cs, length_in_rounds.get_variable());
 
-        let length_in_bits_may_be = 
-            unsafe {
-                UInt32::from_variable_unchecked(
-                    length_in_words.get_variable()
-                ).non_widening_mul(cs, &words_to_bits)
-            };
+        let length_in_bits_may_be = unsafe {
+            UInt32::from_variable_unchecked(length_in_words.get_variable())
+                .non_widening_mul(cs, &words_to_bits)
+        };
 
         // turn over the endianess
         // we IGNORE the highest 4 bytes
@@ -304,9 +280,7 @@ where
         state.state_get_from_queue = boolean_false;
 
         // even though it's not that useful, we will do it in a checked way for ease of witness
-        let may_be_num_rounds_left = unsafe {
-            state.num_rounds_left.decrement_unchecked(cs)
-        };
+        let may_be_num_rounds_left = unsafe { state.num_rounds_left.decrement_unchecked(cs) };
         state.num_rounds_left = UInt16::conditionally_select(
             cs,
             state.state_decommit,
@@ -327,7 +301,8 @@ where
         let code_word_1 = code_word_witness.conditionally_allocate_biased(
             cs,
             process_second_word,
-            code_word_0.inner[0].get_variable());
+            code_word_0.inner[0].get_variable(),
+        );
         let code_word_1_be_bytes = code_word_1.to_be_bytes(cs);
 
         // perform two writes. It's never a "pointer" type
@@ -340,18 +315,14 @@ where
             is_ptr: boolean_false,
         };
 
-        let state_index_incremented = unsafe {
-            state
-                .current_index
-                .increment_unchecked(cs)
-        };
+        let state_index_incremented = unsafe { state.current_index.increment_unchecked(cs) };
 
         state.current_index = UInt32::conditionally_select(
-            cs, 
-            state.state_decommit, 
-            &state_index_incremented, 
-            &state.current_index
-        ); 
+            cs,
+            state.state_decommit,
+            &state_index_incremented,
+            &state.current_index,
+        );
 
         let mem_query_1 = MemoryQuery {
             timestamp: state.timestamp,
@@ -364,17 +335,13 @@ where
 
         // even if we do not write in practice then we will never use next value too
 
-        let state_index_incremented = unsafe {
-            state
-                .current_index
-                .increment_unchecked(cs)
-        };
+        let state_index_incremented = unsafe { state.current_index.increment_unchecked(cs) };
 
         state.current_index = UInt32::conditionally_select(
-            cs, 
-            process_second_word, 
-            &state_index_incremented, 
-            &state.current_index
+            cs,
+            process_second_word,
+            &state_index_incremented,
+            &state.current_index,
         );
 
         memory_queue.push(cs, mem_query_0, state.state_decommit);
@@ -382,7 +349,11 @@ where
 
         // mind endianess!
         let mut sha256_input = [zero_u32; 16];
-        for (dst, src) in sha256_input.iter_mut().zip(code_word_0_be_bytes.array_chunks::<4>().chain(code_word_1_be_bytes.array_chunks::<4>())) {
+        for (dst, src) in sha256_input.iter_mut().zip(
+            code_word_0_be_bytes
+                .array_chunks::<4>()
+                .chain(code_word_1_be_bytes.array_chunks::<4>()),
+        ) {
             *dst = UInt32::from_be_bytes(cs, *src);
         }
 
@@ -396,7 +367,7 @@ where
         sha256_padding[7] = state.length_in_bits;
 
         assert_eq!(sha256_input.len(), 16);
-        
+
         for (dst, src) in sha256_input[8..].iter_mut().zip(sha256_padding.iter()) {
             *dst = UInt32::conditionally_select(cs, finalize, src, dst);
         }
@@ -414,7 +385,7 @@ where
         );
 
         // make it into uint256, and do not forget to ignore highest four bytes
-        let hash = UInt256{
+        let hash = UInt256 {
             inner: [
                 new_internal_state[7],
                 new_internal_state[6],
@@ -424,23 +395,19 @@ where
                 new_internal_state[2],
                 new_internal_state[1],
                 UInt32::allocated_constant(cs, 0),
-            ]
+            ],
         };
 
         for (part_of_first, part_of_second) in hash
             .inner
             .iter()
-            .zip(
-                state.hash_to_compare_against
-                    .inner
-                    .iter()
-            )
+            .zip(state.hash_to_compare_against.inner.iter())
         {
             Num::conditionally_enforce_equal(
-                cs, 
-                finalize, 
-                &part_of_first.into_num(), 
-                &part_of_second.into_num()
+                cs,
+                finalize,
+                &part_of_first.into_num(),
+                &part_of_second.into_num(),
             );
         }
 
@@ -464,40 +431,34 @@ fn decompose_uint32_to_uint16s<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     value: &UInt32<F>,
 ) -> [UInt16<F>; 2] {
-    let [byte_0, 
-        byte_1, 
-        byte_2, 
-        byte_3
-    ] = value.decompose_into_bytes(cs);
-    
+    let [byte_0, byte_1, byte_2, byte_3] = value.decompose_into_bytes(cs);
+
     [
         UInt16::from_le_bytes(cs, [byte_0, byte_1]),
-        UInt16::from_le_bytes(cs, [byte_2, byte_3])
+        UInt16::from_le_bytes(cs, [byte_2, byte_3]),
     ]
 }
 
 #[cfg(test)]
-mod tests { 
+mod tests {
     use crate::base_structures::decommit_query;
 
     use super::*;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
-    use boojum::cs::implementations::reference_cs::{
-        CSDevelopmentAssembly,
-    };
-    use boojum::cs::toolboxes::gate_config::{GatePlacementStrategy};
+    use boojum::cs::implementations::reference_cs::CSDevelopmentAssembly;
+    use boojum::cs::toolboxes::gate_config::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
+    use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
     use boojum::gadgets::tables::*;
-    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
-    use boojum::worker::Worker;
-    use ethereum_types::{Address, U256};
+    use boojum::gadgets::traits::allocatable::CSPlaceholder;
     use boojum::gadgets::u160::UInt160;
     use boojum::gadgets::u256::UInt256;
     use boojum::gadgets::u8::UInt8;
-    use boojum::gadgets::traits::allocatable::CSPlaceholder;
-    use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
+    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::worker::Worker;
+    use ethereum_types::{Address, U256};
 
     type F = GoldilocksField;
     type P = GoldilocksField;
@@ -514,8 +475,12 @@ mod tests {
 
         use boojum::cs::cs_builder::*;
 
-        fn configure<T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
-            builder: CsBuilder<T, F, GC, TB>
+        fn configure<
+            T: CsBuilderImpl<F, T>,
+            GC: GateConfigurationHolder<F>,
+            TB: StaticToolboxHolder,
+        >(
+            builder: CsBuilder<T, F, GC, TB>,
         ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
             let builder = builder.allow_lookup(
                 LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
@@ -524,17 +489,48 @@ mod tests {
                     share_table_id: true,
                 },
             );
-            let builder = ConstantsAllocatorGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ReductionGate::<F, 4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = BooleanConstraintGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<32>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<16>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = SelectionGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ZeroCheckGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns,false);
-            let builder = DotProductGate::<4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ConstantsAllocatorGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ReductionGate::<F, 4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = BooleanConstraintGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<32>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<16>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = SelectionGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ZeroCheckGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+                false,
+            );
+            let builder = DotProductGate::<4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
             let builder = MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = NopGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = NopGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
 
             builder
         }
@@ -542,11 +538,8 @@ mod tests {
         use boojum::config::DevCSConfig;
         use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
 
-        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry, 
-            1 << 26,
-            1 << 20
-        );
+        let builder_impl =
+            CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(geometry, 1 << 26, 1 << 20);
         use boojum::cs::cs_builder::new_builder;
         let builder = new_builder::<_, F>(builder_impl);
 
@@ -563,9 +556,9 @@ mod tests {
         owned_cs.add_lookup_table::<Ch4Table, 4>(table);
 
         let table = create_4bit_chunk_split_table::<F, 1>();
-        owned_cs.add_lookup_table::<chunk4bits::Split4BitChunkTable::<1>, 4>(table);
+        owned_cs.add_lookup_table::<chunk4bits::Split4BitChunkTable<1>, 4>(table);
         let table = create_4bit_chunk_split_table::<F, 2>();
-        owned_cs.add_lookup_table::<chunk4bits::Split4BitChunkTable::<2>, 4>(table);
+        owned_cs.add_lookup_table::<chunk4bits::Split4BitChunkTable<2>, 4>(table);
 
         let cs = &mut owned_cs;
 
@@ -595,7 +588,7 @@ mod tests {
             starting_fsm_state,
             word_witness,
             &round_function,
-            limit
+            limit,
         );
 
         // Check the corectness
@@ -605,12 +598,13 @@ mod tests {
 
         let final_memory_queue_state = compute_memory_queue_state(cs);
         for (lhs, rhs) in final_memory_queue_state
-            .tail.tail.iter()
-            .zip(
-                memory_queue.tail.iter()
-            ) {
-                Num::enforce_equal(cs, lhs, rhs);
-            }
+            .tail
+            .tail
+            .iter()
+            .zip(memory_queue.tail.iter())
+        {
+            Num::enforce_equal(cs, lhs, rhs);
+        }
 
         cs.pad_and_shrink();
         let worker = Worker::new();
@@ -619,11 +613,13 @@ mod tests {
         assert!(owned_cs.check_if_satisfied(&worker));
     }
 
-    fn create_witness_allocator<CS: ConstraintSystem<F>>(cs: &mut CS) -> ConditionalWitnessAllocator::<F, UInt256<F>> {
+    fn create_witness_allocator<CS: ConstraintSystem<F>>(
+        cs: &mut CS,
+    ) -> ConditionalWitnessAllocator<F, UInt256<F>> {
         let code_words_witness = get_byte_code_witness();
 
         let code_words_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
-            witness_source: Arc::new(RwLock::new(code_words_witness.into()))
+            witness_source: Arc::new(RwLock::new(code_words_witness.into())),
         };
 
         code_words_allocator
@@ -644,7 +640,9 @@ mod tests {
         vec![result]
     }
 
-    fn compute_memory_queue_state<CS: ConstraintSystem<F>>(cs: &mut CS) -> QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH> {
+    fn compute_memory_queue_state<CS: ConstraintSystem<F>>(
+        cs: &mut CS,
+    ) -> QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH> {
         let boolean_true = Boolean::allocate(cs, true);
         let mut memory_queue = MemoryQueryQueue::<F, 8, 12, 4, Poseidon2Goldilocks>::empty(cs);
 
@@ -668,7 +666,10 @@ mod tests {
     }
 
     fn get_code_hash_witness() -> U256 {
-        U256::from_dec_str("452313746998214869734508634865817576060841700842481516984674100922521850987").unwrap()
+        U256::from_dec_str(
+            "452313746998214869734508634865817576060841700842481516984674100922521850987",
+        )
+        .unwrap()
     }
 
     fn get_byte_code_witness() -> [U256; 33] {
@@ -706,8 +707,7 @@ mod tests {
             "79228162514264337610723819524",
             "4294967295",
             "0",
-        ].map(|el| {
-            U256::from_dec_str(el).unwrap()
-        })
+        ]
+        .map(|el| U256::from_dec_str(el).unwrap())
     }
 }

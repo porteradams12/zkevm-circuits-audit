@@ -16,6 +16,7 @@ use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
 use boojum::gadgets::traits::castable::WitnessCastable;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
@@ -31,7 +32,6 @@ use boojum::gadgets::{
     u32::UInt32,
     u8::UInt8,
 };
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
 use crate::{
     demux_log_queue::StorageLogQueue,
@@ -559,9 +559,14 @@ where
     assert!(limit <= u32::MAX as usize);
 
     let unsorted_queue_length = Num::from_variable(original_queue.length.get_variable());
-    let intermediate_sorted_queue_length = Num::from_variable(intermediate_sorted_queue.length.get_variable());
+    let intermediate_sorted_queue_length =
+        Num::from_variable(intermediate_sorted_queue.length.get_variable());
 
-    Num::enforce_equal(cs,  &unsorted_queue_length, &intermediate_sorted_queue_length);
+    Num::enforce_equal(
+        cs,
+        &unsorted_queue_length,
+        &intermediate_sorted_queue_length,
+    );
 
     // we can recreate it here, there are two cases:
     // - we are 100% empty, but it's the only circuit in this case
@@ -592,7 +597,7 @@ where
         Boolean::enforce_equal(cs, &original_is_empty, &sorted_is_empty);
 
         let original_is_not_empty = original_is_empty.negated(cs);
-        let sorted_is_not_empty = sorted_is_empty.negated(cs); 
+        let sorted_is_not_empty = sorted_is_empty.negated(cs);
 
         let should_pop = Boolean::multi_and(cs, &[original_is_not_empty, sorted_is_not_empty]);
         let item_is_trivial = original_is_empty;
@@ -809,12 +814,13 @@ where
                     &this_cell_current_depth,
                 );
             }
-            
+
             // check consistency
             let read_is_equal_to_current =
                 UInt256::equals(cs, &this_cell_current_value, &record.read_value);
             // we ALWAYS ensure read consistency on write (but not rollback) and on plain read
-            let check_read_consistency = Boolean::multi_or(cs, &[non_trivial_read_of_same_cell, write_no_rollback]);
+            let check_read_consistency =
+                Boolean::multi_or(cs, &[non_trivial_read_of_same_cell, write_no_rollback]);
             read_is_equal_to_current.conditionally_enforce_true(cs, check_read_consistency);
 
             // decide to update
@@ -992,11 +998,15 @@ mod tests {
     type F = GoldilocksField;
     type P = GoldilocksField;
 
-    use boojum::cs::cs_builder::*;
     use boojum::config::*;
+    use boojum::cs::cs_builder::*;
 
-    fn configure<T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
-        builder: CsBuilder<T, F, GC, TB>
+    fn configure<
+        T: CsBuilderImpl<F, T>,
+        GC: GateConfigurationHolder<F>,
+        TB: StaticToolboxHolder,
+    >(
+        builder: CsBuilder<T, F, GC, TB>,
     ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
         let owned_cs = builder;
         let owned_cs = owned_cs.allow_lookup(
@@ -1066,11 +1076,8 @@ mod tests {
         use boojum::config::DevCSConfig;
         use boojum::cs::cs_builder_reference::*;
 
-        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry, 
-            1 << 26,
-            1 << 20
-        );
+        let builder_impl =
+            CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(geometry, 1 << 26, 1 << 20);
         use boojum::cs::cs_builder::new_builder;
         let builder = new_builder::<_, F>(builder_impl);
 

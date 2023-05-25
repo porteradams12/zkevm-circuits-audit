@@ -4,6 +4,7 @@ use crate::base_structures::{
 };
 use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use boojum::gadgets::{
     boolean::Boolean,
     queue::*,
@@ -13,7 +14,6 @@ use boojum::gadgets::{
     },
 };
 use cs_derive::*;
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use derivative::*;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]

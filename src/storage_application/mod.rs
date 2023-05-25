@@ -14,18 +14,18 @@ use boojum::gadgets::blake2s::blake2s;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::keccak256;
 use boojum::gadgets::num::Num;
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt, CSPlaceholder};
 use boojum::gadgets::traits::castable::WitnessCastable;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
+use ethereum_types::U256;
 use std::sync::{Arc, RwLock};
 use zkevm_opcode_defs::system_params::STORAGE_AUX_BYTE;
-use boojum::gadgets::u256::UInt256;
-use ethereum_types::U256;
 
 use super::*;
 
@@ -288,9 +288,11 @@ where
         .map(|el| (el as u32, (el >> 32) as u32))
         .collect();
 
-    let merkle_paths: VecDeque<U256> = merkle_paths.into_iter().flatten().map(|el| {
-        U256::from_little_endian(&el)
-    }).collect();
+    let merkle_paths: VecDeque<U256> = merkle_paths
+        .into_iter()
+        .flatten()
+        .map(|el| U256::from_little_endian(&el))
+        .collect();
 
     let mut structured_input =
         StorageApplicationInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
@@ -379,7 +381,7 @@ where
 
     let read_index_witness_allocator = Arc::new(RwLock::new(leaf_indexes_for_reads));
     let merkle_path_witness_allocator = ConditionalWitnessAllocator::<F, UInt256<F>> {
-        witness_source: Arc::new(RwLock::new(merkle_paths))
+        witness_source: Arc::new(RwLock::new(merkle_paths)),
     };
 
     for cycle in 0..limit {
@@ -473,8 +475,8 @@ where
         let mut bias_variable = parse_next_queue_elem.get_variable();
         for _ in 0..STORAGE_DEPTH {
             let wit = merkle_path_witness_allocator.conditionally_allocate_biased(
-                cs, 
-                parse_next_queue_elem, 
+                cs,
+                parse_next_queue_elem,
                 bias_variable,
             );
             bias_variable = wit.inner[0].get_variable();
@@ -486,7 +488,7 @@ where
             .iter_mut()
             .zip(new_merkle_path_witness.iter())
         {
-            let src_bytes = src.to_le_bytes(cs); // NOP 
+            let src_bytes = src.to_le_bytes(cs); // NOP
             *dst = UInt8::parallel_select(cs, parse_next_queue_elem, &src_bytes, &*dst);
         }
 
@@ -526,12 +528,8 @@ where
                 &address_bytes,
                 &state_diff_data.address,
             );
-            state_diff_data.key = UInt8::parallel_select(
-                cs, 
-                parse_next_queue_elem, 
-                &key_bytes, 
-                &state_diff_data.key
-            );
+            state_diff_data.key =
+                UInt8::parallel_select(cs, parse_next_queue_elem, &key_bytes, &state_diff_data.key);
             state_diff_data.derived_key = UInt8::parallel_select(
                 cs,
                 parse_next_queue_elem,
@@ -666,7 +664,7 @@ where
         &mut diffs_keccak_accumulator_state,
         &padding_block,
     );
-    
+
     // squeeze
     let mut result = [MaybeUninit::<UInt8<F>>::uninit(); keccak256::KECCAK256_DIGEST_SIZE];
     for (i, dst) in result.array_chunks_mut::<8>().enumerate() {
@@ -695,8 +693,6 @@ where
         &empty_observable_output,
     );
     structured_input.observable_output = observable_output;
-
-    
 
     // self-check
     structured_input.hook_compare_witness(cs, &closed_form_input);

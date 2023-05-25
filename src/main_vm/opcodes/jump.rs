@@ -1,5 +1,3 @@
-
-
 use super::*;
 
 pub(crate) fn apply_jump<F: SmallField, CS: ConstraintSystem<F>>(

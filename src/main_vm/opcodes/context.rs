@@ -1,6 +1,4 @@
-use boojum::{
-    gadgets::u256::UInt256,
-};
+use boojum::gadgets::u256::UInt256;
 
 use crate::base_structures::register::VMRegister;
 

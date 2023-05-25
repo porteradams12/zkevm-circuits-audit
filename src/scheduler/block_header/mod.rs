@@ -1,6 +1,5 @@
 use super::*;
 
-
 use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
 
@@ -15,21 +14,6 @@ use boojum::gadgets::{
     },
 };
 use cs_derive::*;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 use boojum::serde_utils::BigArraySerde;
 
@@ -90,10 +74,7 @@ pub struct BlockContentHeader<F: SmallField> {
 }
 
 impl<F: SmallField> PerShardState<F> {
-    pub fn into_flattened_bytes<CS: ConstraintSystem<F>>(
-        &self,
-        cs: &mut CS,
-    ) -> Vec<UInt8<F>> {
+    pub fn into_flattened_bytes<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> Vec<UInt8<F>> {
         // everything is BE
         let mut result = vec![];
         for el in self.enumeration_counter.iter().rev() {
@@ -107,10 +88,7 @@ impl<F: SmallField> PerShardState<F> {
 }
 
 impl<F: SmallField> BlockPassthroughData<F> {
-    pub fn into_flattened_bytes<CS: ConstraintSystem<F>>(
-        &self,
-        cs: &mut CS,
-    ) -> Vec<UInt8<F>> {
+    pub fn into_flattened_bytes<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> Vec<UInt8<F>> {
         // everything is BE
         let mut result = vec![];
         for el in self.per_shard_states.iter() {
@@ -123,13 +101,11 @@ impl<F: SmallField> BlockPassthroughData<F> {
 }
 
 impl<F: SmallField> BlockMetaParameters<F> {
-    pub fn into_flattened_bytes<CS: ConstraintSystem<F>>(
-        &self,
-        cs: &mut CS,
-    ) -> Vec<UInt8<F>> {
+    pub fn into_flattened_bytes<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> Vec<UInt8<F>> {
         // everything is BE
         let mut result = vec![];
-        let zk_porter_byte = unsafe {UInt8::from_variable_unchecked(self.zkporter_is_available.get_variable())};
+        let zk_porter_byte =
+            unsafe { UInt8::from_variable_unchecked(self.zkporter_is_available.get_variable()) };
         result.push(zk_porter_byte);
 
         result.extend_from_slice(&self.bootloader_code_hash.to_be_bytes(cs));
@@ -140,10 +116,7 @@ impl<F: SmallField> BlockMetaParameters<F> {
 }
 
 impl<F: SmallField> BlockAuxilaryOutput<F> {
-    pub fn into_flattened_bytes<CS: ConstraintSystem<F>>(
-        &self,
-        _cs: &mut CS,
-    ) -> Vec<UInt8<F>> {
+    pub fn into_flattened_bytes<CS: ConstraintSystem<F>>(&self, _cs: &mut CS) -> Vec<UInt8<F>> {
         // everything is BE
         let mut result = vec![];
         result.extend_from_slice(&self.l1_messages_linear_hash);
@@ -160,10 +133,9 @@ impl<F: SmallField> BlockContentHeader<F> {
         self,
         cs: &mut CS,
     ) -> (
-            [UInt8<F>; 32], 
-            ([UInt8<F>; 32], [UInt8<F>; 32], [UInt8<F>; 32])
-        )
-    {
+        [UInt8<F>; 32],
+        ([UInt8<F>; 32], [UInt8<F>; 32], [UInt8<F>; 32]),
+    ) {
         // everything is BE
         let block_data = self.block_data.into_flattened_bytes(cs);
         let block_meta = self.block_meta.into_flattened_bytes(cs);

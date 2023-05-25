@@ -10,7 +10,7 @@ pub mod aux;
 
 use boojum::cs::implementations::proof::Proof;
 
-use boojum::cs::{traits::cs::ConstraintSystem};
+use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::field::SmallField;
 
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
@@ -21,11 +21,8 @@ use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
     boolean::Boolean,
     queue::*,
-    traits::{
-        allocatable::*, selectable::Selectable,
-    },
+    traits::{allocatable::*, selectable::Selectable},
 };
-
 
 use crate::base_structures::decommit_query::DecommitQuery;
 use crate::base_structures::decommit_query::DecommitQueue;
@@ -39,36 +36,33 @@ use crate::scheduler::aux::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
 
-
-
-
+use crate::base_structures::precompile_input_outputs::*;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::cs::implementations::prover::ProofConfig;
+use boojum::cs::implementations::verifier::VerificationKeyCircuitGeometry;
+use boojum::cs::oracle::TreeHasher;
+use boojum::cs::traits::circuit::*;
 use boojum::field::FieldExtension;
 use boojum::gadgets::keccak256;
-use boojum::cs::implementations::verifier::VerificationKeyCircuitGeometry;
-use boojum::cs::implementations::prover::ProofConfig;
-use boojum::cs::oracle::TreeHasher;
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::cs::traits::circuit::*;
+use boojum::gadgets::recursion::circuit_pow::RecursivePoWRunner;
 use boojum::gadgets::recursion::recursive_transcript::*;
 use boojum::gadgets::recursion::recursive_tree_hasher::*;
-use boojum::gadgets::recursion::circuit_pow::RecursivePoWRunner;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use std::collections::HashMap;
-use crate::base_structures::precompile_input_outputs::*;
 
 use crate::base_structures::vm_state::*;
 use crate::code_unpacker_sha256::input::*;
 use crate::demux_log_queue::input::*;
 use crate::fsm_input_output::circuit_inputs::main_vm::*;
-use crate::log_sorter::input::*;
-use crate::sort_decommittment_requests::input::*;
-use crate::storage_application::input::*;
-use crate::storage_validity_by_grand_product::input::*;
 use crate::fsm_input_output::*;
-use crate::scheduler::aux::*;
+use crate::log_sorter::input::*;
 use crate::ram_permutation::input::*;
 use crate::recursion::leaf_layer::input::*;
 use crate::recursion::node_layer::input::*;
+use crate::scheduler::aux::*;
+use crate::sort_decommittment_requests::input::*;
+use crate::storage_application::input::*;
+use crate::storage_validity_by_grand_product::input::*;
 
 pub const SCHEDULER_TIMESTAMP: u32 = 1;
 pub const NUM_SCHEDULER_PUBLIC_INPUTS: usize = 4;
@@ -86,14 +80,22 @@ pub struct SchedulerConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<
 }
 
 pub fn scheduler_function<
-F: SmallField,
-CS: ConstraintSystem<F> + 'static,
-R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-H: RecursiveTreeHasher<F, Num<F>>,
-EXT: FieldExtension<2, BaseField = F>,
-TR: RecursiveTranscript<F, CompatibleCap = <H::NonCircuitSimulator as TreeHasher<F>>::Output, CircuitReflection = CTR>,
-CTR: CircuitTranscript<F, CircuitCompatibleCap = <H as CircuitTreeHasher<F, Num<F>>>::CircuitOutput, TransciptParameters = TR::TransciptParameters>,
-POW: RecursivePoWRunner<F>,
+    F: SmallField,
+    CS: ConstraintSystem<F> + 'static,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+    H: RecursiveTreeHasher<F, Num<F>>,
+    EXT: FieldExtension<2, BaseField = F>,
+    TR: RecursiveTranscript<
+        F,
+        CompatibleCap = <H::NonCircuitSimulator as TreeHasher<F>>::Output,
+        CircuitReflection = CTR,
+    >,
+    CTR: CircuitTranscript<
+        F,
+        CircuitCompatibleCap = <H as CircuitTreeHasher<F, Num<F>>>::CircuitOutput,
+        TransciptParameters = TR::TransciptParameters,
+    >,
+    POW: RecursivePoWRunner<F>,
 >(
     cs: &mut CS,
     mut witness: SchedulerCircuitInstanceWitness<F, H, EXT>,
@@ -101,14 +103,14 @@ POW: RecursivePoWRunner<F>,
     config: SchedulerConfig<F, H::NonCircuitSimulator, EXT>,
     verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
     transcript_params: TR::TransciptParameters,
-)
-where 
+) where
     [(); <RecursionQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     let prev_block_data = BlockPassthroughData::allocate(cs, witness.prev_block_data.clone());
-    let block_meta_parameters = BlockMetaParameters::allocate(cs, witness.block_meta_parameters.clone());
+    let block_meta_parameters =
+        BlockMetaParameters::allocate(cs, witness.block_meta_parameters.clone());
 
     let boolean_false = Boolean::allocated_constant(cs, false);
     let boolean_true = Boolean::allocated_constant(cs, true);
@@ -129,7 +131,8 @@ where
 
     let mut decommittments_queue = DecommitQueue::<F, R>::empty(cs);
     let bootloader_code_hash = block_meta_parameters.bootloader_code_hash;
-    let bootloader_code_page = UInt32::allocated_constant(cs, zkevm_opcode_defs::BOOTLOADER_CODE_PAGE);
+    let bootloader_code_page =
+        UInt32::allocated_constant(cs, zkevm_opcode_defs::BOOTLOADER_CODE_PAGE);
     let scheduler_timestamp = UInt32::allocated_constant(cs, SCHEDULER_TIMESTAMP);
     let bootloader_decommittment_query = crate::base_structures::decommit_query::DecommitQuery {
         code_hash: bootloader_code_hash,
@@ -138,22 +141,17 @@ where
         timestamp: scheduler_timestamp,
     };
 
-    let _ = decommittments_queue.push(
-        cs,
-        bootloader_decommittment_query,
-        boolean_true,
-    );
+    let _ = decommittments_queue.push(cs, bootloader_decommittment_query, boolean_true);
 
     // create all the intermediate output data in uncommitted form to later check for equality
 
     let vm_end_of_execution_observable_output =
         VmOutputData::allocate(cs, witness.vm_end_of_execution_observable_output.clone());
 
-    let decommits_sorter_observable_output =
-        CodeDecommittmentsDeduplicatorOutputData::allocate(
-            cs,
-            witness.decommits_sorter_observable_output.clone(),
-        );
+    let decommits_sorter_observable_output = CodeDecommittmentsDeduplicatorOutputData::allocate(
+        cs,
+        witness.decommits_sorter_observable_output.clone(),
+    );
 
     let code_decommitter_observable_output =
         CodeDecommitterOutputData::allocate(cs, witness.code_decommitter_observable_output.clone());
@@ -170,8 +168,10 @@ where
     let ecrecover_observable_output =
         PrecompileFunctionOutputData::allocate(cs, witness.ecrecover_observable_output.clone());
 
-    let storage_sorter_observable_output =
-        StorageDeduplicatorOutputData::allocate(cs, witness.storage_sorter_observable_output.clone());
+    let storage_sorter_observable_output = StorageDeduplicatorOutputData::allocate(
+        cs,
+        witness.storage_sorter_observable_output.clone(),
+    );
 
     let storage_application_observable_output = StorageApplicationOutputData::allocate(
         cs,
@@ -181,8 +181,10 @@ where
     let events_sorter_observable_output =
         EventsDeduplicatorOutputData::allocate(cs, witness.events_sorter_observable_output.clone());
 
-    let l1messages_sorter_observable_output =
-        EventsDeduplicatorOutputData::allocate(cs, witness.l1messages_sorter_observable_output.clone());
+    let l1messages_sorter_observable_output = EventsDeduplicatorOutputData::allocate(
+        cs,
+        witness.l1messages_sorter_observable_output.clone(),
+    );
 
     // let l1messages_linear_hasher_observable_output = PubdataHasherOutputData::allocate(
     //     cs,
@@ -190,23 +192,20 @@ where
     // );
 
     // auxilary intermediate states
-    let rollup_storage_sorter_intermediate_queue_state =
-        QueueTailState::allocate(
-            cs,
-            witness.rollup_storage_sorter_intermediate_queue_state.clone(),
-        );
+    let rollup_storage_sorter_intermediate_queue_state = QueueTailState::allocate(
+        cs,
+        witness
+            .rollup_storage_sorter_intermediate_queue_state
+            .clone(),
+    );
 
     let events_sorter_intermediate_queue_state =
-        QueueTailState::allocate(
-            cs,
-            witness.events_sorter_intermediate_queue_state.clone(),
-        );
+        QueueTailState::allocate(cs, witness.events_sorter_intermediate_queue_state.clone());
 
-    let l1messages_sorter_intermediate_queue_state =
-        QueueTailState::allocate(
-            cs,
-            witness.l1messages_sorter_intermediate_queue_state.clone(),
-        );
+    let l1messages_sorter_intermediate_queue_state = QueueTailState::allocate(
+        cs,
+        witness.l1messages_sorter_intermediate_queue_state.clone(),
+    );
 
     // final VM storage log state for our construction
     let storage_log_tail = <[Num<F>; QUEUE_STATE_WIDTH]>::allocate(cs, witness.storage_log_tail);
@@ -236,17 +235,25 @@ where
     );
 
     let mut decommittments_sorted_queue_state = QueueState::empty(cs);
-    decommittments_sorted_queue_state.tail = QueueTailState::allocate(cs, witness.decommits_sorter_intermediate_queue_state.clone());
+    decommittments_sorted_queue_state.tail = QueueTailState::allocate(
+        cs,
+        witness.decommits_sorter_intermediate_queue_state.clone(),
+    );
 
     let decommittments_sorter_circuit_input = CodeDecommittmentsDeduplicatorInputData {
-        initial_queue_state: vm_end_of_execution_observable_output
-            .decommitment_queue_final_state,
+        initial_queue_state: vm_end_of_execution_observable_output.decommitment_queue_final_state,
         sorted_queue_initial_state: decommittments_sorted_queue_state,
     };
-    let decommittments_sorter_circuit_input_commitment =
-        commit_variable_length_encodable_item(cs, &decommittments_sorter_circuit_input, round_function);
-    let decommittments_sorter_observable_output_commitment =
-        commit_variable_length_encodable_item(cs, &decommits_sorter_observable_output, round_function);
+    let decommittments_sorter_circuit_input_commitment = commit_variable_length_encodable_item(
+        cs,
+        &decommittments_sorter_circuit_input,
+        round_function,
+    );
+    let decommittments_sorter_observable_output_commitment = commit_variable_length_encodable_item(
+        cs,
+        &decommits_sorter_observable_output,
+        round_function,
+    );
 
     // code decommiments:
     let code_decommitter_circuit_input = CodeDecommitterInputData {
@@ -255,8 +262,11 @@ where
     };
     let code_decommitter_circuit_input_commitment =
         commit_variable_length_encodable_item(cs, &code_decommitter_circuit_input, round_function);
-    let code_decommitter_observable_output_commitment =
-        commit_variable_length_encodable_item(cs, &code_decommitter_observable_output, round_function);
+    let code_decommitter_observable_output_commitment = commit_variable_length_encodable_item(
+        cs,
+        &code_decommitter_observable_output,
+        round_function,
+    );
 
     // log demultiplexer
     let log_demux_circuit_input = LogDemuxerInputData {
@@ -301,7 +311,8 @@ where
     // NBL this circuit is terminal - it has no actual output
 
     let mut ram_sorted_queue_state = QueueState::empty(cs);
-    ram_sorted_queue_state.tail = QueueTailState::allocate(cs, witness.ram_sorted_queue_state.clone());
+    ram_sorted_queue_state.tail =
+        QueueTailState::allocate(cs, witness.ram_sorted_queue_state.clone());
 
     let ram_validation_circuit_input = RamPermutationInputData {
         unsorted_queue_initial_state: ecrecover_observable_output.final_memory_state,
@@ -347,14 +358,18 @@ where
     //     );
 
     const NUM_PROCESSABLE_SHARDS: usize = 1;
-    
+
     let zero_num = Num::zero(cs);
     let empty_input_output_commitment = [zero_num; CLOSED_FORM_COMMITTMENT_LENGTH];
 
-    let mut storage_filter_input_commitments = [empty_input_output_commitment; NUM_PROCESSABLE_SHARDS];
-    let mut storage_filter_output_commitments = [empty_input_output_commitment; NUM_PROCESSABLE_SHARDS];
-    let mut storage_applicator_input_commitments = [empty_input_output_commitment; NUM_PROCESSABLE_SHARDS];
-    let mut storage_applicator_output_commitments = [empty_input_output_commitment; NUM_PROCESSABLE_SHARDS];
+    let mut storage_filter_input_commitments =
+        [empty_input_output_commitment; NUM_PROCESSABLE_SHARDS];
+    let mut storage_filter_output_commitments =
+        [empty_input_output_commitment; NUM_PROCESSABLE_SHARDS];
+    let mut storage_applicator_input_commitments =
+        [empty_input_output_commitment; NUM_PROCESSABLE_SHARDS];
+    let mut storage_applicator_output_commitments =
+        [empty_input_output_commitment; NUM_PROCESSABLE_SHARDS];
 
     let storage_queues_state = [log_demuxer_observable_output.storage_access_queue_state];
 
@@ -371,7 +386,8 @@ where
 
     let storage_intermediate_sorted_queue_state = [rollup_storage_sorter_intermediate_queue_state];
 
-    let storage_diffs_for_compression = [storage_application_observable_output.state_diffs_keccak256_hash];
+    let storage_diffs_for_compression =
+        [storage_application_observable_output.state_diffs_keccak256_hash];
 
     assert_eq!(NUM_PROCESSABLE_SHARDS, 1); // no support of porter as of yet
 
@@ -409,117 +425,113 @@ where
 
     // now let's map it for convenience, and later on walk over it
 
-    let input_commitments_as_map = HashMap::<BaseLayerCircuitType, [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH]>::from_iter(
-        [
-            (
-                BaseLayerCircuitType::VM, 
-                vm_observable_input_commitment
-            ),
-            (
-                BaseLayerCircuitType::DecommitmentsFilter,
-                decommittments_sorter_circuit_input_commitment,
-            ),
-            (
-                BaseLayerCircuitType::Decommiter,
-                code_decommitter_circuit_input_commitment,
-            ),
-            (
-                BaseLayerCircuitType::LogDemultiplexer,
-                log_demux_circuit_input_commitment,
-            ),
-            (
-                BaseLayerCircuitType::KeccakPrecompile,
-                keccak_circuit_observable_input_commitment,
-            ),
-            (
-                BaseLayerCircuitType::Sha256Precompile,
-                sha256_circuit_observable_input_commitment,
-            ),
-            (
-                BaseLayerCircuitType::EcrecoverPrecompile,
-                ecrecover_circuit_observable_input_commitment,
-            ),
-            (
-                BaseLayerCircuitType::RamValidation,
-                ram_validation_circuit_input_commitment,
-            ),
-            (
-                BaseLayerCircuitType::EventsRevertsFilter,
-                events_filter_input_com
-            ),
-            (
-                BaseLayerCircuitType::L1MessagesRevertsFilter,
-                l1_messages_filter_input_com,
-            ),
-            (
-                BaseLayerCircuitType::StorageFilter,
-                storage_filter_input_commitments[0],
-            ),
-            (
-                BaseLayerCircuitType::StorageApplicator,
-                storage_applicator_input_commitments[0],
-            ),
-            // (
-            //     BaseLayerCircuitType::L1MessagesHasher, 
-            //     l1_messages_hasher_input_com
-            // ),
-        ]
-        .into_iter(),
-    );
+    let input_commitments_as_map =
+        HashMap::<BaseLayerCircuitType, [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH]>::from_iter(
+            [
+                (BaseLayerCircuitType::VM, vm_observable_input_commitment),
+                (
+                    BaseLayerCircuitType::DecommitmentsFilter,
+                    decommittments_sorter_circuit_input_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::Decommiter,
+                    code_decommitter_circuit_input_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::LogDemultiplexer,
+                    log_demux_circuit_input_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::KeccakPrecompile,
+                    keccak_circuit_observable_input_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::Sha256Precompile,
+                    sha256_circuit_observable_input_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::EcrecoverPrecompile,
+                    ecrecover_circuit_observable_input_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::RamValidation,
+                    ram_validation_circuit_input_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::EventsRevertsFilter,
+                    events_filter_input_com,
+                ),
+                (
+                    BaseLayerCircuitType::L1MessagesRevertsFilter,
+                    l1_messages_filter_input_com,
+                ),
+                (
+                    BaseLayerCircuitType::StorageFilter,
+                    storage_filter_input_commitments[0],
+                ),
+                (
+                    BaseLayerCircuitType::StorageApplicator,
+                    storage_applicator_input_commitments[0],
+                ),
+                // (
+                //     BaseLayerCircuitType::L1MessagesHasher,
+                //     l1_messages_hasher_input_com
+                // ),
+            ]
+            .into_iter(),
+        );
 
-    let output_commitments_as_map = HashMap::<BaseLayerCircuitType, [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH]>::from_iter(
-        [
-            (
-                BaseLayerCircuitType::VM, 
-                vm_observable_output_commitment
-            ),
-            (
-                BaseLayerCircuitType::DecommitmentsFilter,
-                decommittments_sorter_observable_output_commitment,
-            ),
-            (
-                BaseLayerCircuitType::Decommiter,
-                code_decommitter_observable_output_commitment,
-            ),
-            (
-                BaseLayerCircuitType::LogDemultiplexer,
-                log_demuxer_observable_output_commitment,
-            ),
-            (
-                BaseLayerCircuitType::KeccakPrecompile,
-                keccak_circuit_observable_output_commitment,
-            ),
-            (
-                BaseLayerCircuitType::Sha256Precompile,
-                sha256_circuit_observable_output_commitment,
-            ),
-            (
-                BaseLayerCircuitType::EcrecoverPrecompile,
-                ecrecover_circuit_observable_output_commitment,
-            ),
-            (
-                BaseLayerCircuitType::EventsRevertsFilter, 
-                events_filter_output_com
-            ),
-            (
-                BaseLayerCircuitType::L1MessagesRevertsFilter,
-                l1_messages_filter_output_com,
-            ),
-            (
-                BaseLayerCircuitType::StorageFilter,
-                storage_filter_output_commitments[0],
-            ),
-            (
-                BaseLayerCircuitType::StorageApplicator,
-                storage_applicator_output_commitments[0],
-            ),
-            // (
-            //     BaseLayerCircuitType::L1MessagesHasher, 
-            //     l1_messages_hasher_output_com
-            // ),
-        ]
-        .into_iter(),
-    );
+    let output_commitments_as_map =
+        HashMap::<BaseLayerCircuitType, [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH]>::from_iter(
+            [
+                (BaseLayerCircuitType::VM, vm_observable_output_commitment),
+                (
+                    BaseLayerCircuitType::DecommitmentsFilter,
+                    decommittments_sorter_observable_output_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::Decommiter,
+                    code_decommitter_observable_output_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::LogDemultiplexer,
+                    log_demuxer_observable_output_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::KeccakPrecompile,
+                    keccak_circuit_observable_output_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::Sha256Precompile,
+                    sha256_circuit_observable_output_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::EcrecoverPrecompile,
+                    ecrecover_circuit_observable_output_commitment,
+                ),
+                (
+                    BaseLayerCircuitType::EventsRevertsFilter,
+                    events_filter_output_com,
+                ),
+                (
+                    BaseLayerCircuitType::L1MessagesRevertsFilter,
+                    l1_messages_filter_output_com,
+                ),
+                (
+                    BaseLayerCircuitType::StorageFilter,
+                    storage_filter_output_commitments[0],
+                ),
+                (
+                    BaseLayerCircuitType::StorageApplicator,
+                    storage_applicator_output_commitments[0],
+                ),
+                // (
+                //     BaseLayerCircuitType::L1MessagesHasher,
+                //     l1_messages_hasher_output_com
+                // ),
+            ]
+            .into_iter(),
+        );
 
     let sequence_of_circuit_types = [
         BaseLayerCircuitType::VM,
@@ -545,37 +557,71 @@ where
     let mut skip_flags = [None; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
     // we can skip everything except VM
     skip_flags[(BaseLayerCircuitType::DecommitmentsFilter as u8 as usize) - 1] = Some(
-        decommittments_sorter_circuit_input.initial_queue_state.tail.length.is_zero(cs)
+        decommittments_sorter_circuit_input
+            .initial_queue_state
+            .tail
+            .length
+            .is_zero(cs),
     );
     skip_flags[(BaseLayerCircuitType::Decommiter as u8 as usize) - 1] = Some(
-        code_decommitter_circuit_input.sorted_requests_queue_initial_state.tail.length.is_zero(cs)
+        code_decommitter_circuit_input
+            .sorted_requests_queue_initial_state
+            .tail
+            .length
+            .is_zero(cs),
     );
     skip_flags[(BaseLayerCircuitType::LogDemultiplexer as u8 as usize) - 1] = Some(
-        log_demux_circuit_input.initial_log_queue_state.tail.length.is_zero(cs)
+        log_demux_circuit_input
+            .initial_log_queue_state
+            .tail
+            .length
+            .is_zero(cs),
     );
     skip_flags[(BaseLayerCircuitType::KeccakPrecompile as u8 as usize) - 1] = Some(
-        log_demuxer_observable_output.keccak256_access_queue_state.tail.length.is_zero(cs)
+        log_demuxer_observable_output
+            .keccak256_access_queue_state
+            .tail
+            .length
+            .is_zero(cs),
     );
     skip_flags[(BaseLayerCircuitType::Sha256Precompile as u8 as usize) - 1] = Some(
-        log_demuxer_observable_output.sha256_access_queue_state.tail.length.is_zero(cs)
+        log_demuxer_observable_output
+            .sha256_access_queue_state
+            .tail
+            .length
+            .is_zero(cs),
     );
     skip_flags[(BaseLayerCircuitType::EcrecoverPrecompile as u8 as usize) - 1] = Some(
-        log_demuxer_observable_output.ecrecover_access_queue_state.tail.length.is_zero(cs)
+        log_demuxer_observable_output
+            .ecrecover_access_queue_state
+            .tail
+            .length
+            .is_zero(cs),
     );
     skip_flags[(BaseLayerCircuitType::RamValidation as u8 as usize) - 1] = Some(
-        ram_validation_circuit_input.unsorted_queue_initial_state.tail.length.is_zero(cs)
+        ram_validation_circuit_input
+            .unsorted_queue_initial_state
+            .tail
+            .length
+            .is_zero(cs),
     );
-    skip_flags[(BaseLayerCircuitType::StorageFilter as u8 as usize) - 1] = Some(
-        storage_queues_state[0].tail.length.is_zero(cs)
-    );
-    skip_flags[(BaseLayerCircuitType::StorageApplicator as u8 as usize) - 1] = Some(
-        filtered_storage_queues_state[0].tail.length.is_zero(cs)
-    );
+    skip_flags[(BaseLayerCircuitType::StorageFilter as u8 as usize) - 1] =
+        Some(storage_queues_state[0].tail.length.is_zero(cs));
+    skip_flags[(BaseLayerCircuitType::StorageApplicator as u8 as usize) - 1] =
+        Some(filtered_storage_queues_state[0].tail.length.is_zero(cs));
     skip_flags[(BaseLayerCircuitType::EventsRevertsFilter as u8 as usize) - 1] = Some(
-        log_demuxer_observable_output.events_access_queue_state.tail.length.is_zero(cs)
+        log_demuxer_observable_output
+            .events_access_queue_state
+            .tail
+            .length
+            .is_zero(cs),
     );
     skip_flags[(BaseLayerCircuitType::L1MessagesRevertsFilter as u8 as usize) - 1] = Some(
-        log_demuxer_observable_output.l1messages_access_queue_state.tail.length.is_zero(cs)
+        log_demuxer_observable_output
+            .l1messages_access_queue_state
+            .tail
+            .length
+            .is_zero(cs),
     );
     // skip_flags[(BaseLayerCircuitType::L1MessagesHasher as u8 as usize) - 1] = Some(
     //     log_demuxer_observable_output.events_access_queue_state.tail.length.is_zero(cs)
@@ -595,29 +641,29 @@ where
     let mut previous_completion_flag = boolean_true;
 
     let empty_recursive_queue_state_tail = QueueTailState::empty(cs);
-    let mut recursive_queue_state_tails = [empty_recursive_queue_state_tail; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
+    let mut recursive_queue_state_tails =
+        [empty_recursive_queue_state_tail; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
 
     for _idx in 0..config.capacity {
         let mut next_mask = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
 
-        let closed_form_input_witness = witness.per_circuit_closed_form_inputs.pop_front().unwrap_or(ClosedFormInputCompactForm::placeholder_witness()); 
+        let closed_form_input_witness = witness
+            .per_circuit_closed_form_inputs
+            .pop_front()
+            .unwrap_or(ClosedFormInputCompactForm::placeholder_witness());
         let closed_form_input = ClosedFormInputCompactForm::allocate(cs, closed_form_input_witness);
 
         // we believe that prover gives us valid compact forms,
         // so we check equality
-        let start_of_next_when_previous_is_finished = Boolean::equals(
-            cs,
-            &closed_form_input.start_flag,
-            &previous_completion_flag
-        );
+        let start_of_next_when_previous_is_finished =
+            Boolean::equals(cs, &closed_form_input.start_flag, &previous_completion_flag);
         start_of_next_when_previous_is_finished.conditionally_enforce_true(cs, execution_flag);
 
         let mut computed_applicability_flags = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
         let mut circuit_type_to_use = Num::zero(cs);
 
-        for (idx, 
-            ((circuit_type, stage_flag), skip_flag)
-        ) in sequence_of_circuit_types.iter()
+        for (idx, ((circuit_type, stage_flag), skip_flag)) in sequence_of_circuit_types
+            .iter()
             .zip(execution_stage_bitmask.iter())
             .zip(skip_flags.iter())
             .enumerate()
@@ -656,34 +702,30 @@ where
             } else {
                 closed_form_input.completion_flag
             };
-            let stage_just_finished = Boolean::multi_and(cs, &[should_start_next, execution_flag, *stage_flag]);
+            let stage_just_finished =
+                Boolean::multi_and(cs, &[should_start_next, execution_flag, *stage_flag]);
             next_mask[idx] = stage_just_finished;
 
             let circuit_type = UInt8::allocated_constant(cs, *circuit_type as u8).into_num();
 
-            circuit_type_to_use = Num::conditionally_select(
-                cs,
-                validate, 
-                &circuit_type, 
-                &circuit_type_to_use,
-            );
+            circuit_type_to_use =
+                Num::conditionally_select(cs, validate, &circuit_type, &circuit_type_to_use);
 
             computed_applicability_flags[idx] = validate;
         }
 
         // now we can use a proper circuit type and manyally add it into single queue
         let mut tail_to_use = QueueTailState::empty(cs);
-        for (flag, state) in computed_applicability_flags.iter().zip(recursive_queue_state_tails.iter()) {
-            tail_to_use = conditionally_select_queue_tail(
-                cs, 
-                *flag, 
-                &state,
-                &tail_to_use,
-            );
+        for (flag, state) in computed_applicability_flags
+            .iter()
+            .zip(recursive_queue_state_tails.iter())
+        {
+            tail_to_use = conditionally_select_queue_tail(cs, *flag, &state, &tail_to_use);
         }
 
         let push_to_any = Boolean::multi_or(cs, &computed_applicability_flags);
-        let closed_form_input_comm = commit_variable_length_encodable_item(cs, &closed_form_input, round_function);
+        let closed_form_input_comm =
+            commit_variable_length_encodable_item(cs, &closed_form_input, round_function);
         let query = RecursionQuery {
             circuit_type: circuit_type_to_use,
             input_commitment: closed_form_input_comm,
@@ -696,20 +738,22 @@ where
         let _ = tmp_queue.push(cs, query, push_to_any);
         let tail_to_use_for_update = tmp_queue.into_state().tail;
 
-        for (flag, state) in computed_applicability_flags.iter().zip(recursive_queue_state_tails.iter_mut()) {
-            *state = conditionally_select_queue_tail(
-                cs, 
-                *flag, 
-                &tail_to_use_for_update,
-                &*state,
-            );
+        for (flag, state) in computed_applicability_flags
+            .iter()
+            .zip(recursive_queue_state_tails.iter_mut())
+        {
+            *state = conditionally_select_queue_tail(cs, *flag, &tail_to_use_for_update, &*state);
         }
 
         previous_completion_flag = Boolean::multi_or(cs, &next_mask);
         // for the next stage we do shifted AND
         let src = execution_stage_bitmask;
         // note skip(1)
-        for ((a, b), dst) in src.iter().zip(next_mask.iter()).zip(execution_stage_bitmask.iter_mut().skip(1)) {
+        for ((a, b), dst) in src
+            .iter()
+            .zip(next_mask.iter())
+            .zip(execution_stage_bitmask.iter_mut().skip(1))
+        {
             *dst = Boolean::multi_and(cs, &[*a, *b]);
         }
         // and check if we are done
@@ -720,22 +764,37 @@ where
 
     // so we are done!
     Boolean::enforce_equal(cs, &execution_flag, &boolean_false);
-    
-    // actually perform verification
-    let leaf_layer_parameters = witness.leaf_layer_parameters.clone().map(|el| {
-        RecursionLeafParameters::allocate(cs, el)
-    });
 
-    let leaf_layer_parameters_commitment = <[Num<F>; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH]>::allocate(cs, witness.leaf_layer_parameters_commitment);
-    let computed_leaf_layer_parameters_commitment: [_; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &leaf_layer_parameters, round_function);
-    for (a, b) in leaf_layer_parameters_commitment.iter().zip(computed_leaf_layer_parameters_commitment.iter()) {
+    // actually perform verification
+    let leaf_layer_parameters = witness
+        .leaf_layer_parameters
+        .clone()
+        .map(|el| RecursionLeafParameters::allocate(cs, el));
+
+    let leaf_layer_parameters_commitment =
+        <[Num<F>; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH]>::allocate(
+            cs,
+            witness.leaf_layer_parameters_commitment,
+        );
+    let computed_leaf_layer_parameters_commitment: [_; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH] =
+        commit_variable_length_encodable_item(cs, &leaf_layer_parameters, round_function);
+    for (a, b) in leaf_layer_parameters_commitment
+        .iter()
+        .zip(computed_leaf_layer_parameters_commitment.iter())
+    {
         Num::enforce_equal(cs, a, b);
     }
 
-    let node_layer_vk_commitment = <[Num<F>; VK_COMMITMENT_LENGTH]>::allocate(cs, witness.node_layer_vk_commitment);
-    let node_layer_vk = AllocatedVerificationKey::<F, H>::allocate(cs, witness.node_leyer_vk_witness.clone());
-    let recomputed_node_vk_commitment: [_; VK_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &node_layer_vk, round_function);
-    for (a, b) in node_layer_vk_commitment.iter().zip(recomputed_node_vk_commitment.iter()) {
+    let node_layer_vk_commitment =
+        <[Num<F>; VK_COMMITMENT_LENGTH]>::allocate(cs, witness.node_layer_vk_commitment);
+    let node_layer_vk =
+        AllocatedVerificationKey::<F, H>::allocate(cs, witness.node_leyer_vk_witness.clone());
+    let recomputed_node_vk_commitment: [_; VK_COMMITMENT_LENGTH] =
+        commit_variable_length_encodable_item(cs, &node_layer_vk, round_function);
+    for (a, b) in node_layer_vk_commitment
+        .iter()
+        .zip(recomputed_node_vk_commitment.iter())
+    {
         Num::enforce_equal(cs, a, b);
     }
 
@@ -744,15 +803,17 @@ where
     // create verifier
     let r = cs as *mut CS;
 
-    assert_eq!(config.vk_fixed_parameters.parameters, verifier_builder.geometry());
+    assert_eq!(
+        config.vk_fixed_parameters.parameters,
+        verifier_builder.geometry()
+    );
 
     let verifier = verifier_builder.create_recursive_verifier(cs);
 
-    let cs = unsafe {&mut *r};
+    let cs = unsafe { &mut *r };
 
-    for (_idx, 
-        (circuit_type, state)
-    ) in sequence_of_circuit_types.iter()
+    for (_idx, (circuit_type, state)) in sequence_of_circuit_types
+        .iter()
         .zip(recursive_queue_state_tails.into_iter())
         .enumerate()
     {
@@ -771,49 +832,39 @@ where
             queue_state: queue_state,
         };
 
-        let expected_input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &input, round_function);
+        let expected_input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
+            commit_variable_length_encodable_item(cs, &input, round_function);
 
-        let proof_witness = proof_witnesses.pop_front().unwrap_or(config.padding_proof.clone());
+        let proof_witness = proof_witnesses
+            .pop_front()
+            .unwrap_or(config.padding_proof.clone());
         let proof = AllocatedProof::allocate(cs, proof_witness);
 
-        let (is_valid, inputs) = verifier.verify::<
-            H,
-            TR,
-            CTR,
-            POW,
-        >(
-            cs, 
-            transcript_params.clone(), 
-            &proof, 
-            &config.vk_fixed_parameters, 
-            &config.proof_config, 
-            &node_layer_vk
+        let (is_valid, inputs) = verifier.verify::<H, TR, CTR, POW>(
+            cs,
+            transcript_params.clone(),
+            &proof,
+            &config.vk_fixed_parameters,
+            &config.proof_config,
+            &node_layer_vk,
         );
 
         is_valid.conditionally_enforce_true(cs, should_verify);
         assert_eq!(inputs.len(), expected_input_commitment.len());
 
-        for (a, b) in inputs.iter().zip(expected_input_commitment.iter()){
-            Num::conditionally_enforce_equal(
-                cs, 
-                should_verify, 
-                a, 
-                b
-            );
+        for (a, b) in inputs.iter().zip(expected_input_commitment.iter()) {
+            Num::conditionally_enforce_equal(cs, should_verify, a, b);
         }
     }
 
     // now we can collapse queues
-    let bootloader_heap_snapshot: [_; QUEUE_FINAL_STATE_COMMITMENT_LENGTH] = finalize_queue_state(
-        cs,
-        &bootloader_heap_memory_state,
-        round_function
-    );
+    let bootloader_heap_snapshot: [_; QUEUE_FINAL_STATE_COMMITMENT_LENGTH] =
+        finalize_queue_state(cs, &bootloader_heap_memory_state, round_function);
 
     let events_snapshot: [_; QUEUE_FINAL_STATE_COMMITMENT_LENGTH] = finalize_queue_state(
         cs,
         &events_sorter_observable_output.final_queue_state.tail,
-        round_function
+        round_function,
     );
 
     // Form a public block header
@@ -832,21 +883,28 @@ where
     let zero_u8 = UInt8::zero(cs);
 
     let mut bootloader_heap_initial_content = [zero_u8; 32];
-    for (dst, src) in bootloader_heap_initial_content.array_chunks_mut::<8>().zip(bootloader_heap_snapshot.iter()) {
+    for (dst, src) in bootloader_heap_initial_content
+        .array_chunks_mut::<8>()
+        .zip(bootloader_heap_snapshot.iter())
+    {
         let le_bytes = src.constraint_bit_length_as_bytes(cs, 64);
         dst.copy_from_slice(&le_bytes[..]);
         dst.reverse();
     }
 
     let mut events_queue_state = [zero_u8; 32];
-    for (dst, src) in events_queue_state.array_chunks_mut::<8>().zip(events_snapshot.iter()) {
+    for (dst, src) in events_queue_state
+        .array_chunks_mut::<8>()
+        .zip(events_snapshot.iter())
+    {
         let le_bytes = src.constraint_bit_length_as_bytes(cs, 64);
         dst.copy_from_slice(&le_bytes[..]);
         dst.reverse();
     }
 
     let aux_data = BlockAuxilaryOutput {
-        rollup_state_diff_for_compression: storage_application_observable_output.state_diffs_keccak256_hash,
+        rollup_state_diff_for_compression: storage_application_observable_output
+            .state_diffs_keccak256_hash,
         bootloader_heap_initial_content,
         events_queue_state,
         l1_messages_linear_hash: [zero_u8; 32],
@@ -858,12 +916,12 @@ where
         auxilary_output: aux_data,
     };
 
-    let (this_block_content_hash, _) =
-        block_content_header.clone().into_formal_block_hash(cs);
+    let (this_block_content_hash, _) = block_content_header.clone().into_formal_block_hash(cs);
 
     // we are done with this block, process the previous one
     let previous_block_passthrough_data = prev_block_data.into_flattened_bytes(cs);
-    let previous_block_passthrough_hash = keccak256::keccak256(cs, &previous_block_passthrough_data);
+    let previous_block_passthrough_hash =
+        keccak256::keccak256(cs, &previous_block_passthrough_data);
 
     let previous_block_meta_hash = <[UInt8<F>; 32]>::allocate(cs, witness.previous_block_meta_hash);
     let previous_block_aux_hash = <[UInt8<F>; 32]>::allocate(cs, witness.previous_block_aux_hash);
@@ -883,19 +941,24 @@ where
     // recursion parameters
 
     let mut recursion_node_verification_key_hash = [zero_u8; 32];
-    for (dst, src) in recursion_node_verification_key_hash.array_chunks_mut::<8>().zip(node_layer_vk_commitment.iter()) {
+    for (dst, src) in recursion_node_verification_key_hash
+        .array_chunks_mut::<8>()
+        .zip(node_layer_vk_commitment.iter())
+    {
         let le_bytes = src.constraint_bit_length_as_bytes(cs, 64);
         dst.copy_from_slice(&le_bytes[..]);
         dst.reverse();
     }
 
     let mut leaf_layer_parameters_hash = [zero_u8; 32];
-    for (dst, src) in leaf_layer_parameters_hash.array_chunks_mut::<8>().zip(leaf_layer_parameters_commitment.iter()) {
+    for (dst, src) in leaf_layer_parameters_hash
+        .array_chunks_mut::<8>()
+        .zip(leaf_layer_parameters_commitment.iter())
+    {
         let le_bytes = src.constraint_bit_length_as_bytes(cs, 64);
         dst.copy_from_slice(&le_bytes[..]);
         dst.reverse();
     }
-
 
     flattened_public_input.extend(recursion_node_verification_key_hash);
     flattened_public_input.extend(leaf_layer_parameters_hash);
@@ -903,7 +966,10 @@ where
     let input_keccak_hash = keccak256::keccak256(cs, &flattened_public_input);
     let take_by = F::CAPACITY_BITS / 8;
 
-    for chunk in input_keccak_hash.chunks_exact(take_by).take(NUM_SCHEDULER_PUBLIC_INPUTS) {
+    for chunk in input_keccak_hash
+        .chunks_exact(take_by)
+        .take(NUM_SCHEDULER_PUBLIC_INPUTS)
+    {
         let mut lc = Vec::with_capacity(chunk.len());
         // treat as BE
         for (idx, el) in chunk.iter().rev().enumerate() {

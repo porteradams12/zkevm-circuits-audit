@@ -1,13 +1,13 @@
-use std::mem::MaybeUninit;
-use boojum::serde_utils::BigArraySerde;
-use cs_derive::*;
 use super::*;
+use crate::base_structures::register::VMRegister;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::u32::UInt32;
-use crate::base_structures::register::VMRegister;
-use boojum::{field::SmallField, gadgets::u8::UInt8};
 use boojum::gadgets::traits::allocatable::CSAllocatable;
+use boojum::gadgets::u32::UInt32;
+use boojum::serde_utils::BigArraySerde;
+use boojum::{field::SmallField, gadgets::u8::UInt8};
+use cs_derive::*;
+use std::mem::MaybeUninit;
 
 // we can decompose register into bytes before passing it into individual opcodes
 // because eventually those bytes will go into XOR/AND/OR table as inputs and will be range checked

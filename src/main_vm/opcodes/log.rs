@@ -1,6 +1,4 @@
-use boojum::{
-    gadgets::u256::UInt256,
-};
+use boojum::gadgets::u256::UInt256;
 
 use crate::base_structures::{
     log_query::{self, LogQuery, LOG_QUERY_PACKED_WIDTH, ROLLBACK_PACKING_FLAG_VARIABLE_IDX},
@@ -8,12 +6,12 @@ use crate::base_structures::{
 };
 
 use super::*;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::main_vm::opcodes::log::log_query::LogQueryWitness;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::gadgets::traits::allocatable::CSAllocatableExt;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
 pub(crate) fn apply_log<
     F: SmallField,

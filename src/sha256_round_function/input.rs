@@ -2,18 +2,18 @@ use std::collections::VecDeque;
 
 use super::*;
 
-use boojum::cs::Variable;
-use boojum::gadgets::traits::allocatable::CSAllocatable;
-use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use crate::base_structures::precompile_input_outputs::*;
-use boojum::gadgets::traits::allocatable::CSPlaceholder;
-use boojum::gadgets::queue::*;
 use crate::base_structures::vm_state::*;
+use boojum::cs::Variable;
+use boojum::gadgets::queue::*;
+use boojum::gadgets::traits::allocatable::CSAllocatable;
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
+use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::boolean::Boolean;
 use boojum::field::SmallField;
+use boojum::gadgets::boolean::Boolean;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::serde_utils::BigArraySerde;
@@ -47,7 +47,6 @@ impl<F: SmallField> CSPlaceholder<F> for Sha256RoundFunctionFSM<F> {
     }
 }
 
-
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
@@ -59,7 +58,6 @@ pub struct Sha256RoundFunctionFSMInputOutput<F: SmallField> {
 
 impl<F: SmallField> CSPlaceholder<F> for Sha256RoundFunctionFSMInputOutput<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
-        
         Self {
             internal_fsm: Sha256RoundFunctionFSM::placeholder(cs),
             log_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
@@ -67,8 +65,6 @@ impl<F: SmallField> CSPlaceholder<F> for Sha256RoundFunctionFSMInputOutput<F> {
         }
     }
 }
-
-
 
 pub type Sha256RoundFunctionCircuitInputOutput<F> = ClosedFormInput<
     F,
@@ -82,7 +78,6 @@ pub type Sha256RoundFunctionCircuitInputOutputWitness<F> = ClosedFormInputWitnes
     PrecompileFunctionInputData<F>,
     PrecompileFunctionOutputData<F>,
 >;
-
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug, Default)]

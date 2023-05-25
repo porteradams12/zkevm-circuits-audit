@@ -1,29 +1,28 @@
-use cs_derive::*;
-use ethereum_types::U256;
+use crate::base_structures::vm_state::*;
+use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
-use boojum::cs::{
-    traits::cs::ConstraintSystem,
-    Variable
-};
-use crate::base_structures::{vm_state::*, 
-};
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use boojum::gadgets::{
-    queue::*,
-    traits::{allocatable::*, selectable::Selectable, encodable::CircuitVarLengthEncodable, witnessable::WitnessHookable},
     boolean::Boolean,
+    queue::*,
+    traits::{
+        allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
+        witnessable::WitnessHookable,
+    },
     u16::UInt16,
-    u32::UInt32,
     u256::UInt256,
+    u32::UInt32,
 };
 use boojum::serde_utils::BigArraySerde;
+use cs_derive::*;
 use derivative::*;
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
+use ethereum_types::U256;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 pub struct CodeDecommittmentFSM<F: SmallField> {
     pub sha256_inner_state: [UInt32<F>; 8], // 8 uint32 words of internal sha256 state
-    pub hash_to_compare_against: UInt256<F>, 
+    pub hash_to_compare_against: UInt256<F>,
     pub current_index: UInt32<F>,
     pub current_page: UInt32<F>,
     pub timestamp: UInt32<F>,
@@ -56,7 +55,6 @@ impl<F: SmallField> CSPlaceholder<F> for CodeDecommittmentFSM<F> {
     }
 }
 
-
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
@@ -70,7 +68,8 @@ impl<F: SmallField> CSPlaceholder<F> for CodeDecommitterFSMInputOutput<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
             internal_fsm: CodeDecommittmentFSM::<F>::placeholder(cs),
-            decommittment_requests_queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
+            decommittment_requests_queue_state:
+                QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
             memory_queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
         }
     }
@@ -86,8 +85,11 @@ pub struct CodeDecommitterInputData<F: SmallField> {
 impl<F: SmallField> CSPlaceholder<F> for CodeDecommitterInputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            memory_queue_initial_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
-            sorted_requests_queue_initial_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
+            memory_queue_initial_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(
+                cs,
+            ),
+            sorted_requests_queue_initial_state:
+                QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
         }
     }
 }
@@ -102,7 +104,9 @@ pub struct CodeDecommitterOutputData<F: SmallField> {
 impl<F: SmallField> CSPlaceholder<F> for CodeDecommitterOutputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            memory_queue_final_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
+            memory_queue_final_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(
+                cs,
+            ),
         }
     }
 }
@@ -113,15 +117,16 @@ pub type CodeDecommitterCycleInputOutput<F> = crate::fsm_input_output::ClosedFor
     CodeDecommitterInputData<F>,
     CodeDecommitterOutputData<F>,
 >;
-pub type CodeDecommitterCycleInputOutputWitness<F> = crate::fsm_input_output::ClosedFormInputWitness<
-    F,
-    CodeDecommitterFSMInputOutput<F>,
-    CodeDecommitterInputData<F>,
-    CodeDecommitterOutputData<F>,
->;
+pub type CodeDecommitterCycleInputOutputWitness<F> =
+    crate::fsm_input_output::ClosedFormInputWitness<
+        F,
+        CodeDecommitterFSMInputOutput<F>,
+        CodeDecommitterInputData<F>,
+        CodeDecommitterOutputData<F>,
+    >;
 
-use crate::code_unpacker_sha256::{DecommitQuery, DECOMMIT_QUERY_PACKED_WIDTH};
 use crate::code_unpacker_sha256::full_state_queue::FullStateCircuitQueueRawWitness;
+use crate::code_unpacker_sha256::{DecommitQuery, DECOMMIT_QUERY_PACKED_WIDTH};
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug, Default)]

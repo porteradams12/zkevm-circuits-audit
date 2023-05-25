@@ -2,20 +2,20 @@ use cs_derive::*;
 
 use super::*;
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::Variable;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
+use boojum::gadgets::traits::castable::WitnessCastable;
+use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitEncodableExt};
 use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u32::UInt32;
 use boojum::{field::SmallField, gadgets::u256::UInt256};
-use boojum::cs::traits::cs::DstBuffer;
-use boojum::gadgets::traits::castable::WitnessCastable;
 use ethereum_types::U256;
-use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
-use boojum::gadgets::traits::allocatable::CSPlaceholder;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable, CSVarLengthEncodable)]
 #[derivative(Clone, Copy, Debug)]
@@ -44,9 +44,18 @@ impl<F: SmallField> CircuitEncodable<F, DECOMMIT_QUERY_PACKED_WIDTH> for Decommi
             cs,
             &[
                 (self.code_hash.inner[0].get_variable(), F::ONE),
-                (page_bytes[0].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (page_bytes[1].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (page_bytes[2].get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    page_bytes[0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    page_bytes[1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    page_bytes[2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -55,7 +64,10 @@ impl<F: SmallField> CircuitEncodable<F, DECOMMIT_QUERY_PACKED_WIDTH> for Decommi
             cs,
             &[
                 (self.code_hash.inner[1].get_variable(), F::ONE),
-                (page_bytes[3].get_variable(), F::from_u64_unchecked(1u64 << 32)),
+                (
+                    page_bytes[3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
                 (
                     timestamp_bytes[0].get_variable(),
                     F::from_u64_unchecked(1u64 << 40),
@@ -80,7 +92,10 @@ impl<F: SmallField> CircuitEncodable<F, DECOMMIT_QUERY_PACKED_WIDTH> for Decommi
                     timestamp_bytes[3].get_variable(),
                     F::from_u64_unchecked(1u64 << 40),
                 ),
-                (self.is_first.get_variable(), F::from_u64_unchecked(1u64 << 48)),
+                (
+                    self.is_first.get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
             ],
         )
         .get_variable();
@@ -93,25 +108,15 @@ impl<F: SmallField> CircuitEncodable<F, DECOMMIT_QUERY_PACKED_WIDTH> for Decommi
 
         [v0, v1, v2, v3, v4, v5, v6, v7]
     }
-    
 }
 
 impl<F: SmallField> CSAllocatableExt<F> for DecommitQuery<F> {
     const INTERNAL_STRUCT_LEN: usize = 11;
 
     fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
-        let code_hash: U256 = WitnessCastable::cast_from_source(
-            [
-                values[0],
-                values[1],
-                values[2],
-                values[3],
-                values[4],
-                values[5],
-                values[6],
-                values[7],
-            ]
-        );
+        let code_hash: U256 = WitnessCastable::cast_from_source([
+            values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7],
+        ]);
 
         let page: u32 = WitnessCastable::cast_from_source(values[8]);
         let is_first: bool = WitnessCastable::cast_from_source(values[9]);
@@ -167,18 +172,14 @@ impl<F: SmallField> CSPlaceholder<F> for DecommitQuery<F> {
     }
 }
 
-
 use boojum::gadgets::queue::full_state_queue::{
-    FullStateCircuitQueue,
-    FullStateCircuitQueueWitness,
+    FullStateCircuitQueue, FullStateCircuitQueueWitness,
 };
 
 pub type DecommitQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
     FullStateCircuitQueue<F, DecommitQuery<F>, AW, SW, CW, DECOMMIT_QUERY_PACKED_WIDTH, R>;
 
-
-pub type DecommitQueue<F, R> =
-    DecommitQueryQueue<F, 8, 12, 4, R>;
+pub type DecommitQueue<F, R> = DecommitQueryQueue<F, 8, 12, 4, R>;
 
 pub type DecommitQueueWitness<F, const SW: usize> =
     FullStateCircuitQueueWitness<F, DecommitQuery<F>, SW, DECOMMIT_QUERY_PACKED_WIDTH>;

@@ -4,6 +4,7 @@ use boojum::cs::implementations::verifier::VerificationKey;
 use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
 
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use boojum::gadgets::{
     boolean::Boolean,
     traits::{
@@ -12,15 +13,13 @@ use boojum::gadgets::{
     },
 };
 use cs_derive::*;
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
 
 use crate::base_structures::vm_state::*;
 use boojum::gadgets::num::Num;
 
-use boojum::serde_utils::BigArraySerde;
-use boojum::field::FieldExtension;
 use crate::recursion::leaf_layer::input::RecursionLeafParameters;
-
+use boojum::field::FieldExtension;
+use boojum::serde_utils::BigArraySerde;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
@@ -47,8 +46,14 @@ impl<F: SmallField> CSPlaceholder<F> for RecursionNodeInput<F> {
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug, Default(bound = "RecursionNodeInputWitness<F>: Default"))]
-#[serde(bound = "<H::CircuitOutput as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned")]
-pub struct RecursionNodeInstanceWitness<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, BaseField = F>> {
+#[serde(
+    bound = "<H::CircuitOutput as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned"
+)]
+pub struct RecursionNodeInstanceWitness<
+    F: SmallField,
+    H: RecursiveTreeHasher<F, Num<F>>,
+    EXT: FieldExtension<2, BaseField = F>,
+> {
     pub input: RecursionNodeInputWitness<F>,
     pub vk_witness: VerificationKey<F, H::NonCircuitSimulator>,
     pub split_points: VecDeque<[F; FULL_SPONGE_QUEUE_STATE_WIDTH]>,
