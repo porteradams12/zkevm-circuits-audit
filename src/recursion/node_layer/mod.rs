@@ -30,7 +30,6 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 
 use boojum::config::*;
-use boojum::cs::traits::circuit::Circuit;
 use boojum::gadgets::u32::UInt32;
 
 use super::*;

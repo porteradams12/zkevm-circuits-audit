@@ -12,7 +12,6 @@ use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::traits::selectable::Selectable;
-use boojum::gadgets::non_native_field::traits::NonNativeField;
 
 use ethereum_types::U256;
 use boojum::gadgets::num::Num;
@@ -20,7 +19,6 @@ use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 
 use std::sync::{Arc, RwLock};
-use boojum::pairing::{CurveAffine, GenericCurveProjective};
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::queue::QueueState;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
