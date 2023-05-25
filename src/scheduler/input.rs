@@ -1,38 +1,29 @@
 use super::*;
 use boojum::cs::implementations::proof::Proof;
 use boojum::cs::implementations::verifier::VerificationKey;
-use boojum::cs::{traits::cs::ConstraintSystem, Variable};
+
 use boojum::field::SmallField;
-use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueRawWitness;
-use boojum::gadgets::{
-    boolean::Boolean,
-    queue::*,
-    traits::{
-        allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
-        witnessable::WitnessHookable,
-    },
-};
-use cs_derive::*;
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
+
+use boojum::gadgets::{queue::*, traits::allocatable::*};
+
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputDataWitness;
-use crate::base_structures::recursion_query::*;
+
 use crate::base_structures::vm_state::*;
 use crate::code_unpacker_sha256::input::CodeDecommitterOutputDataWitness;
-use crate::demux_log_queue::input::LogDemuxerInputOutputWitness;
+
 use crate::fsm_input_output::circuit_inputs::main_vm::VmOutputDataWitness;
 use crate::log_sorter::input::EventsDeduplicatorOutputDataWitness;
-use crate::sort_decommittment_requests::input::CodeDecommittmentsDeduplicatorInputOutputWitness;
+
+use crate::fsm_input_output::ClosedFormInputCompactFormWitness;
 use crate::storage_application::input::StorageApplicationOutputDataWitness;
 use crate::storage_validity_by_grand_product::input::StorageDeduplicatorOutputDataWitness;
-use crate::fsm_input_output::ClosedFormInputCompactFormWitness;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
 use std::collections::VecDeque;
-use derivative::*;
-use boojum::serde_utils::BigArraySerde;
-use boojum::field::FieldExtension;
-use crate::recursion::*;
+
 use crate::recursion::leaf_layer::input::*;
+use crate::recursion::*;
+use boojum::field::FieldExtension;
 
 // #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 // #[derivative(Clone, Copy, Debug)]
@@ -82,9 +73,15 @@ use crate::recursion::leaf_layer::input::*;
 // This structure only keeps witness, but there is a lot of in unfortunately
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug)]
-#[serde(bound = "<H::CircuitOutput as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned,
-    [RecursionLeafParametersWitness<F>; NUM_BASE_LAYER_CIRCUITS]: serde::Serialize + serde::de::DeserializeOwned")]
-pub struct SchedulerCircuitInstanceWitness<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, BaseField = F>> {
+#[serde(
+    bound = "<H::CircuitOutput as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned,
+    [RecursionLeafParametersWitness<F>; NUM_BASE_LAYER_CIRCUITS]: serde::Serialize + serde::de::DeserializeOwned"
+)]
+pub struct SchedulerCircuitInstanceWitness<
+    F: SmallField,
+    H: RecursiveTreeHasher<F, Num<F>>,
+    EXT: FieldExtension<2, BaseField = F>,
+> {
     pub prev_block_data: BlockPassthroughDataWitness<F>,
     pub block_meta_parameters: BlockMetaParametersWitness<F>,
 
@@ -109,7 +106,8 @@ pub struct SchedulerCircuitInstanceWitness<F: SmallField, H: RecursiveTreeHasher
 
     pub bootloader_heap_memory_state: QueueTailStateWitness<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
     pub ram_sorted_queue_state: QueueTailStateWitness<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
-    pub decommits_sorter_intermediate_queue_state: QueueTailStateWitness<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+    pub decommits_sorter_intermediate_queue_state:
+        QueueTailStateWitness<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
 
     // all multi-circuits responsible for sorting
     pub rollup_storage_sorter_intermediate_queue_state: QueueTailStateWitness<F, QUEUE_STATE_WIDTH>,

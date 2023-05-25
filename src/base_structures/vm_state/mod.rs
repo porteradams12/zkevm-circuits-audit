@@ -1,23 +1,23 @@
 use super::register::VMRegister;
 use super::*;
+use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::cs::Variable;
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::*;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
+use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use boojum::gadgets::traits::selectable::*;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u160::UInt160;
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
-use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
-use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
-use boojum::cs::Variable;
-use cs_derive::*;
 use boojum::serde_utils::BigArraySerde;
+use cs_derive::*;
 
 pub mod callstack;
 pub mod saved_context;
@@ -48,15 +48,26 @@ impl<F: SmallField> Selectable<F> for ArithmeticFlagsPort<F> {
 
         let boolean_false = Boolean::allocated_constant(cs, false);
 
-        let a = [a.overflow_or_less_than, a.equal, a.greater_than, boolean_false];
-        let b = [b.overflow_or_less_than, b.equal, b.greater_than, boolean_false];
+        let a = [
+            a.overflow_or_less_than,
+            a.equal,
+            a.greater_than,
+            boolean_false,
+        ];
+        let b = [
+            b.overflow_or_less_than,
+            b.equal,
+            b.greater_than,
+            boolean_false,
+        ];
 
-        let [overflow_or_less_than, equal, greater_than, _] = Boolean::parallel_select(cs, flag, &a, &b);
+        let [overflow_or_less_than, equal, greater_than, _] =
+            Boolean::parallel_select(cs, flag, &a, &b);
 
         Self {
             overflow_or_less_than,
             equal,
-            greater_than
+            greater_than,
         }
     }
 }

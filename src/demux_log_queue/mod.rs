@@ -4,25 +4,23 @@ pub mod input;
 
 use crate::fsm_input_output::ClosedFormInputCompactForm;
 use crate::base_structures::{
-    log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH, LOG_QUERY_ABSORBTION_ROUNDS},
+    log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
     vm_state::*,
 };
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
 use boojum::gadgets::queue::queue_optimizer::SpongeOptimizer;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::u8::UInt8;
+use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
     queue::*,
-    traits::{
-        allocatable::CSAllocatableExt, encodable::CircuitEncodableExt, selectable::Selectable,
-    },
+    traits::{allocatable::CSAllocatableExt, selectable::Selectable},
     u160::*,
-    u32::UInt32,
 };
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
 use zkevm_opcode_defs::system_params::*;
 
@@ -32,7 +30,8 @@ use crate::{
 };
 
 pub type StorageLogQueue<F, R> = CircuitQueue<F, LogQuery<F>, 8, 12, 4, 4, 20, R>;
-pub type StorageLogQueueWitness<F> = CircuitQueueWitness<F, LogQuery<F>, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH>;
+pub type StorageLogQueueWitness<F> =
+    CircuitQueueWitness<F, LogQuery<F>, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH>;
 
 pub fn demultiplex_storage_logs_enty_point<
     F: SmallField,
@@ -43,8 +42,10 @@ pub fn demultiplex_storage_logs_enty_point<
     witness: LogDemuxerCircuitInstanceWitness<F>,
     round_function: &R,
     limit: usize,
-) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH] 
-where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
     let LogDemuxerCircuitInstanceWitness {
         closed_form_input,
         initial_queue_witness,
@@ -53,18 +54,16 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
     let mut structured_input =
         LogDemuxerInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
 
-
     // passthrough must be trivial
     structured_input
         .observable_input
-        .initial_log_queue_state.enforce_trivial_head(cs);
+        .initial_log_queue_state
+        .enforce_trivial_head(cs);
 
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
-        &structured_input
-            .observable_input
-            .initial_log_queue_state,
+        &structured_input.observable_input.initial_log_queue_state,
         &structured_input.hidden_fsm_input.initial_log_queue_state,
     );
     let mut initial_queue = StorageLogQueue::<F, R>::from_state(cs, state);
@@ -89,14 +88,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
     ];
 
     let empty_state = QueueState::empty(cs);
-    let [
-        mut storage_access_queue, 
-        mut events_access_queue, 
-        mut l1messages_access_queue, 
-        mut keccak256_access_queue, 
-        mut sha256_access_queue, 
-        mut ecrecover_access_queue
-    ] =
+    let [mut storage_access_queue, mut events_access_queue, mut l1messages_access_queue, mut keccak256_access_queue, mut sha256_access_queue, mut ecrecover_access_queue] =
         queue_states_from_fsm.map(|el| {
             let state = QueueState::conditionally_select(
                 cs,
@@ -127,24 +119,38 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
 
     structured_input.hidden_fsm_output.initial_log_queue_state = initial_queue.into_state();
 
-    structured_input.hidden_fsm_output.storage_access_queue_state = storage_access_queue.into_state();
+    structured_input
+        .hidden_fsm_output
+        .storage_access_queue_state = storage_access_queue.into_state();
 
     structured_input.hidden_fsm_output.events_access_queue_state = events_access_queue.into_state();
 
-    structured_input.hidden_fsm_output.l1messages_access_queue_state = l1messages_access_queue.into_state();
+    structured_input
+        .hidden_fsm_output
+        .l1messages_access_queue_state = l1messages_access_queue.into_state();
 
-    structured_input.hidden_fsm_output.keccak256_access_queue_state = keccak256_access_queue.into_state();
+    structured_input
+        .hidden_fsm_output
+        .keccak256_access_queue_state = keccak256_access_queue.into_state();
 
     structured_input.hidden_fsm_output.sha256_access_queue_state = sha256_access_queue.into_state();
 
-    structured_input.hidden_fsm_output.ecrecover_access_queue_state = ecrecover_access_queue.into_state();
+    structured_input
+        .hidden_fsm_output
+        .ecrecover_access_queue_state = ecrecover_access_queue.into_state();
 
     // copy into observable output
-    structured_input.observable_output.storage_access_queue_state = QueueState::conditionally_select(
+    structured_input
+        .observable_output
+        .storage_access_queue_state = QueueState::conditionally_select(
         cs,
         completed,
-        &structured_input.hidden_fsm_output.storage_access_queue_state,
-        &structured_input.observable_output.storage_access_queue_state,
+        &structured_input
+            .hidden_fsm_output
+            .storage_access_queue_state,
+        &structured_input
+            .observable_output
+            .storage_access_queue_state,
     );
     structured_input.observable_output.events_access_queue_state = QueueState::conditionally_select(
         cs,
@@ -152,17 +158,29 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
         &structured_input.hidden_fsm_output.events_access_queue_state,
         &structured_input.observable_output.events_access_queue_state,
     );
-    structured_input.observable_output.l1messages_access_queue_state = QueueState::conditionally_select(
+    structured_input
+        .observable_output
+        .l1messages_access_queue_state = QueueState::conditionally_select(
         cs,
         completed,
-        &structured_input.hidden_fsm_output.l1messages_access_queue_state,
-        &structured_input.observable_output.l1messages_access_queue_state,
+        &structured_input
+            .hidden_fsm_output
+            .l1messages_access_queue_state,
+        &structured_input
+            .observable_output
+            .l1messages_access_queue_state,
     );
-    structured_input.observable_output.keccak256_access_queue_state = QueueState::conditionally_select(
+    structured_input
+        .observable_output
+        .keccak256_access_queue_state = QueueState::conditionally_select(
         cs,
         completed,
-        &structured_input.hidden_fsm_output.keccak256_access_queue_state,
-        &structured_input.observable_output.keccak256_access_queue_state,
+        &structured_input
+            .hidden_fsm_output
+            .keccak256_access_queue_state,
+        &structured_input
+            .observable_output
+            .keccak256_access_queue_state,
     );
     structured_input.observable_output.sha256_access_queue_state = QueueState::conditionally_select(
         cs,
@@ -170,11 +188,17 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
         &structured_input.hidden_fsm_output.sha256_access_queue_state,
         &structured_input.observable_output.sha256_access_queue_state,
     );
-    structured_input.observable_output.ecrecover_access_queue_state = QueueState::conditionally_select(
+    structured_input
+        .observable_output
+        .ecrecover_access_queue_state = QueueState::conditionally_select(
         cs,
         completed,
-        &structured_input.hidden_fsm_output.ecrecover_access_queue_state,
-        &structured_input.observable_output.ecrecover_access_queue_state,
+        &structured_input
+            .hidden_fsm_output
+            .ecrecover_access_queue_state,
+        &structured_input
+            .observable_output
+            .ecrecover_access_queue_state,
     );
 
     // self-check
@@ -196,13 +220,13 @@ pub const NUM_SEPARATE_QUEUES: usize = 6;
 
 #[repr(u64)]
 pub enum LogType {
-    RollupStorage,
-    PorterStorage,
-    Events,
-    L1Messages,
-    KeccakCalls,
-    Sha256Calls,
-    ECRecoverCalls,
+    RollupStorage = 0,
+    Events = 1,
+    L1Messages = 2,
+    KeccakCalls = 3,
+    Sha256Calls = 4,
+    ECRecoverCalls = 5,
+    PorterStorage = 1024, // force unreachable
 }
 
 pub fn demultiplex_storage_logs_inner<
@@ -218,43 +242,54 @@ pub fn demultiplex_storage_logs_inner<
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     assert!(limit <= u32::MAX as usize);
-    let mut optimizer = SpongeOptimizer::<F, R, 8, 12, 4, 7>::new(LOG_QUERY_ABSORBTION_ROUNDS * limit);
 
-    let [
-        rollup_storage_queue, 
-        events_queue, 
-        l1_messages_queue, 
-        keccak_calls_queue, 
-        sha256_calls_queue, 
-        ecdsa_calls_queue
-    ] = output_queues;
+    let [rollup_storage_queue, events_queue, l1_messages_queue, keccak_calls_queue, sha256_calls_queue, ecdsa_calls_queue] =
+        output_queues;
 
-    let keccak_precompile_address = UInt160::allocated_constant(cs, 
-        *zkevm_opcode_defs::system_params::KECCAK256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
-    let sha256_precompile_address = UInt160::allocated_constant(cs, 
-        *zkevm_opcode_defs::system_params::SHA256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
-    let ecrecover_precompile_address = UInt160::allocated_constant(cs, 
-        *zkevm_opcode_defs::system_params::ECRECOVER_INNER_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
+    let keccak_precompile_address = UInt160::allocated_constant(
+        cs,
+        *zkevm_opcode_defs::system_params::KECCAK256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS,
+    );
+    let sha256_precompile_address = UInt160::allocated_constant(
+        cs,
+        *zkevm_opcode_defs::system_params::SHA256_ROUND_FUNCTION_PRECOMPILE_FORMAL_ADDRESS,
+    );
+    let ecrecover_precompile_address = UInt160::allocated_constant(
+        cs,
+        *zkevm_opcode_defs::system_params::ECRECOVER_INNER_FUNCTION_PRECOMPILE_FORMAL_ADDRESS,
+    );
+
+    // we have 6 queues to demux into, and up to 3 sponges per any push
+    use crate::base_structures::log_query::LOG_QUERY_ABSORBTION_ROUNDS;
+    let mut optimizer = SpongeOptimizer::<F, R, 8, 12, 4, 6>::new(LOG_QUERY_ABSORBTION_ROUNDS * limit);
 
     for _ in 0..limit {
+        debug_assert!(optimizer.is_fresh());
+
         let queue_is_empty = storage_log_queue.is_empty(cs);
         let execute = queue_is_empty.negated(cs);
         let popped = storage_log_queue.pop_front(cs, execute);
 
         let [aux_byte_for_storage, aux_byte_for_event, aux_byte_for_l1_message, aux_byte_for_precompile_call] =
-            [STORAGE_AUX_BYTE, EVENT_AUX_BYTE, L1_MESSAGE_AUX_BYTE, PRECOMPILE_AUX_BYTE]
-                .map(|byte|
-                    UInt8::allocated_constant(cs, byte)
-                );
+            [
+                STORAGE_AUX_BYTE,
+                EVENT_AUX_BYTE,
+                L1_MESSAGE_AUX_BYTE,
+                PRECOMPILE_AUX_BYTE,
+            ]
+            .map(|byte| UInt8::allocated_constant(cs, byte));
 
         let is_storage_aux_byte = UInt8::equals(cs, &aux_byte_for_storage, &popped.0.aux_byte);
         let is_event_aux_byte = UInt8::equals(cs, &aux_byte_for_event, &popped.0.aux_byte);
-        let is_l1_message_aux_byte = UInt8::equals(cs, &aux_byte_for_l1_message, &popped.0.aux_byte);
-        let is_precompile_aux_byte = UInt8::equals(cs, &aux_byte_for_precompile_call, &popped.0.aux_byte,);
+        let is_l1_message_aux_byte =
+            UInt8::equals(cs, &aux_byte_for_l1_message, &popped.0.aux_byte);
+        let is_precompile_aux_byte =
+            UInt8::equals(cs, &aux_byte_for_precompile_call, &popped.0.aux_byte);
 
         let is_keccak_address = UInt160::equals(cs, &keccak_precompile_address, &popped.0.address);
         let is_sha256_address = UInt160::equals(cs, &sha256_precompile_address, &popped.0.address);
-        let is_ecrecover_address = UInt160::equals(cs, &ecrecover_precompile_address, &popped.0.address);
+        let is_ecrecover_address =
+            UInt160::equals(cs, &ecrecover_precompile_address, &popped.0.address);
 
         let is_rollup_shard = popped.0.shard_id.is_zero(cs);
         let execute_rollup_storage =
@@ -327,15 +362,21 @@ pub fn demultiplex_storage_logs_inner<
 
         let is_bitmask = check_if_bitmask_and_if_empty(cs, expected_bitmask_bits);
         is_bitmask.conditionally_enforce_true(cs, execute);
+
+        // we enforce optimizer in this round, and it clears it up
+        optimizer.enforce(cs);
     }
 
-    optimizer.enforce(cs);
+    storage_log_queue.enforce_consistency(cs);
+
+    // checks in "Drop" interact badly with some tools, so we check it during testing instead
+    debug_assert!(optimizer.is_fresh());
 }
 
 pub fn check_if_bitmask_and_if_empty<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(
     cs: &mut CS,
     mask: [Boolean<F>; N],
-) -> Boolean<F>{
+) -> Boolean<F> {
     let lc: [_; N] = mask.map(|el| (el.get_variable(), F::ONE));
 
     let lc = Num::linear_combination(cs, &lc);

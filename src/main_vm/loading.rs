@@ -1,12 +1,14 @@
+use super::*;
+use crate::base_structures::register::VMRegister;
+use crate::base_structures::vm_state::callstack::Callstack;
+use crate::base_structures::vm_state::callstack::FullExecutionContext;
+use crate::base_structures::vm_state::{
+    VmLocalState, FULL_SPONGE_QUEUE_STATE_WIDTH, QUEUE_STATE_WIDTH,
+};
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::u160::UInt160;
 use boojum::gadgets::u256::{decompose_u256_as_u32x8, UInt256};
-use crate::base_structures::register::VMRegister;
-use crate::base_structures::vm_state::{FULL_SPONGE_QUEUE_STATE_WIDTH, QUEUE_STATE_WIDTH, VmLocalState};
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use crate::base_structures::vm_state::callstack::FullExecutionContext;
-use crate::base_structures::vm_state::callstack::Callstack;
-use super::*;
 
 pub fn initial_bootloader_state<
     F: SmallField,
@@ -36,12 +38,27 @@ pub fn initial_bootloader_state<
     let boolean_true = Boolean::allocated_constant(cs, true);
 
     ctx.saved_context.pc = zero_u16;
-    ctx.saved_context.exception_handler_loc = UInt16::allocated_constant(cs, zkevm_opcode_defs::system_params::INITIAL_FRAME_FORMAL_EH_LOCATION);
-    ctx.saved_context.ergs_remaining = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::VM_INITIAL_FRAME_ERGS);
+    ctx.saved_context.exception_handler_loc = UInt16::allocated_constant(
+        cs,
+        zkevm_opcode_defs::system_params::INITIAL_FRAME_FORMAL_EH_LOCATION,
+    );
+    ctx.saved_context.ergs_remaining =
+        UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::VM_INITIAL_FRAME_ERGS);
 
-    let formal_bootloader_address_low = UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::BOOTLOADER_FORMAL_ADDRESS_LOW as u32);
+    let formal_bootloader_address_low = UInt32::allocated_constant(
+        cs,
+        zkevm_opcode_defs::system_params::BOOTLOADER_FORMAL_ADDRESS_LOW as u32,
+    );
 
-    let formal_bootloader_address = UInt160 {inner: [formal_bootloader_address_low, zero_u32, zero_u32, zero_u32, zero_u32]};
+    let formal_bootloader_address = UInt160 {
+        inner: [
+            formal_bootloader_address_low,
+            zero_u32,
+            zero_u32,
+            zero_u32,
+            zero_u32,
+        ],
+    };
 
     ctx.saved_context.code_address = formal_bootloader_address;
     ctx.saved_context.this = formal_bootloader_address;
@@ -49,8 +66,7 @@ pub fn initial_bootloader_state<
 
     // circuit specific bit
     ctx.saved_context.reverted_queue_tail = initial_rollback_queue_value;
-    ctx.saved_context.reverted_queue_head =
-        ctx.saved_context.reverted_queue_tail;
+    ctx.saved_context.reverted_queue_head = ctx.saved_context.reverted_queue_tail;
 
     // mark as kernel
     ctx.saved_context.is_kernel_mode = boolean_true;
@@ -65,10 +81,9 @@ pub fn initial_bootloader_state<
 
     let mut empty_entry = FullExecutionContext::uninitialized(cs);
     empty_entry.saved_context.reverted_queue_tail = initial_rollback_queue_value;
-    empty_entry.saved_context.reverted_queue_head =
-        ctx.saved_context.reverted_queue_tail;
+    empty_entry.saved_context.reverted_queue_head = ctx.saved_context.reverted_queue_tail;
     empty_entry.saved_context.is_kernel_mode = boolean_true;
-    
+
     use boojum::gadgets::traits::encodable::CircuitEncodable;
     let empty_entry_encoding = empty_entry.saved_context.encode(cs); // only saved part
 
@@ -173,8 +188,10 @@ pub fn initial_bootloader_state<
     // rest
     bootloaded_state.callstack = callstack;
     // timestamp and global counters
-    bootloaded_state.timestamp = UInt32::allocated_constant(cs, zkevm_opcode_defs::STARTING_TIMESTAMP);
-    bootloaded_state.memory_page_counter = UInt32::allocated_constant(cs, zkevm_opcode_defs::STARTING_BASE_PAGE);
+    bootloaded_state.timestamp =
+        UInt32::allocated_constant(cs, zkevm_opcode_defs::STARTING_TIMESTAMP);
+    bootloaded_state.memory_page_counter =
+        UInt32::allocated_constant(cs, zkevm_opcode_defs::STARTING_BASE_PAGE);
 
     // we also FORMALLY mark r1 as "pointer" type, even though we will NOT have any calldata
     // Nevertheless we put it "formally" to make an empty slice to designated page
@@ -201,8 +218,8 @@ pub fn initial_bootloader_state<
     bootloaded_state.registers[0] = VMRegister {
         is_pointer: boolean_true,
         value: UInt256 {
-            inner: [l0, l1, l2, l3, zero_u32, zero_u32, zero_u32, zero_u32]
-        }
+            inner: [l0, l1, l2, l3, zero_u32, zero_u32, zero_u32, zero_u32],
+        },
     };
 
     bootloaded_state

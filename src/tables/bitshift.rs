@@ -1,6 +1,6 @@
 use super::*;
-use boojum::field::SmallField;
 use boojum::cs::implementations::lookup_table::LookupTable;
+use boojum::field::SmallField;
 use ethereum_types::U256;
 
 pub const VM_SHIFT_TO_NUM_CONVERTER_TABLE_NAME: &'static str = "Shift to num converter table";
@@ -38,5 +38,3 @@ pub fn create_shift_to_num_converter_table<F: SmallField>() -> LookupTable<F, 3>
         1,
     )
 }
-
-
