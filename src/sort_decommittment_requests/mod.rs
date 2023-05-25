@@ -387,6 +387,9 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
         result_queue.push(cs, record_to_add, add_to_the_queue);
     }
 
+    original_queue.enforce_consistency(cs);
+    sorted_queue.enforce_consistency(cs);
+
     (completed, lhs, rhs)
 }
 

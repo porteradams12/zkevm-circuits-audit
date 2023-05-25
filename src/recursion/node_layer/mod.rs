@@ -96,6 +96,7 @@ where
     } = input;
 
     let vk = AllocatedVerificationKey::<F, H>::allocate(cs, vk_witness);
+    assert_eq!(vk.setup_merkle_tree_cap.len(), config.vk_fixed_parameters.cap_size);
     let vk_commitment_computed: [_; VK_COMMITMENT_LENGTH] = commit_variable_length_encodable_item(cs, &vk, round_function);
 
     // select VK commitment over which we will work with
@@ -175,7 +176,19 @@ where
     assert_eq!(subqueues.len(), node_layer_capacity);
 
     for subqueue in subqueues.into_iter() {
-        let witness = proof_witnesses.pop_front().unwrap_or(padding_proof.clone());
+        // here we do the trick to protect ourselves from setup pending from witness, but
+        // nevertheless do not create new types for proofs with fixed number of inputs, etc
+        let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
+            padding_proof.clone()
+        } else {
+            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
+                // proving mode
+                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
+            } else {
+                // we are in the testing mode
+                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
+            }
+        };
         let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
 
         let chunk_is_empty = subqueue.tail.length.is_zero(cs);

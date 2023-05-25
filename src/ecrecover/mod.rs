@@ -692,6 +692,8 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         let _ = memory_queue.push(cs, value_query, should_process);
     }
 
+    requests_queue.enforce_consistency(cs);
+
     // form the final state
     let done = requests_queue.is_empty(cs);
     structured_input.completion_flag = done;

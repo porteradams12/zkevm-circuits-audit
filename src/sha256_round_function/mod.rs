@@ -286,6 +286,8 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
         state.read_words_for_round = t.negated(cs);
     }
 
+    precompile_calls_queue.enforce_consistency(cs);
+
     state
 }
 

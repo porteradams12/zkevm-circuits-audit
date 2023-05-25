@@ -462,6 +462,8 @@ where
         state.state_decommit = continue_decommit;
     }
 
+    unpack_requests_queue.enforce_consistency(cs);
+
     state
 }
 

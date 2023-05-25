@@ -450,6 +450,9 @@ pub fn repack_and_prove_events_rollbacks_inner<
         result_queue.push(cs, query_to_add, add_to_the_queue);
     }
 
+    unsorted_queue.enforce_consistency(cs);
+    intermediate_sorted_queue.enforce_consistency(cs);
+
     (
         lhs,
         rhs,

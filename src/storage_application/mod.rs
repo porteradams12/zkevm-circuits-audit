@@ -636,6 +636,8 @@ where
         write_stage_in_progress = Boolean::multi_and(cs, &[parse_next_queue_elem, rw_flag]);
     }
 
+    storage_accesses_queue.enforce_consistency(cs);
+
     structured_input.completion_flag = completed.clone();
     let storage_queue_state = storage_accesses_queue.into_state();
 

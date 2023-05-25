@@ -139,6 +139,9 @@ where
         limit
     );
 
+    unsorted_queue.enforce_consistency(cs);
+    sorted_queue.enforce_consistency(cs);
+
     let completed = unsorted_queue.length.is_zero(cs);
 
     for (lhs, rhs) in lhs.iter().zip(rhs.iter()) {

@@ -197,13 +197,13 @@ pub const NUM_SEPARATE_QUEUES: usize = 6;
 
 #[repr(u64)]
 pub enum LogType {
-    RollupStorage,
-    PorterStorage,
-    Events,
-    L1Messages,
-    KeccakCalls,
-    Sha256Calls,
-    ECRecoverCalls,
+    RollupStorage = 0,
+    Events = 1,
+    L1Messages = 2,
+    KeccakCalls = 3,
+    Sha256Calls = 4,
+    ECRecoverCalls = 5,
+    PorterStorage = 1024, // force unreachable
 }
 
 pub fn demultiplex_storage_logs_inner<
@@ -219,7 +219,6 @@ pub fn demultiplex_storage_logs_inner<
     [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     assert!(limit <= u32::MAX as usize);
-    let mut optimizer = SpongeOptimizer::<F, R, 8, 12, 4, 7>::new(limit);
 
     let [
         rollup_storage_queue, 
@@ -237,7 +236,13 @@ pub fn demultiplex_storage_logs_inner<
     let ecrecover_precompile_address = UInt160::allocated_constant(cs, 
         *zkevm_opcode_defs::system_params::ECRECOVER_INNER_FUNCTION_PRECOMPILE_FORMAL_ADDRESS);
 
+    // we have 6 queues to demux into, and up to 3 sponges per any push
+    use crate::base_structures::log_query::LOG_QUERY_ABSORBTION_ROUNDS;
+    let mut optimizer = SpongeOptimizer::<F, R, 8, 12, 4, 6>::new(LOG_QUERY_ABSORBTION_ROUNDS);
+
     for _ in 0..limit {
+        debug_assert!(optimizer.is_fresh());
+
         let queue_is_empty = storage_log_queue.is_empty(cs);
         let execute = queue_is_empty.negated(cs);
         let popped = storage_log_queue.pop_front(cs, execute);
@@ -328,9 +333,15 @@ pub fn demultiplex_storage_logs_inner<
 
         let is_bitmask = check_if_bitmask_and_if_empty(cs, expected_bitmask_bits);
         is_bitmask.conditionally_enforce_true(cs, execute);
+
+        // we enforce optimizer in this round, and it clears it up
+        optimizer.enforce(cs);
     }
 
-    optimizer.enforce(cs);
+    storage_log_queue.enforce_consistency(cs);
+
+    // checks in "Drop" interact badly with some tools, so we check it during testing instead
+    debug_assert!(optimizer.is_fresh());
 }
 
 pub fn check_if_bitmask_and_if_empty<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(

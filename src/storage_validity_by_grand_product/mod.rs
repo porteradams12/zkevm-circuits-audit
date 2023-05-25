@@ -422,6 +422,9 @@ where
         limit,
     );
 
+    unsorted_queue.enforce_consistency(cs);
+    intermediate_sorted_queue.enforce_consistency(cs);
+
     let unsorted_is_empty = unsorted_queue.is_empty(cs);
     let sorted_is_empty = intermediate_sorted_queue.is_empty(cs);
 
