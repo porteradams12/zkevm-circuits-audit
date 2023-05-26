@@ -21,8 +21,8 @@ boojum = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
 # boojum = { path = "../boojum" }
 bincode = "*"
 ethereum-types = "0.12.*"
-# cs_derive = { git = "https://github.com/matter-labs/boojum.git", branch = "main" }
-cs_derive = { path = "../boojum/cs_derive" }
+cs_derive = { git = "https://github.com/matter-labs/boojum.git", branch = "main" }
+# cs_derive = { path = "../boojum/cs_derive" }
 serde_json = "*"
 itertools = "0.10"
 rand_new = { package = "rand", version = "0.8" }
