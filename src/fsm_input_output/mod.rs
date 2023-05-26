@@ -1,31 +1,33 @@
 use super::*;
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
 use cs_derive::*;
-use boojum::algebraic_props::round_function;
+
 use boojum::cs::gates::ConstantAllocatableCS;
-use boojum::gadgets::traits::allocatable::CSAllocatable;
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::cs::Variable;
 use boojum::field::SmallField;
-use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::gadgets::num::Num;
+use boojum::gadgets::traits::allocatable::CSAllocatable;
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
+use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u32::UInt32;
-use boojum::cs::Variable;
 use boojum::serde_utils::BigArraySerde;
 
 pub mod circuit_inputs;
 
 #[derive(Derivative, CSAllocatable, WitnessHookable)]
-#[WitnessHookBound("
+#[WitnessHookBound(
+    "
 where
     <T as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
     <IN as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
     <OUT as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
-")]
+"
+)]
 #[derivative(Clone, Debug)]
 pub struct ClosedFormInput<
     F: SmallField,
@@ -46,11 +48,23 @@ pub struct ClosedFormInput<
 }
 
 impl<
-    F: SmallField,
-    T: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
-    IN: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
-    OUT: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
-> ClosedFormInput<F, T, IN, OUT>
+        F: SmallField,
+        T: Clone
+            + std::fmt::Debug
+            + CSAllocatable<F>
+            + CircuitVarLengthEncodable<F>
+            + WitnessHookable<F>,
+        IN: Clone
+            + std::fmt::Debug
+            + CSAllocatable<F>
+            + CircuitVarLengthEncodable<F>
+            + WitnessHookable<F>,
+        OUT: Clone
+            + std::fmt::Debug
+            + CSAllocatable<F>
+            + CircuitVarLengthEncodable<F>
+            + WitnessHookable<F>,
+    > ClosedFormInput<F, T, IN, OUT>
 where
     <T as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
     <IN as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
@@ -85,17 +99,34 @@ where
     }
 
     #[track_caller]
-    pub fn hook_compare_witness<CS: ConstraintSystem<F>>(&self, cs: &CS, expected: &<ClosedFormInput<F, T, IN, OUT> as CSAllocatable<F>>::Witness) 
-        where T: PrettyComparison<F>, OUT: PrettyComparison<F>,
+    pub fn hook_compare_witness<CS: ConstraintSystem<F>>(
+        &self,
+        cs: &CS,
+        expected: &<ClosedFormInput<F, T, IN, OUT> as CSAllocatable<F>>::Witness,
+    ) where
+        T: PrettyComparison<F>,
+        OUT: PrettyComparison<F>,
     {
         if let Some(circuit_result) = (self.witness_hook(&*cs))() {
-            let comparison_lines = <T as PrettyComparison<F>>::find_diffs(&circuit_result.hidden_fsm_output, &expected.hidden_fsm_output);
+            let comparison_lines = <T as PrettyComparison<F>>::find_diffs(
+                &circuit_result.hidden_fsm_output,
+                &expected.hidden_fsm_output,
+            );
             if comparison_lines.is_empty() == false {
-                panic!("Difference in FSM. Left is circuit, right is expected:\n{}", comparison_lines.join("\n"));
+                panic!(
+                    "Difference in FSM. Left is circuit, right is expected:\n{}",
+                    comparison_lines.join("\n")
+                );
             }
-            let comparison_lines = <OUT as PrettyComparison<F>>::find_diffs(&circuit_result.observable_output, &expected.observable_output);
+            let comparison_lines = <OUT as PrettyComparison<F>>::find_diffs(
+                &circuit_result.observable_output,
+                &expected.observable_output,
+            );
             if comparison_lines.is_empty() == false {
-                panic!("Difference in observable output. Left is circuit, right is expected:\n{}", comparison_lines.join("\n"));
+                panic!(
+                    "Difference in observable output. Left is circuit, right is expected:\n{}",
+                    comparison_lines.join("\n")
+                );
             }
             assert_eq!(&circuit_result, expected);
         }
@@ -105,11 +136,23 @@ where
 pub const CLOSED_FORM_COMMITTMENT_LENGTH: usize = 4;
 
 impl<
-    F: SmallField,
-    T: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
-    IN: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
-    OUT: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
-> std::default::Default for ClosedFormInputWitness<F, T, IN, OUT>
+        F: SmallField,
+        T: Clone
+            + std::fmt::Debug
+            + CSAllocatable<F>
+            + CircuitVarLengthEncodable<F>
+            + WitnessHookable<F>,
+        IN: Clone
+            + std::fmt::Debug
+            + CSAllocatable<F>
+            + CircuitVarLengthEncodable<F>
+            + WitnessHookable<F>,
+        OUT: Clone
+            + std::fmt::Debug
+            + CSAllocatable<F>
+            + CircuitVarLengthEncodable<F>
+            + WitnessHookable<F>,
+    > std::default::Default for ClosedFormInputWitness<F, T, IN, OUT>
 where
     <T as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
     <IN as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
@@ -134,10 +177,22 @@ pub struct ClosedFormInputCompactForm<F: SmallField> {
 impl<F: SmallField> ClosedFormInputCompactForm<F> {
     pub fn from_full_form<
         CS: ConstraintSystem<F>,
-        T: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
-        IN: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
-        OUT: Clone + std::fmt::Debug + CSAllocatable<F> + CircuitVarLengthEncodable<F> + WitnessHookable<F>,
-        R: CircuitRoundFunction<F, 8, 12, 4>
+        T: Clone
+            + std::fmt::Debug
+            + CSAllocatable<F>
+            + CircuitVarLengthEncodable<F>
+            + WitnessHookable<F>,
+        IN: Clone
+            + std::fmt::Debug
+            + CSAllocatable<F>
+            + CircuitVarLengthEncodable<F>
+            + WitnessHookable<F>,
+        OUT: Clone
+            + std::fmt::Debug
+            + CSAllocatable<F>
+            + CircuitVarLengthEncodable<F>
+            + WitnessHookable<F>,
+        R: CircuitRoundFunction<F, 8, 12, 4>,
     >(
         cs: &mut CS,
         full_form: &ClosedFormInput<F, T, IN, OUT>,
@@ -145,24 +200,18 @@ impl<F: SmallField> ClosedFormInputCompactForm<F> {
     ) -> Self
     where
         <T as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
-        <IN as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned  + Eq,
-        <OUT as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned  + Eq,
+        <IN as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
+        <OUT as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned + Eq,
     {
         let observable_input_committment =
             commit_variable_length_encodable_item(cs, &full_form.observable_input, round_function);
-        let observable_output_committment = commit_variable_length_encodable_item(
-            cs,
-            &full_form.observable_output,
-            round_function,
-        );
+        let observable_output_committment =
+            commit_variable_length_encodable_item(cs, &full_form.observable_output, round_function);
 
         let hidden_fsm_input_committment =
             commit_variable_length_encodable_item(cs, &full_form.hidden_fsm_input, round_function);
-        let hidden_fsm_output_committment = commit_variable_length_encodable_item(
-            cs,
-            &full_form.hidden_fsm_output,
-            round_function,
-        );
+        let hidden_fsm_output_committment =
+            commit_variable_length_encodable_item(cs, &full_form.hidden_fsm_output, round_function);
 
         // mask FSM part. Observable part is NEVER masked
 
@@ -213,11 +262,11 @@ pub fn commit_variable_length_encodable_item<
     const SW: usize,
     const CW: usize,
     const N: usize,
-    R: CircuitRoundFunction<F, AW, SW, CW>
+    R: CircuitRoundFunction<F, AW, SW, CW>,
 >(
     cs: &mut CS,
     item: &T,
-    _round_function: &R
+    _round_function: &R,
 ) -> [Num<F>; N] {
     let expected_length = item.encoding_length();
 
@@ -236,11 +285,11 @@ pub fn commit_encoding<
     const SW: usize,
     const CW: usize,
     const N: usize,
-    R: CircuitRoundFunction<F, AW, SW, CW>
+    R: CircuitRoundFunction<F, AW, SW, CW>,
 >(
     cs: &mut CS,
     input: &[Variable],
-    _round_function: &R
+    _round_function: &R,
 ) -> [Num<F>; N] {
     // we use length specialization here
     let expected_length = input.len();
@@ -267,17 +316,11 @@ pub fn commit_encoding<
     for chunk in buffer.array_chunks::<AW>() {
         let capacity_els = R::split_capacity_elements(&state);
 
-        state = R::absorb_with_replacement(
-            cs, 
-            *chunk, 
-            capacity_els
-        );
+        state = R::absorb_with_replacement(cs, *chunk, capacity_els);
         state = R::compute_round_function(cs, state);
     }
 
-    let output = R::state_into_commitment::<N>(
-        &state
-    );
+    let output = R::state_into_commitment::<N>(&state);
 
     output.map(|el| Num::from_variable(el))
 }

@@ -1,10 +1,10 @@
 use super::*;
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::u16::UInt16;
-use cs_derive::*;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
+use boojum::gadgets::u16::UInt16;
 use boojum::serde_utils::BigArraySerde;
+use cs_derive::*;
 
 use zkevm_opcode_defs::{
     ISAVersion, ImmMemHandlerFlags, OPCODE_INPUT_VARIANT_FLAGS, OPCODE_OUTPUT_VARIANT_FLAGS,
@@ -87,7 +87,7 @@ impl<F: SmallField> OpcodeBitmask<F> {
             zkevm_opcode_defs::total_description_bits_rounded_for_version(SUPPORTED_ISA_VERSION)
         );
         debug_assert_eq!(
-            TOTAL_OPCODE_MEANINGFULL_DESCRIPTION_BITS, 
+            TOTAL_OPCODE_MEANINGFULL_DESCRIPTION_BITS,
             zkevm_opcode_defs::total_description_bits_for_version(SUPPORTED_ISA_VERSION)
         );
 

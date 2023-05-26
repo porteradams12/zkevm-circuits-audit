@@ -1,11 +1,11 @@
 use super::*;
 
-use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecordWitness;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
+use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 
 #[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
@@ -52,7 +52,7 @@ where
         .decoded_opcode
         .properties_bits
         .boolean_for_opcode(NEAR_CALL_OPCODE);
-    
+
     if crate::config::CIRCUIT_VERSOBE {
         if (execute.witness_hook(&*cs))().unwrap_or(false) {
             println!("Applying NEAR CALL");
@@ -70,7 +70,10 @@ where
     let call_timestamp = draft_vm_state.timestamp;
 
     let oracle = witness_oracle.clone();
-    let dependencies = [execute.get_variable().into(), call_timestamp.get_variable().into()];
+    let dependencies = [
+        execute.get_variable().into(),
+        call_timestamp.get_variable().into(),
+    ];
     let potential_rollback_queue_segment_tail =
         Num::allocate_multiple_from_closure_and_dependencies(
             cs,
@@ -111,8 +114,7 @@ where
         &near_call_abi.ergs_passed,
     );
 
-    let (remaining_for_this_context, uf) =
-        preliminary_ergs_left.overflowing_sub(cs, ergs_to_pass);
+    let (remaining_for_this_context, uf) = preliminary_ergs_left.overflowing_sub(cs, ergs_to_pass);
 
     let remaining_ergs_if_pass = remaining_for_this_context;
     let passed_ergs_if_pass = ergs_to_pass;
@@ -131,7 +133,13 @@ where
         <ExecutionContextRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 2,
     );
     dependencies.push(execute.get_variable().into());
-    dependencies.push(draft_vm_state.callstack.context_stack_depth.get_variable().into());
+    dependencies.push(
+        draft_vm_state
+            .callstack
+            .context_stack_depth
+            .get_variable()
+            .into(),
+    );
     dependencies.extend(Place::from_variables(
         current_callstack_entry.flatten_as_variables(),
     ));

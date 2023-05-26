@@ -1,24 +1,25 @@
-use boojum::gadgets::u8::UInt8;
-use boojum::gadgets::u32::UInt32;
-use cs_derive::*;
+use crate::base_structures::{
+    log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
+    vm_state::*,
+};
+use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
-use boojum::cs::{
-    traits::cs::ConstraintSystem,
-    Variable
-};
-use crate::base_structures::{vm_state::*, 
-    log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH}, 
-};
-use boojum::gadgets::{
-    queue::*,
-    traits::{allocatable::*, selectable::Selectable, encodable::CircuitVarLengthEncodable, witnessable::WitnessHookable},
-    boolean::Boolean
-};
-use derivative::*;
-use boojum::serde_utils::BigArraySerde;
 use boojum::gadgets::keccak256;
-use std::collections::VecDeque;
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
+use boojum::gadgets::u32::UInt32;
+use boojum::gadgets::u8::UInt8;
+use boojum::gadgets::{
+    boolean::Boolean,
+    queue::*,
+    traits::{
+        allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
+        witnessable::WitnessHookable,
+    },
+};
+use boojum::serde_utils::BigArraySerde;
+use cs_derive::*;
+use derivative::*;
+use std::collections::VecDeque;
 
 pub const STORAGE_DEPTH: usize = 256;
 
@@ -29,7 +30,8 @@ pub struct StorageApplicationFSMInputOutput<F: SmallField> {
     pub current_root_hash: [UInt8<F>; 32],
     pub next_enumeration_counter: [UInt32<F>; 2],
     pub current_storage_application_log_state: QueueState<F, QUEUE_STATE_WIDTH>,
-    pub current_diffs_keccak_accumulator_state: [[[UInt8<F>; keccak256::BYTES_PER_WORD]; keccak256::LANE_WIDTH]; keccak256::LANE_WIDTH],
+    pub current_diffs_keccak_accumulator_state:
+        [[[UInt8<F>; keccak256::BYTES_PER_WORD]; keccak256::LANE_WIDTH]; keccak256::LANE_WIDTH],
 }
 
 impl<F: SmallField> CSPlaceholder<F> for StorageApplicationFSMInputOutput<F> {
@@ -37,8 +39,13 @@ impl<F: SmallField> CSPlaceholder<F> for StorageApplicationFSMInputOutput<F> {
         Self {
             current_root_hash: [UInt8::<F>::placeholder(cs); 32],
             next_enumeration_counter: [UInt32::<F>::placeholder(cs); 2],
-            current_storage_application_log_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
-            current_diffs_keccak_accumulator_state: [[[UInt8::<F>::placeholder(cs); keccak256::BYTES_PER_WORD]; keccak256::LANE_WIDTH]; keccak256::LANE_WIDTH]
+            current_storage_application_log_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(
+                cs,
+            ),
+            current_diffs_keccak_accumulator_state: [[[UInt8::<F>::placeholder(cs);
+                keccak256::BYTES_PER_WORD];
+                keccak256::LANE_WIDTH];
+                keccak256::LANE_WIDTH],
         }
     }
 }
@@ -55,7 +62,6 @@ pub struct StorageApplicationInputData<F: SmallField> {
 
 impl<F: SmallField> CSPlaceholder<F> for StorageApplicationInputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
-        
         Self {
             shard: UInt8::<F>::placeholder(cs),
             initial_root_hash: [UInt8::<F>::placeholder(cs); 32],
@@ -86,16 +92,16 @@ impl<F: SmallField> CSPlaceholder<F> for StorageApplicationOutputData<F> {
 
 pub type StorageApplicationInputOutput<F> = crate::fsm_input_output::ClosedFormInput<
     F,
-    StorageApplicationFSMInputOutput<F>, 
-    StorageApplicationInputData<F>, 
-    StorageApplicationOutputData<F>
+    StorageApplicationFSMInputOutput<F>,
+    StorageApplicationInputData<F>,
+    StorageApplicationOutputData<F>,
 >;
 
 pub type StorageApplicationInputOutputWitness<F> = crate::fsm_input_output::ClosedFormInputWitness<
-    F, 
-    StorageApplicationFSMInputOutput<F>, 
-    StorageApplicationInputData<F>, 
-    StorageApplicationOutputData<F>
+    F,
+    StorageApplicationFSMInputOutput<F>,
+    StorageApplicationInputData<F>,
+    StorageApplicationOutputData<F>,
 >;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]

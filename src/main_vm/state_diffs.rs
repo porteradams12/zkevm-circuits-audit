@@ -1,14 +1,14 @@
 use arrayvec::ArrayVec;
 
 use super::*;
-use boojum::field::SmallField;
-use boojum::gadgets::num::Num;
 use crate::base_structures::vm_state::*;
-use boojum::gadgets::{boolean::Boolean, u16::UInt16, u32::UInt32};
 use crate::base_structures::{
     register::VMRegister,
     vm_state::{callstack::Callstack, ArithmeticFlagsPort},
 };
+use boojum::field::SmallField;
+use boojum::gadgets::num::Num;
+use boojum::gadgets::{boolean::Boolean, u16::UInt16, u32::UInt32};
 
 use crate::main_vm::opcodes::{AddSubRelation, MulDivRelation};
 
@@ -83,17 +83,11 @@ pub struct StateDiffsAccumulator<F: SmallField> {
     // add/sub relations to enforce
     pub add_sub_relations: Vec<(
         Boolean<F>,
-        ArrayVec<
-            AddSubRelation<F>,
-            MAX_ADD_SUB_RELATIONS_PER_CYCLE,
-        >,
+        ArrayVec<AddSubRelation<F>, MAX_ADD_SUB_RELATIONS_PER_CYCLE>,
     )>,
     // mul/div relations to enforce
     pub mul_div_relations: Vec<(
         Boolean<F>,
-        ArrayVec<
-            MulDivRelation<F>,
-            MAX_MUL_DIV_RELATIONS_PER_CYCLE,
-        >,
+        ArrayVec<MulDivRelation<F>, MAX_MUL_DIV_RELATIONS_PER_CYCLE>,
     )>,
 }

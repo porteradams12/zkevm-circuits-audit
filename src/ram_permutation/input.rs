@@ -1,25 +1,26 @@
-use cs_derive::*;
-use boojum::field::SmallField;
-use boojum::cs::{
-    traits::cs::ConstraintSystem,
-    Variable
-};
-use crate::base_structures::{vm_state::*,
+use crate::base_structures::{
     memory_query::{MemoryQuery, MEMORY_QUERY_PACKED_WIDTH},
+    vm_state::*,
 };
+use crate::boojum::gadgets::traits::auxiliary::PrettyComparison;
+use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
+use boojum::cs::{traits::cs::ConstraintSystem, Variable};
+use boojum::field::SmallField;
 use boojum::gadgets::{
-    queue::*,
-    queue::full_state_queue::*,
-    traits::{allocatable::*, selectable::Selectable, encodable::CircuitVarLengthEncodable, witnessable::WitnessHookable},
     boolean::Boolean,
     num::Num,
-    u32::UInt32,
+    queue::full_state_queue::*,
+    queue::*,
+    traits::{
+        allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
+        witnessable::WitnessHookable,
+    },
     u256::UInt256,
+    u32::UInt32,
 };
-use derivative::*;
 use boojum::serde_utils::BigArraySerde;
-use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
-use crate::boojum::gadgets::traits::auxiliary::PrettyComparison;
+use cs_derive::*;
+use derivative::*;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Debug)]
@@ -37,7 +38,7 @@ impl<F: SmallField> CSPlaceholder<F> for RamPermutationInputData<F> {
         Self {
             unsorted_queue_initial_state: empty_state,
             sorted_queue_initial_state: empty_state,
-            non_deterministic_bootloader_memory_snapshot_length: zero_u32
+            non_deterministic_bootloader_memory_snapshot_length: zero_u32,
         }
     }
 }
@@ -82,10 +83,18 @@ impl<F: SmallField> CSPlaceholder<F> for RamPermutationFSMInputOutput<F> {
     }
 }
 
-pub type RamPermutationCycleInputOutput<F> =
-    crate::fsm_input_output::ClosedFormInput<F, RamPermutationFSMInputOutput<F>, RamPermutationInputData<F>, ()>;
-pub type RamPermutationCycleInputOutputWitness<F> =
-    crate::fsm_input_output::ClosedFormInputWitness<F, RamPermutationFSMInputOutput<F>, RamPermutationInputData<F>, ()>;
+pub type RamPermutationCycleInputOutput<F> = crate::fsm_input_output::ClosedFormInput<
+    F,
+    RamPermutationFSMInputOutput<F>,
+    RamPermutationInputData<F>,
+    (),
+>;
+pub type RamPermutationCycleInputOutputWitness<F> = crate::fsm_input_output::ClosedFormInputWitness<
+    F,
+    RamPermutationFSMInputOutput<F>,
+    RamPermutationInputData<F>,
+    (),
+>;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug, Default)]
@@ -93,10 +102,19 @@ pub type RamPermutationCycleInputOutputWitness<F> =
 pub struct RamPermutationCircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: RamPermutationCycleInputOutputWitness<F>,
 
-    pub unsorted_queue_witness: FullStateCircuitQueueRawWitness<F, MemoryQuery<F>, FULL_SPONGE_QUEUE_STATE_WIDTH, MEMORY_QUERY_PACKED_WIDTH>,
-    pub sorted_queue_witness: FullStateCircuitQueueRawWitness<F, MemoryQuery<F>, FULL_SPONGE_QUEUE_STATE_WIDTH, MEMORY_QUERY_PACKED_WIDTH>,
+    pub unsorted_queue_witness: FullStateCircuitQueueRawWitness<
+        F,
+        MemoryQuery<F>,
+        FULL_SPONGE_QUEUE_STATE_WIDTH,
+        MEMORY_QUERY_PACKED_WIDTH,
+    >,
+    pub sorted_queue_witness: FullStateCircuitQueueRawWitness<
+        F,
+        MemoryQuery<F>,
+        FULL_SPONGE_QUEUE_STATE_WIDTH,
+        MEMORY_QUERY_PACKED_WIDTH,
+    >,
 }
 
 pub type MemoryQueriesQueue<F, R> =
     FullStateCircuitQueue<F, MemoryQuery<F>, 8, 12, 4, MEMORY_QUERY_PACKED_WIDTH, R>;
-

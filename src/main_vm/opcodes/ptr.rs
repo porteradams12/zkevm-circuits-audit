@@ -1,5 +1,5 @@
-use boojum::{gadgets::u256::UInt256};
 use crate::base_structures::register::VMRegister;
+use boojum::gadgets::u256::UInt256;
 
 use super::*;
 
@@ -82,8 +82,7 @@ pub(crate) fn apply_ptr<F: SmallField, CS: ConstraintSystem<F>>(
     let (result_for_ptr_sub, uf) = src_0.u32x8_view[0].overflowing_sub(cs, src_1.u32x8_view[0]);
     let underflow_panic_if_sub = Boolean::multi_and(cs, &[ptr_sub_variant, uf]);
 
-    let (result_for_ptr_shrink, uf) =
-        src_0.u32x8_view[3].overflowing_sub(cs, src_1.u32x8_view[0]);
+    let (result_for_ptr_shrink, uf) = src_0.u32x8_view[3].overflowing_sub(cs, src_1.u32x8_view[0]);
     let underflow_panic_if_shrink = Boolean::multi_and(cs, &[ptr_shrink_variant, uf]);
 
     let any_potential_panic = Boolean::multi_or(

@@ -1,14 +1,14 @@
-use boojum::cs::{traits::cs::DstBuffer};
-use boojum::config::*;
 use crate::base_structures::{register::VMRegister, vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH};
+use boojum::config::*;
+use boojum::cs::traits::cs::DstBuffer;
 
 use super::*;
 
-use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
+use crate::base_structures::vm_state::QUEUE_STATE_WIDTH;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
-use crate::base_structures::vm_state::QUEUE_STATE_WIDTH;
+use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 
 use arrayvec::ArrayVec;
 
@@ -50,7 +50,7 @@ where
         .decoded_opcode
         .properties_bits
         .boolean_for_opcode(RET_OPCODE);
-    
+
     let is_ret_ok = common_opcode_state
         .decoded_opcode
         .properties_bits
@@ -121,7 +121,10 @@ where
         if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
             let oracle = witness_oracle.clone();
 
-            let dependencies = [current_depth.get_variable().into(), execute.get_variable().into()];
+            let dependencies = [
+                current_depth.get_variable().into(),
+                execute.get_variable().into(),
+            ];
 
             let mut outputs_to_set = Vec::with_capacity(
                 <ExecutionContextRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN
