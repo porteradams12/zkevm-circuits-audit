@@ -1,23 +1,24 @@
-use boojum::gadgets::u32::UInt32;
-use derivative::*;
-use cs_derive::*;
-use boojum::cs::{
-    traits::cs::ConstraintSystem,
-    Variable
+use crate::base_structures::{
+    log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
+    vm_state::*,
 };
-use boojum::serde_utils::BigArraySerde;
+use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
 use boojum::gadgets::queue::QueueState;
-use crate::base_structures::{vm_state::*, 
-    log_query::{LogQuery,LOG_QUERY_PACKED_WIDTH}, 
-};
-use boojum::gadgets::{
-    queue::*,
-    traits::{allocatable::*, selectable::Selectable, encodable::CircuitVarLengthEncodable, witnessable::WitnessHookable},
-    boolean::Boolean,
-    num::Num
-};
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
+use boojum::gadgets::u32::UInt32;
+use boojum::gadgets::{
+    boolean::Boolean,
+    num::Num,
+    queue::*,
+    traits::{
+        allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
+        witnessable::WitnessHookable,
+    },
+};
+use boojum::serde_utils::BigArraySerde;
+use cs_derive::*;
+use derivative::*;
 
 use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
 
@@ -31,7 +32,7 @@ pub struct EventsDeduplicatorFSMInputOutput<F: SmallField> {
     pub intermediate_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub final_result_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub previous_key: UInt32<F>,
-    pub previous_item: LogQuery<F>
+    pub previous_item: LogQuery<F>,
 }
 
 impl<F: SmallField> CSPlaceholder<F> for EventsDeduplicatorFSMInputOutput<F> {
@@ -53,14 +54,13 @@ impl<F: SmallField> CSPlaceholder<F> for EventsDeduplicatorFSMInputOutput<F> {
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
-pub struct EventsDeduplicatorInputData<F: SmallField>  {
+pub struct EventsDeduplicatorInputData<F: SmallField> {
     pub initial_log_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
     pub intermediate_sorted_queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
 }
 
 impl<F: SmallField> CSPlaceholder<F> for EventsDeduplicatorInputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
-        
         Self {
             initial_log_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
             intermediate_sorted_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
@@ -77,22 +77,19 @@ pub struct EventsDeduplicatorOutputData<F: SmallField> {
 
 impl<F: SmallField> CSPlaceholder<F> for EventsDeduplicatorOutputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
-        
         Self {
             final_queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
         }
     }
 }
 
-pub type EventsDeduplicatorInputOutput<F> = 
-crate::fsm_input_output::ClosedFormInput<
+pub type EventsDeduplicatorInputOutput<F> = crate::fsm_input_output::ClosedFormInput<
     F,
     EventsDeduplicatorFSMInputOutput<F>,
     EventsDeduplicatorInputData<F>,
     EventsDeduplicatorOutputData<F>,
 >;
-pub type EventsDeduplicatorInputOutputWitness<F> = 
-crate::fsm_input_output::ClosedFormInputWitness<
+pub type EventsDeduplicatorInputOutputWitness<F> = crate::fsm_input_output::ClosedFormInputWitness<
     F,
     EventsDeduplicatorFSMInputOutput<F>,
     EventsDeduplicatorInputData<F>,
@@ -104,5 +101,6 @@ crate::fsm_input_output::ClosedFormInputWitness<
 pub struct EventsDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: EventsDeduplicatorInputOutputWitness<F>,
     pub initial_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
-    pub intermediate_sorted_queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
+    pub intermediate_sorted_queue_witness:
+        CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
 }

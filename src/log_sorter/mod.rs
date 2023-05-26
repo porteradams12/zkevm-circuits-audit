@@ -1,23 +1,23 @@
 pub mod input;
 
 use super::*;
-use boojum::cs::{traits::cs::ConstraintSystem, gates::*};
-use boojum::field::SmallField;
-use boojum::gadgets::{
-    traits::{selectable::Selectable, allocatable::{CSAllocatableExt}},
-    num::Num,
-    boolean::Boolean,
-    u32::UInt32,
-    queue::*,
-    u256::UInt256,
-    u8::UInt8
-};
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use crate::fsm_input_output::{ClosedFormInputCompactForm, commit_variable_length_encodable_item};
-use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::base_structures::log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH};
 use crate::base_structures::vm_state::*;
+use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use crate::fsm_input_output::{commit_variable_length_encodable_item, ClosedFormInputCompactForm};
 use crate::storage_validity_by_grand_product::unpacked_long_comparison;
+use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
+use boojum::field::SmallField;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
+use boojum::gadgets::{
+    boolean::Boolean,
+    num::Num,
+    queue::*,
+    traits::{allocatable::CSAllocatableExt, selectable::Selectable},
+    u256::UInt256,
+    u32::UInt32,
+    u8::UInt8,
+};
 
 use crate::demux_log_queue::StorageLogQueue;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -39,141 +39,95 @@ pub fn sort_and_deduplicate_events_entry_point<
     witness: EventsDeduplicatorInstanceWitness<F>,
     round_function: &R,
     limit: usize,
-) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]  
-where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
-
+) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
     //use table
     let EventsDeduplicatorInstanceWitness {
         closed_form_input,
         initial_queue_witness,
-        intermediate_sorted_queue_witness
+        intermediate_sorted_queue_witness,
     } = witness;
 
     let mut structured_input =
         EventsDeduplicatorInputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
 
-        let unsorted_queue_from_passthrough_state = QueueState {
-            head: structured_input
-                .observable_input
-                .initial_log_queue_state
-                .head,
-            tail: structured_input
-                .observable_input
-                .initial_log_queue_state
-                .tail,
-        };
+    let unsorted_queue_from_passthrough_state =
+        structured_input.observable_input.initial_log_queue_state;
 
     // passthrough must be trivial
     unsorted_queue_from_passthrough_state.enforce_trivial_head(cs);
 
-    let unsorted_queue_from_fsm_input_state = QueueState {
-        head: structured_input
-            .hidden_fsm_input
-            .initial_unsorted_queue_state
-            .head,
-        tail: structured_input
-            .hidden_fsm_input
-            .initial_unsorted_queue_state
-            .tail,
-    };
+    let unsorted_queue_from_fsm_input_state = structured_input
+        .hidden_fsm_input
+        .initial_unsorted_queue_state;
 
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &unsorted_queue_from_passthrough_state,
-        &unsorted_queue_from_fsm_input_state
+        &unsorted_queue_from_fsm_input_state,
     );
 
-    let mut unsorted_queue = StorageLogQueue::<F, R>::from_raw_parts(
-        cs, 
-        state.head, 
-        state.tail.tail, 
-        state.tail.length
-    );
+    let mut unsorted_queue = StorageLogQueue::<F, R>::from_state(cs, state);
 
     use std::sync::Arc;
     let initial_queue_witness = CircuitQueueWitness::from_inner_witness(initial_queue_witness);
     unsorted_queue.witness = Arc::new(initial_queue_witness);
 
-    let intermediate_sorted_queue_from_passthrough_state = QueueState {
-        head: structured_input
-            .observable_input
-            .intermediate_sorted_queue_state
-            .head,
-        tail: structured_input
-            .observable_input
-            .intermediate_sorted_queue_state
-            .tail,
-    };
+    let intermediate_sorted_queue_from_passthrough_state = structured_input
+        .observable_input
+        .intermediate_sorted_queue_state;
 
     // passthrough must be trivial
     intermediate_sorted_queue_from_passthrough_state.enforce_trivial_head(cs);
 
-
-    let intermediate_sorted_queue_from_fsm_state  = QueueState {
-        head: structured_input
-            .hidden_fsm_input
-            .intermediate_sorted_queue_state
-            .head,
-        tail: structured_input
-            .hidden_fsm_input
-            .intermediate_sorted_queue_state
-            .tail,
-    };
+    let intermediate_sorted_queue_from_fsm_state = structured_input
+        .hidden_fsm_input
+        .intermediate_sorted_queue_state;
 
     let state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &intermediate_sorted_queue_from_passthrough_state,
-        &intermediate_sorted_queue_from_fsm_state
+        &intermediate_sorted_queue_from_fsm_state,
     );
-    let mut intermediate_sorted_queue = StorageLogQueue::<F, R>::from_raw_parts(
-        cs, 
-        state.head, 
-        state.tail.tail, 
-        state.tail.length
-    );
-    let intermediate_sorted_queue_witness = CircuitQueueWitness::from_inner_witness(intermediate_sorted_queue_witness);
+    let mut intermediate_sorted_queue = StorageLogQueue::<F, R>::from_state(cs, state);
+    let intermediate_sorted_queue_witness =
+        CircuitQueueWitness::from_inner_witness(intermediate_sorted_queue_witness);
     intermediate_sorted_queue.witness = Arc::new(intermediate_sorted_queue_witness);
 
-
-    let final_sorted_queue_from_fsm = QueueState {
-        head: structured_input
-            .hidden_fsm_input
-            .final_result_queue_state
-            .head,
-        tail: structured_input
-            .hidden_fsm_input
-            .final_result_queue_state
-            .tail,
-    };
+    let final_sorted_queue_from_fsm = structured_input.hidden_fsm_input.final_result_queue_state;
     let empty_state = QueueState::empty(cs);
 
     let final_sorted_state = QueueState::conditionally_select(
         cs,
         structured_input.start_flag,
         &empty_state,
-        &final_sorted_queue_from_fsm
+        &final_sorted_queue_from_fsm,
     );
-    let mut final_sorted_queue = StorageLogQueue::<F, R>::from_raw_parts(
-        cs, 
-        final_sorted_state.head, 
-        final_sorted_state.tail.tail, 
-        final_sorted_state.tail.length
-    );
+    let mut final_sorted_queue = StorageLogQueue::<F, R>::from_state(cs, final_sorted_state);
 
     // get challenges for permutation argument
-    let challenges = crate::utils::produce_fs_challenges::<F, CS, R, QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
-        cs, 
+    let challenges = crate::utils::produce_fs_challenges::<
+        F,
+        CS,
+        R,
+        QUEUE_STATE_WIDTH,
+        { MEMORY_QUERY_PACKED_WIDTH + 1 },
+        DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
+    >(
+        cs,
         structured_input
             .observable_input
             .initial_log_queue_state
-            .tail, 
+            .tail,
         structured_input
             .observable_input
             .intermediate_sorted_queue_state
             .tail,
-        round_function
+        round_function,
     );
 
     let one = Num::allocated_constant(cs, F::ONE);
@@ -197,7 +151,7 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         cs,
         structured_input.start_flag,
         &zero_u32,
-        &structured_input.hidden_fsm_input.previous_key
+        &structured_input.hidden_fsm_input.previous_key,
     );
 
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
@@ -207,27 +161,23 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
         cs,
         structured_input.start_flag,
         &empty_storage,
-        &structured_input.hidden_fsm_input.previous_item
+        &structured_input.hidden_fsm_input.previous_item,
     );
 
-    let (
-        new_lhs,
-        new_rhs,
-        previous_key,
-        previous_item,
-    ) = repack_and_prove_events_rollbacks_inner(
-        cs,
-        initial_lhs,
-        initial_rhs,
-        &mut unsorted_queue,
-        &mut intermediate_sorted_queue,
-        &mut final_sorted_queue,
-        structured_input.start_flag,
-        challenges,
-        previous_key,
-        previous_item,
-        limit,
-    );
+    let (new_lhs, new_rhs, previous_key, previous_item) =
+        repack_and_prove_events_rollbacks_inner::<_, _, R>(
+            cs,
+            initial_lhs,
+            initial_rhs,
+            &mut unsorted_queue,
+            &mut intermediate_sorted_queue,
+            &mut final_sorted_queue,
+            structured_input.start_flag,
+            challenges,
+            previous_key,
+            previous_item,
+            limit,
+        );
 
     let unsorted_is_empty = unsorted_queue.is_empty(cs);
     let sorted_is_empty = intermediate_sorted_queue.is_empty(cs);
@@ -255,17 +205,15 @@ where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:{
 
     let empty_state = QueueState::empty(cs);
     let final_queue_for_observable_output = QueueState::conditionally_select(
-        cs, 
-        completed, 
-        &final_sorted_queue.into_state(), 
-        &empty_state
+        cs,
+        completed,
+        &final_sorted_queue.into_state(),
+        &empty_state,
     );
 
     structured_input.observable_output.final_queue_state = final_queue_for_observable_output;
 
-    structured_input
-        .hidden_fsm_output
-        .final_result_queue_state = final_sorted_queue.into_state();
+    structured_input.hidden_fsm_output.final_result_queue_state = final_sorted_queue.into_state();
 
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
@@ -292,16 +240,20 @@ pub fn repack_and_prove_events_rollbacks_inner<
     intermediate_sorted_queue: &mut StorageLogQueue<F, R>,
     result_queue: &mut StorageLogQueue<F, R>,
     is_start: Boolean<F>,
-    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1];
+        DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut previous_key: UInt32<F>,
     mut previous_item: LogQuery<F>,
     limit: usize,
 ) -> (
-        [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS], 
-        [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
-        UInt32<F>,
-        LogQuery<F>
-    ) where [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]: {
+    [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    UInt32<F>,
+    LogQuery<F>,
+)
+where
+    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
     assert!(limit <= u32::MAX as usize);
 
     // we can recreate it here, there are two cases:
@@ -311,9 +263,14 @@ pub fn repack_and_prove_events_rollbacks_inner<
     let mut previous_is_trivial = Boolean::multi_or(cs, &[no_work, is_start]);
 
     let unsorted_queue_lenght = Num::from_variable(unsorted_queue.length.get_variable());
-    let intermediate_sorted_queue_lenght = Num::from_variable(intermediate_sorted_queue.length.get_variable());
+    let intermediate_sorted_queue_lenght =
+        Num::from_variable(intermediate_sorted_queue.length.get_variable());
 
-    Num::enforce_equal(cs,  &unsorted_queue_lenght, &intermediate_sorted_queue_lenght);
+    Num::enforce_equal(
+        cs,
+        &unsorted_queue_lenght,
+        &intermediate_sorted_queue_lenght,
+    );
 
     // reallocate and simultaneously collapse rollbacks
 
@@ -322,29 +279,22 @@ pub fn repack_and_prove_events_rollbacks_inner<
         let sorted_is_empty = intermediate_sorted_queue.is_empty(cs);
         Boolean::enforce_equal(cs, &original_is_empty, &sorted_is_empty);
 
-        let original_is_not_empty = original_is_empty.negated(cs);
-        let sorted_is_not_empty = sorted_is_empty.negated(cs); 
-
-        let should_pop = Boolean::multi_and(cs, &[original_is_not_empty, sorted_is_not_empty]);
+        let should_pop = original_is_empty.negated(cs);
         let is_trivial = original_is_empty;
 
-        let (_, original_encoding) = unsorted_queue.pop_front(
-            cs,
-            should_pop,
-        );
-        let (sorted_item, sorted_encoding) =
-        intermediate_sorted_queue.pop_front(cs, should_pop);
+        let (_, original_encoding) = unsorted_queue.pop_front(cs, should_pop);
+        let (sorted_item, sorted_encoding) = intermediate_sorted_queue.pop_front(cs, should_pop);
 
         // we also ensure that items are "write" unless it's a padding
-        sorted_item.rw_flag.conditionally_enforce_false(cs, original_is_empty);
+        sorted_item
+            .rw_flag
+            .conditionally_enforce_true(cs, should_pop);
 
         assert_eq!(original_encoding.len(), sorted_encoding.len());
         assert_eq!(lhs.len(), rhs.len());
-        for ((challenges, lhs), rhs) in fs_challenges
-            .iter()
-            .zip(lhs.iter_mut())
-            .zip(rhs.iter_mut())
+        for ((challenges, lhs), rhs) in fs_challenges.iter().zip(lhs.iter_mut()).zip(rhs.iter_mut())
         {
+            // additive parts
             let mut lhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
             let mut rhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
 
@@ -353,10 +303,23 @@ pub fn repack_and_prove_events_rollbacks_inner<
                 .zip(sorted_encoding.iter())
                 .zip(challenges.iter())
             {
-                let left = Num::from_variable(*original_el).mul(cs, challenge);
-                lhs_contribution = lhs_contribution.add(cs, &left);
-                let right = Num::from_variable(*sorted_el).mul(cs, challenge);
-                rhs_contribution = rhs_contribution.add(cs, &right);
+                lhs_contribution = Num::fma(
+                    cs,
+                    &Num::from_variable(*original_el),
+                    challenge,
+                    &F::ONE,
+                    &lhs_contribution,
+                    &F::ONE,
+                );
+
+                rhs_contribution = Num::fma(
+                    cs,
+                    &Num::from_variable(*sorted_el),
+                    challenge,
+                    &F::ONE,
+                    &rhs_contribution,
+                    &F::ONE,
+                );
             }
 
             let new_lhs = lhs.mul(cs, &lhs_contribution);
@@ -368,7 +331,9 @@ pub fn repack_and_prove_events_rollbacks_inner<
         // now ensure sorting
         {
             // sanity check - all such logs are "write into the sky"
-            sorted_item.rw_flag.conditionally_enforce_false(cs,  is_trivial);
+            sorted_item
+                .rw_flag
+                .conditionally_enforce_true(cs, should_pop);
 
             // check if keys are equal and check a value
 
@@ -390,31 +355,28 @@ pub fn repack_and_prove_events_rollbacks_inner<
 
             // it's enough to compare timestamps as VM circuit guarantees uniqueness of the if it's not a padding
             let previous_is_not_rollback = previous_item.rollback.negated(cs);
-            let enforce_sequential_rollback = Boolean::multi_and(cs, &[previous_is_not_rollback, sorted_item.rollback, should_pop]);
+            let enforce_sequential_rollback = Boolean::multi_and(
+                cs,
+                &[previous_is_not_rollback, sorted_item.rollback, should_pop],
+            );
             keys_are_equal.conditionally_enforce_true(cs, enforce_sequential_rollback);
-            let same_log = keys_are_equal;
 
-            let mut tmp = vec![];
-            for (a, b) in sorted_item.written_value.inner.iter().zip(previous_item.written_value.inner.iter()){
-                let values_are_equal = UInt32::equals(cs, &a, &b);
-                tmp.push(values_are_equal);
-            }
+            let same_log = UInt32::equals(cs, &sorted_item.timestamp, &previous_item.timestamp);
 
-            let values_are_equal = Boolean::multi_and(cs, &tmp);
+            let values_are_equal =
+                UInt256::equals(cs, &sorted_item.written_value, &previous_item.written_value);
+
             let negate_previous_is_trivial = previous_is_trivial.negated(cs);
             let should_enforce = Boolean::multi_and(cs, &[same_log, negate_previous_is_trivial]);
+
             values_are_equal.conditionally_enforce_true(cs, should_enforce);
 
-            let negate_trivial = is_trivial.negated(cs);
             let this_item_is_non_trivial_rollback =
-                Boolean::multi_and(cs, &[sorted_item.rollback, negate_trivial]);
+                Boolean::multi_and(cs, &[sorted_item.rollback, should_pop]);
             let negate_previous_item_rollback = previous_item.rollback.negated(cs);
             let prevous_item_is_non_trivial_write = Boolean::multi_and(
                 cs,
-                &[
-                    negate_previous_item_rollback,
-                    negate_previous_is_trivial,
-                ],
+                &[negate_previous_item_rollback, negate_previous_is_trivial],
             );
             let is_sequential_rollback = Boolean::multi_and(
                 cs,
@@ -428,7 +390,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
             // decide if we should add the PREVIOUS into the queue
             // We add only if previous one is not trivial,
             // and it had a different key, and it wasn't rolled back
-            let negate_same_log = same_log.negated(cs);
+            let negate_same_log = same_log.and(cs, should_pop).negated(cs);
             let add_to_the_queue = Boolean::multi_and(
                 cs,
                 &[
@@ -460,7 +422,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
             previous_key = sorting_key;
         }
     }
-    
+
     // finalization step - same way, check if last item is not a rollback
     {
         let now_empty = unsorted_queue.is_empty(cs);
@@ -472,7 +434,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
             &[
                 negate_previous_is_trivial,
                 negate_previous_item_rollback,
-                now_empty
+                now_empty,
             ],
         );
         let boolean_false = Boolean::allocated_constant(cs, false);
@@ -493,12 +455,10 @@ pub fn repack_and_prove_events_rollbacks_inner<
         result_queue.push(cs, query_to_add, add_to_the_queue);
     }
 
-    (
-        lhs,
-        rhs,
-        previous_key,
-        previous_item
-    )
+    unsorted_queue.enforce_consistency(cs);
+    intermediate_sorted_queue.enforce_consistency(cs);
+
+    (lhs, rhs, previous_key, previous_item)
 }
 
 /// Check that a == b and a > b by performing a long subtraction b - a with borrow.
@@ -509,19 +469,15 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
     a: &[Num<F>],
     b: &[Num<F>],
     width_data: &[usize],
-) -> (Boolean<F>, Boolean<F>){
+) -> (Boolean<F>, Boolean<F>) {
     assert_eq!(a.len(), b.len());
     assert_eq!(a.len(), width_data.len());
 
     let mut previous_borrow = Boolean::allocated_constant(cs, false);
     let mut limbs_are_equal = vec![];
     for (a, b) in a.iter().zip(b.iter()) {
-        let a_uint32 = unsafe {
-            UInt32::from_variable_unchecked(a.get_variable())
-        };
-        let b_uint32 = unsafe {
-            UInt32::from_variable_unchecked(b.get_variable())
-        };
+        let a_uint32 = unsafe { UInt32::from_variable_unchecked(a.get_variable()) };
+        let b_uint32 = unsafe { UInt32::from_variable_unchecked(b.get_variable()) };
         let (diff, borrow) = a_uint32.overflowing_sub_with_borrow_in(cs, b_uint32, previous_borrow);
         let equal = diff.is_zero(cs);
         limbs_are_equal.push(equal);
@@ -532,4 +488,3 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
 
     (eq, final_borrow)
 }
-

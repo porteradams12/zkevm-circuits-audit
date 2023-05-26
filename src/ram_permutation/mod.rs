@@ -1,26 +1,26 @@
 use super::*;
 
-use std::sync::Arc;
-use boojum::field::SmallField;
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::selectable::Selectable;
-use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u256::UInt256;
+use boojum::gadgets::u32::UInt32;
+use std::sync::Arc;
 
-use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use crate::base_structures::memory_query::MemoryQuery;
-use boojum::gadgets::queue::{QueueState};
-use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use crate::base_structures::memory_query::MEMORY_QUERY_PACKED_WIDTH;
-use crate::fsm_input_output::ClosedFormInputCompactForm;
-use crate::fsm_input_output::commit_variable_length_encodable_item;
-use boojum::cs::gates::PublicInputGate;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use crate::fsm_input_output::commit_variable_length_encodable_item;
+use crate::fsm_input_output::ClosedFormInputCompactForm;
 use crate::storage_validity_by_grand_product::unpacked_long_comparison;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::cs::gates::PublicInputGate;
+use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
+use boojum::gadgets::queue::QueueState;
+use boojum::gadgets::traits::allocatable::CSAllocatableExt;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
 use zkevm_opcode_defs::BOOTLOADER_HEAP_PAGE;
 
@@ -43,7 +43,7 @@ where
     let RamPermutationCircuitInstanceWitness {
         closed_form_input,
         unsorted_queue_witness,
-        sorted_queue_witness
+        sorted_queue_witness,
     } = closed_form_input_witness;
 
     let mut structured_input =
@@ -54,35 +54,53 @@ where
     let hidden_fsm_input = structured_input.hidden_fsm_input.clone();
 
     // passthrought must be trivial
-    observable_input.unsorted_queue_initial_state.enforce_trivial_head(cs);
+    observable_input
+        .unsorted_queue_initial_state
+        .enforce_trivial_head(cs);
 
     let unsorted_queue_state = QueueState::conditionally_select(
-        cs, 
-        start_flag, 
-        &observable_input.unsorted_queue_initial_state, 
+        cs,
+        start_flag,
+        &observable_input.unsorted_queue_initial_state,
         &hidden_fsm_input.current_unsorted_queue_state,
     );
 
     use crate::boojum::gadgets::queue::full_state_queue::FullStateCircuitQueue;
-    let mut unsorted_queue: FullStateCircuitQueue<F, MemoryQuery<F>, 8, 12, 4, MEMORY_QUERY_PACKED_WIDTH, R> = 
-        MemoryQueriesQueue::from_state(cs, unsorted_queue_state);
+    let mut unsorted_queue: FullStateCircuitQueue<
+        F,
+        MemoryQuery<F>,
+        8,
+        12,
+        4,
+        MEMORY_QUERY_PACKED_WIDTH,
+        R,
+    > = MemoryQueriesQueue::from_state(cs, unsorted_queue_state);
 
     unsorted_queue.witness = Arc::new(FullStateCircuitQueueWitness::from_inner_witness(
         unsorted_queue_witness,
     ));
 
     // passthrought must be trivial
-    observable_input.sorted_queue_initial_state.enforce_trivial_head(cs);
+    observable_input
+        .sorted_queue_initial_state
+        .enforce_trivial_head(cs);
 
     let sorted_queue_state = QueueState::conditionally_select(
-        cs, 
-        start_flag, 
-        &observable_input.sorted_queue_initial_state, 
+        cs,
+        start_flag,
+        &observable_input.sorted_queue_initial_state,
         &hidden_fsm_input.current_sorted_queue_state,
     );
 
-    let mut sorted_queue: FullStateCircuitQueue<F, MemoryQuery<F>, 8, 12, 4, MEMORY_QUERY_PACKED_WIDTH, R> = 
-        MemoryQueriesQueue::from_state(cs, sorted_queue_state);
+    let mut sorted_queue: FullStateCircuitQueue<
+        F,
+        MemoryQuery<F>,
+        8,
+        12,
+        4,
+        MEMORY_QUERY_PACKED_WIDTH,
+        R,
+    > = MemoryQueriesQueue::from_state(cs, sorted_queue_state);
 
     sorted_queue.witness = Arc::new(FullStateCircuitQueueWitness::from_inner_witness(
         sorted_queue_witness,
@@ -90,10 +108,10 @@ where
 
     // get challenges for permutation argument
     let fs_challenges = crate::utils::produce_fs_challenges(
-        cs, 
-        observable_input.unsorted_queue_initial_state.tail, 
+        cs,
+        observable_input.unsorted_queue_initial_state.tail,
         observable_input.sorted_queue_initial_state.tail,
-        round_function
+        round_function,
     );
 
     let num_one = Num::allocated_constant(cs, F::ONE);
@@ -112,10 +130,10 @@ where
 
     let uint32_zero = UInt32::zero(cs);
     let mut num_nondeterministic_writes = UInt32::conditionally_select(
-        cs, 
-        start_flag, 
-        &uint32_zero, 
-        &hidden_fsm_input.num_nondeterministic_writes
+        cs,
+        start_flag,
+        &uint32_zero,
+        &hidden_fsm_input.num_nondeterministic_writes,
     );
 
     let mut previous_sorting_key = hidden_fsm_input.previous_sorting_key;
@@ -136,8 +154,11 @@ where
         &mut previous_value,
         &mut previous_is_ptr,
         &mut num_nondeterministic_writes,
-        limit
+        limit,
     );
+
+    unsorted_queue.enforce_consistency(cs);
+    sorted_queue.enforce_consistency(cs);
 
     let completed = unsorted_queue.length.is_zero(cs);
 
@@ -148,18 +169,17 @@ where
     let num_nondeterministic_writes_equal = UInt32::equals(
         cs,
         &num_nondeterministic_writes,
-        &observable_input
-            .non_deterministic_bootloader_memory_snapshot_length,
+        &observable_input.non_deterministic_bootloader_memory_snapshot_length,
     );
+    num_nondeterministic_writes_equal.conditionally_enforce_true(cs, completed);
 
+    // form the final state
     structured_input
         .hidden_fsm_output
         .num_nondeterministic_writes = num_nondeterministic_writes;
-
     structured_input
         .hidden_fsm_output
         .current_unsorted_queue_state = unsorted_queue.into_state();
-
     structured_input
         .hidden_fsm_output
         .current_sorted_queue_state = sorted_queue.into_state();
@@ -171,8 +191,6 @@ where
     structured_input.hidden_fsm_output.previous_full_key = previous_full_key;
     structured_input.hidden_fsm_output.previous_value = previous_value;
     structured_input.hidden_fsm_output.previous_is_ptr = previous_is_ptr;
-
-    num_nondeterministic_writes_equal.conditionally_enforce_true(cs, completed);
 
     structured_input.completion_flag = completed;
 
@@ -198,7 +216,8 @@ pub fn partial_accumulate_inner<
     cs: &mut CS,
     unsorted_queue: &mut MemoryQueriesQueue<F, R>,
     sorted_queue: &mut MemoryQueriesQueue<F, R>,
-    fs_challenges: &[[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1]; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
+    fs_challenges: &[[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1];
+         DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     is_start: Boolean<F>,
     lhs: &mut [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     rhs: &mut [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
@@ -208,12 +227,15 @@ pub fn partial_accumulate_inner<
     previous_is_ptr: &mut Boolean<F>,
     num_nondeterministic_writes: &mut UInt32<F>,
     limit: usize,
-)
-where
+) where
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
     let not_start = is_start.negated(cs);
-    Num::enforce_equal(cs, &unsorted_queue.length.into_num(), &sorted_queue.length.into_num());
+    Num::enforce_equal(
+        cs,
+        &unsorted_queue.length.into_num(),
+        &sorted_queue.length.into_num(),
+    );
 
     let bootloader_heap_page = UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE);
     let uint256_zero = UInt256::zero(cs);
@@ -224,27 +246,19 @@ where
 
         // this is an exotic way so synchronize popping from both queues
         // in asynchronous resolution
-        let can_pop_unsorted = unsorted_is_empty.negated(cs);
-        let can_pop_sorted: Boolean<F> = sorted_is_empty.negated(cs);
-        Boolean::enforce_equal(cs, &can_pop_unsorted, &can_pop_sorted);
-        let can_pop = Boolean::multi_and(cs, &[can_pop_unsorted, can_pop_sorted]);
+        Boolean::enforce_equal(cs, &unsorted_is_empty, &sorted_is_empty);
+        let can_pop = unsorted_is_empty.negated(cs);
 
         // we do not need any information about unsorted element other than it's encoding
-        let (_, unsorted_item_encoding) =
-            unsorted_queue.pop_front(cs, can_pop);
-        // let unsorted_item_encoding = unsorted_queue.pop_first_encoding_only(cs, &can_pop, round_function);
-        let (sorted_item, sorted_item_encoding) =
-            sorted_queue.pop_front(cs, can_pop);
+        let (_, unsorted_item_encoding) = unsorted_queue.pop_front(cs, can_pop);
+        let (sorted_item, sorted_item_encoding) = sorted_queue.pop_front(cs, can_pop);
 
         // check non-deterministic writes
         {
             let ts_is_zero = sorted_item.timestamp.is_zero(cs);
 
-            let page_is_bootloader_heap = UInt32::equals(
-                cs,
-                &sorted_item.memory_page,
-                &bootloader_heap_page,
-            );
+            let page_is_bootloader_heap =
+                UInt32::equals(cs, &sorted_item.memory_page, &bootloader_heap_page);
 
             let is_write = sorted_item.rw_flag;
             let is_ptr = sorted_item.is_ptr;
@@ -261,38 +275,35 @@ where
                 ],
             );
 
-            let num_nondeterministic_writes_incremented = unsafe {
-                UInt32::increment_unchecked(&num_nondeterministic_writes, cs)
-            };
+            let num_nondeterministic_writes_incremented =
+                unsafe { UInt32::increment_unchecked(&num_nondeterministic_writes, cs) };
 
             *num_nondeterministic_writes = UInt32::conditionally_select(
-                cs, 
-                is_nondeterministic_write, 
-                &num_nondeterministic_writes_incremented, 
-                &num_nondeterministic_writes
+                cs,
+                is_nondeterministic_write,
+                &num_nondeterministic_writes_incremented,
+                &num_nondeterministic_writes,
             );
         }
+
         // check RAM ordering
         {
             // either continue the argument or do nothing
 
-            let sorting_key = [sorted_item.timestamp, sorted_item.index, sorted_item.memory_page];
+            let sorting_key = [
+                sorted_item.timestamp,
+                sorted_item.index,
+                sorted_item.memory_page,
+            ];
             let comparison_key = [sorted_item.index, sorted_item.memory_page];
 
             // ensure sorting
-            let (keys_are_equal, previous_key_is_greater) = unpacked_long_comparison(
-                cs,
-                previous_sorting_key,
-                &sorting_key,
-            );
+            let (_keys_are_equal, previous_key_is_smaller) =
+                unpacked_long_comparison(cs, &sorting_key, previous_sorting_key);
 
             // we can not have previous sorting key even to be >= than our current key
 
-            // keys_are_in_ascending_order = !previous_key_is_greater and !keys_are_equal
-            let keys_are_in_ascending_order = {
-                let keys_are_not_in_ascending_order = keys_are_equal.or(cs, previous_key_is_greater);
-                keys_are_not_in_ascending_order.negated(cs)
-            };
+            let keys_are_in_ascending_order = previous_key_is_smaller;
 
             if _cycle != 0 {
                 keys_are_in_ascending_order.conditionally_enforce_true(cs, can_pop);
@@ -332,7 +343,8 @@ where
                 let read_uninitialized_if_continue =
                     Boolean::multi_and(cs, &[not_start, not_same_cell, not_rw_flag]);
                 let read_uninit_if_at_the_start = is_start.and(cs, not_rw_flag);
-                let should_enforce = read_uninitialized_if_continue.or(cs, read_uninit_if_at_the_start);
+                let should_enforce =
+                    read_uninitialized_if_continue.or(cs, read_uninit_if_at_the_start);
                 is_zero.conditionally_enforce_true(cs, should_enforce);
 
                 // check standard RW validity, but it can break if we are at the very start
@@ -348,17 +360,17 @@ where
         }
 
         // if we did pop then accumulate to grand product
-        for ((challenges, lhs), rhs) in fs_challenges
-            .iter()
-            .zip(lhs.iter_mut())
-            .zip(rhs.iter_mut())
+        for ((challenges, lhs), rhs) in fs_challenges.iter().zip(lhs.iter_mut()).zip(rhs.iter_mut())
         {
             // additive parts
             let mut lhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
             let mut rhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
 
             debug_assert_eq!(unsorted_item_encoding.len(), sorted_item_encoding.len());
-            debug_assert_eq!(unsorted_item_encoding.len(), challenges[..MEMORY_QUERY_PACKED_WIDTH].len());
+            debug_assert_eq!(
+                unsorted_item_encoding.len(),
+                challenges[..MEMORY_QUERY_PACKED_WIDTH].len()
+            );
 
             for ((unsorted_contribution, sorted_contribution), challenge) in unsorted_item_encoding
                 .iter()
@@ -366,22 +378,22 @@ where
                 .zip(challenges[..MEMORY_QUERY_PACKED_WIDTH].iter())
             {
                 let new_lhs = Num::fma(
-                    cs, 
+                    cs,
                     &Num::from_variable(*unsorted_contribution),
-                    challenge, 
-                    &F::ONE, 
-                    &lhs_contribution, 
-                    &F::ONE
+                    challenge,
+                    &F::ONE,
+                    &lhs_contribution,
+                    &F::ONE,
                 );
                 lhs_contribution = new_lhs;
 
                 let new_rhs = Num::fma(
-                    cs, 
+                    cs,
                     &Num::from_variable(*sorted_contribution),
-                    challenge, 
-                    &F::ONE, 
-                    &rhs_contribution, 
-                    &F::ONE
+                    challenge,
+                    &F::ONE,
+                    &rhs_contribution,
+                    &F::ONE,
                 );
                 rhs_contribution = new_rhs;
             }
@@ -395,16 +407,11 @@ where
     }
 }
 
-pub(crate) fn long_equals<
-    F: SmallField, 
-    CS: ConstraintSystem<F>,
-    const N: usize
->(
+pub(crate) fn long_equals<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(
     cs: &mut CS,
     a: &[UInt32<F>; N],
-    b: &[UInt32<F>; N]
+    b: &[UInt32<F>; N],
 ) -> Boolean<F> {
-
     let equals: [_; N] = std::array::from_fn(|i| UInt32::equals(cs, &a[i], &b[i]));
 
     Boolean::multi_and(cs, &equals)

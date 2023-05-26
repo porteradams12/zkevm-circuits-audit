@@ -5,17 +5,17 @@ use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 
 use super::*;
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::Variable;
+use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
+use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitEncodableExt};
 use boojum::gadgets::traits::selectable::Selectable;
-use boojum::field::SmallField;
-use boojum::cs::traits::cs::DstBuffer;
-use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
-use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::serde_utils::BigArraySerde;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable, CSVarLengthEncodable)]
@@ -33,16 +33,18 @@ impl<F: SmallField> CircuitEncodable<F, RECURSION_QUERY_PACKED_WIDTH> for Recurs
         cs: &mut CS,
     ) -> [Variable; RECURSION_QUERY_PACKED_WIDTH] {
         let zero = cs.allocate_constant(F::ZERO);
-        let [
-            t0, t1, t2, t3
-        ] = self.input_commitment.map(|el| el.get_variable());
+        let [t0, t1, t2, t3] = self.input_commitment.map(|el| el.get_variable());
         [
             self.circuit_type.get_variable(),
-            t0, t1, t2, t3,
-            zero, zero, zero
+            t0,
+            t1,
+            t2,
+            t3,
+            zero,
+            zero,
+            zero,
         ]
     }
-    
 }
 
 impl<F: SmallField> CSAllocatableExt<F> for RecursionQuery<F> {
@@ -58,7 +60,7 @@ impl<F: SmallField> CSAllocatableExt<F> for RecursionQuery<F> {
 
         Self::Witness {
             circuit_type,
-            input_commitment: [t0, t1, t2, t3]
+            input_commitment: [t0, t1, t2, t3],
         }
     }
 
@@ -95,17 +97,14 @@ impl<F: SmallField> CSPlaceholder<F> for RecursionQuery<F> {
     }
 }
 
-
 use boojum::gadgets::queue::full_state_queue::{
-    FullStateCircuitQueue,
-    FullStateCircuitQueueWitness,
+    FullStateCircuitQueue, FullStateCircuitQueueWitness,
 };
 
 pub type RecursionQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
     FullStateCircuitQueue<F, RecursionQuery<F>, AW, SW, CW, RECURSION_QUERY_PACKED_WIDTH, R>;
 
-pub type RecursionQueue<F, R> =
-    RecursionQueryQueue<F, 8, 12, 4, R>;
+pub type RecursionQueue<F, R> = RecursionQueryQueue<F, 8, 12, 4, R>;
 
 pub type RecursionQueueWitness<F, const SW: usize> =
     FullStateCircuitQueueWitness<F, RecursionQuery<F>, SW, RECURSION_QUERY_PACKED_WIDTH>;

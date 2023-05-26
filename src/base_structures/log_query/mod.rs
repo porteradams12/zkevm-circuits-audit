@@ -1,21 +1,21 @@
 use super::*;
-use boojum::field::SmallField;
-use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::u160::{recompose_address_from_u32x5, UInt160};
-use boojum::gadgets::u256::{recompose_u256_as_u32x8, UInt256};
-use boojum::gadgets::u32::UInt32;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::Variable;
+use boojum::field::SmallField;
+use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
 use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::traits::encodable::CircuitEncodableExt;
 use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitVarLengthEncodable};
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
+use boojum::gadgets::u160::{recompose_address_from_u32x5, UInt160};
+use boojum::gadgets::u256::{recompose_u256_as_u32x8, UInt256};
+use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
-use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use cs_derive::*;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable, CSVarLengthEncodable)]

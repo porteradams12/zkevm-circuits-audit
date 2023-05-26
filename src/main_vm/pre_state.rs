@@ -3,21 +3,19 @@ use cs_derive::*;
 use super::witness_oracle::{SynchronizedWitnessOracle, WitnessOracle};
 use super::*;
 
-use boojum::field::SmallField;
-use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::num::Num;
-use boojum::serde_utils::BigArraySerde;
-use boojum::gadgets::u16::UInt16;
-use boojum::gadgets::u256::UInt256;
-use boojum::gadgets::u32::UInt32;
 use crate::base_structures::register::VMRegister;
-use crate::base_structures::vm_state::{
-    ArithmeticFlagsPort, FULL_SPONGE_QUEUE_STATE_WIDTH,
-};
+use crate::base_structures::vm_state::{ArithmeticFlagsPort, FULL_SPONGE_QUEUE_STATE_WIDTH};
 use crate::main_vm::decoded_opcode::OpcodePropertiesDecoding;
 use crate::main_vm::register_input_view::RegisterInputView;
 use crate::main_vm::utils::*;
+use boojum::field::SmallField;
+use boojum::gadgets::boolean::Boolean;
+use boojum::gadgets::num::Num;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
+use boojum::gadgets::u16::UInt16;
+use boojum::gadgets::u256::UInt256;
+use boojum::gadgets::u32::UInt32;
+use boojum::serde_utils::BigArraySerde;
 
 #[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Debug)]
@@ -63,10 +61,10 @@ pub struct PendingSponge<F: SmallField> {
     pub should_enforce: Boolean<F>,
 }
 
+use crate::base_structures::vm_state::VmLocalState;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use crate::base_structures::vm_state::VmLocalState;
 
 // create a draft candidate for next VM state, as well as all the data required for
 // opcodes to proceed
@@ -118,7 +116,11 @@ pub fn create_prestate<
     let should_read_for_new_pc = should_read_memory(
         cs,
         current_state.previous_code_page,
-        current_state.callstack.current_context.saved_context.code_page,
+        current_state
+            .callstack
+            .current_context
+            .saved_context
+            .code_page,
         super_pc,
         previous_super_pc,
     );
@@ -185,21 +187,21 @@ pub fn create_prestate<
     // default one is one corresponding to the "highest" bytes in 32 byte word in our BE machine
     let opcode = [code_word.inner[6], code_word.inner[7]];
     let opcode = <[UInt32<F>; 2]>::conditionally_select(
-        cs, 
+        cs,
         subpc_bitmask[0],
-        &[code_word.inner[4], code_word.inner[5]], 
+        &[code_word.inner[4], code_word.inner[5]],
         &opcode,
     );
     let opcode = <[UInt32<F>; 2]>::conditionally_select(
-        cs, 
+        cs,
         subpc_bitmask[1],
-        &[code_word.inner[2], code_word.inner[3]], 
+        &[code_word.inner[2], code_word.inner[3]],
         &opcode,
     );
     let opcode = <[UInt32<F>; 2]>::conditionally_select(
-        cs, 
+        cs,
         subpc_bitmask[2],
-        &[code_word.inner[0], code_word.inner[1]], 
+        &[code_word.inner[0], code_word.inner[1]],
         &opcode,
     );
 
@@ -221,7 +223,11 @@ pub fn create_prestate<
     // update super_pc and code words if we did read
     current_state.previous_code_word = code_word;
     // always update code page
-    current_state.previous_code_page = current_state.callstack.current_context.saved_context.code_page;
+    current_state.previous_code_page = current_state
+        .callstack
+        .current_context
+        .saved_context
+        .code_page;
     current_state.callstack.current_context.saved_context.pc = UInt16::conditionally_select(
         cs,
         should_skip_cycle,
@@ -257,7 +263,7 @@ pub fn create_prestate<
         .ergs_remaining;
 
     use crate::main_vm::decoded_opcode::encode_flags;
-    
+
     let encoded_flags = encode_flags(cs, &current_state.flags);
 
     use crate::main_vm::decoded_opcode::perform_initial_decoding;
@@ -275,7 +281,11 @@ pub fn create_prestate<
 
     // decoded opcode and current (yet dirty) ergs left should be passed into the opcode,
     // but by default we set it into context that is true for most of the opcodes
-    current_state.callstack.current_context.saved_context.ergs_remaining = dirty_ergs_left;
+    current_state
+        .callstack
+        .current_context
+        .saved_context
+        .ergs_remaining = dirty_ergs_left;
 
     // we did all the masking and "INVALID" opcode must never happed
     let invalid_opcode_bit =
@@ -392,24 +402,14 @@ pub fn create_prestate<
     let use_reg = decoded_opcode
         .properties_bits
         .boolean_for_src_mem_access(ImmMemHandlerFlags::UseRegOnly);
-    let src0 = VMRegister::conditionally_select(
-        cs,
-        use_reg,
-        &draft_src0,
-        &src0_register_from_mem,
-    );
+    let src0 = VMRegister::conditionally_select(cs, use_reg, &draft_src0, &src0_register_from_mem);
 
     // select if it was imm
     let imm_as_reg = VMRegister::from_imm(cs, decoded_opcode.imm0);
     let use_imm = decoded_opcode
         .properties_bits
         .boolean_for_src_mem_access(ImmMemHandlerFlags::UseImm16Only);
-    let src0 = VMRegister::conditionally_select(
-        cs,
-        use_imm,
-        &imm_as_reg,
-        &src0,
-    );
+    let src0 = VMRegister::conditionally_select(cs, use_imm, &imm_as_reg, &src0);
 
     // form an intermediate state to process the opcodes over it
     let next_pc = pc_plus_one;

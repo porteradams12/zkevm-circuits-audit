@@ -1,22 +1,22 @@
-use cs_derive::*;
-use boojum::field::SmallField;
-use boojum::cs::{
-    traits::cs::ConstraintSystem,
-    Variable
-};
-use boojum::gadgets::{
-    queue::*,
-    traits::{allocatable::*, selectable::Selectable, encodable::CircuitVarLengthEncodable, witnessable::WitnessHookable},
-    boolean::Boolean
-};
-use boojum::gadgets::num::Num;
-use boojum::gadgets::u32::UInt32;
-use boojum::gadgets::traits::auxiliary::PrettyComparison;
-use derivative::*;
-use boojum::serde_utils::BigArraySerde;
-use crate::base_structures::decommit_query::{DECOMMIT_QUERY_PACKED_WIDTH};
-use crate::sort_decommittment_requests::*;
+use crate::base_structures::decommit_query::DECOMMIT_QUERY_PACKED_WIDTH;
 use crate::sort_decommittment_requests::full_state_queue::FullStateCircuitQueueRawWitness;
+use crate::sort_decommittment_requests::*;
+use boojum::cs::{traits::cs::ConstraintSystem, Variable};
+use boojum::field::SmallField;
+use boojum::gadgets::num::Num;
+use boojum::gadgets::traits::auxiliary::PrettyComparison;
+use boojum::gadgets::u32::UInt32;
+use boojum::gadgets::{
+    boolean::Boolean,
+    queue::*,
+    traits::{
+        allocatable::*, encodable::CircuitVarLengthEncodable, selectable::Selectable,
+        witnessable::WitnessHookable,
+    },
+};
+use boojum::serde_utils::BigArraySerde;
+use cs_derive::*;
+use derivative::*;
 
 pub const PACKED_KEY_LENGTH: usize = 8 + 1;
 
@@ -24,8 +24,8 @@ pub const PACKED_KEY_LENGTH: usize = 8 + 1;
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
 pub struct CodeDecommittmentsDeduplicatorFSMInputOutput<F: SmallField> {
-    pub initial_queue_state:  QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
-    pub sorted_queue_state:  QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+    pub initial_queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
+    pub sorted_queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
     pub final_queue_state: QueueState<F, FULL_SPONGE_QUEUE_STATE_WIDTH>,
 
     pub lhs_accumulator: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
@@ -68,7 +68,9 @@ impl<F: SmallField> CSPlaceholder<F> for CodeDecommittmentsDeduplicatorInputData
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
             initial_queue_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
-            sorted_queue_initial_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs),
+            sorted_queue_initial_state: QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(
+                cs,
+            ),
         }
     }
 }
@@ -107,6 +109,16 @@ pub type CodeDecommittmentsDeduplicatorInputOutputWitness<F> =
 #[serde(bound = "")]
 pub struct CodeDecommittmentsDeduplicatorInstanceWitness<F: SmallField> {
     pub closed_form_input: CodeDecommittmentsDeduplicatorInputOutputWitness<F>,
-    pub initial_queue_witness: FullStateCircuitQueueRawWitness<F, DecommitQuery<F>, FULL_SPONGE_QUEUE_STATE_WIDTH, DECOMMIT_QUERY_PACKED_WIDTH>,
-    pub sorted_queue_witness:  FullStateCircuitQueueRawWitness<F, DecommitQuery<F>, FULL_SPONGE_QUEUE_STATE_WIDTH, DECOMMIT_QUERY_PACKED_WIDTH>,
+    pub initial_queue_witness: FullStateCircuitQueueRawWitness<
+        F,
+        DecommitQuery<F>,
+        FULL_SPONGE_QUEUE_STATE_WIDTH,
+        DECOMMIT_QUERY_PACKED_WIDTH,
+    >,
+    pub sorted_queue_witness: FullStateCircuitQueueRawWitness<
+        F,
+        DecommitQuery<F>,
+        FULL_SPONGE_QUEUE_STATE_WIDTH,
+        DECOMMIT_QUERY_PACKED_WIDTH,
+    >,
 }

@@ -24,7 +24,8 @@ impl<F: SmallField> ForwardingModeABI<F> {
         input: &RegisterInputView<F>,
     ) -> Self {
         // higher parts of highest 64 bits
-        let forwarding_mode_byte = input.u8x32_view[zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_FORWARDING_MODE_BYTE_IDX];
+        let forwarding_mode_byte = input.u8x32_view
+            [zkevm_opcode_defs::definitions::abi::far_call::FAR_CALL_FORWARDING_MODE_BYTE_IDX];
 
         let new = Self {
             forwarding_mode_byte,
@@ -51,8 +52,11 @@ pub(crate) fn compute_shared_abi_parts<F: SmallField, CS: ConstraintSystem<F>>(
     let forward_fat_pointer_marker =
         UInt8::allocated_constant(cs, FarCallForwardPageType::ForwardFatPointer as u8);
 
-    let call_ret_use_aux_heap =
-        UInt8::equals(cs, &forwarding_mode_abi.forwarding_mode_byte, &use_aux_heap_marker);
+    let call_ret_use_aux_heap = UInt8::equals(
+        cs,
+        &forwarding_mode_abi.forwarding_mode_byte,
+        &use_aux_heap_marker,
+    );
     let call_ret_forward_fat_pointer = UInt8::equals(
         cs,
         &forwarding_mode_abi.forwarding_mode_byte,
@@ -78,9 +82,5 @@ pub(crate) fn compute_shared_abi_parts<F: SmallField, CS: ConstraintSystem<F>>(
         forward_fat_pointer: call_ret_forward_fat_pointer,
     };
 
-    (
-        common_parts,
-        far_call_abi,
-        forwarding_mode,
-    )
+    (common_parts, far_call_abi, forwarding_mode)
 }

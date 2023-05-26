@@ -1,12 +1,12 @@
 use boojum::cs::gates::assert_no_placeholder_variables;
-use boojum::cs::Variable;
 use boojum::cs::traits::cs::DstBuffer;
+use boojum::cs::Variable;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
+use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::traits::encodable::CircuitEncodable;
 use boojum::gadgets::traits::selectable::parallel_select_variables;
-use boojum::gadgets::traits::castable::WitnessCastable;
-use ethereum_types::Address;
 use cs_derive::*;
+use ethereum_types::Address;
 
 use super::*;
 
@@ -224,7 +224,8 @@ impl<F: SmallField> CircuitEncodable<F, EXECUTION_CONTEXT_RECORD_ENCODING_WIDTH>
         // - aux_heap_upper_bound
         // - reverted_queue_segment_len
 
-        let reverted_queue_segment_len_decomposition = self.reverted_queue_segment_len.decompose_into_bytes(cs);
+        let reverted_queue_segment_len_decomposition =
+            self.reverted_queue_segment_len.decompose_into_bytes(cs);
         let v30 = Num::linear_combination(
             cs,
             &[
@@ -397,58 +398,50 @@ impl<F: SmallField> CSAllocatableExt<F> for ExecutionContextRecord<F> {
         dst.push(WitnessCastable::cast_into_source(witness.code_page));
         dst.push(WitnessCastable::cast_into_source(witness.base_page));
         dst.push(WitnessCastable::cast_into_source(witness.heap_upper_bound));
-        dst.push(WitnessCastable::cast_into_source(witness.aux_heap_upper_bound));
+        dst.push(WitnessCastable::cast_into_source(
+            witness.aux_heap_upper_bound,
+        ));
 
         dst.extend(witness.reverted_queue_head);
         dst.extend(witness.reverted_queue_tail);
-        dst.push(WitnessCastable::cast_into_source(witness.reverted_queue_segment_len));
+        dst.push(WitnessCastable::cast_into_source(
+            witness.reverted_queue_segment_len,
+        ));
 
         dst.push(WitnessCastable::cast_into_source(witness.pc));
         dst.push(WitnessCastable::cast_into_source(witness.sp));
-        dst.push(WitnessCastable::cast_into_source(witness.exception_handler_loc));
+        dst.push(WitnessCastable::cast_into_source(
+            witness.exception_handler_loc,
+        ));
         dst.push(WitnessCastable::cast_into_source(witness.ergs_remaining));
 
-        dst.push(WitnessCastable::cast_into_source(witness.is_static_execution));
+        dst.push(WitnessCastable::cast_into_source(
+            witness.is_static_execution,
+        ));
         dst.push(WitnessCastable::cast_into_source(witness.is_kernel_mode));
         dst.push(WitnessCastable::cast_into_source(witness.this_shard_id));
         dst.push(WitnessCastable::cast_into_source(witness.caller_shard_id));
         dst.push(WitnessCastable::cast_into_source(witness.code_shard_id));
 
-        dst.extend(WitnessCastable::cast_into_source(witness.context_u128_value_composite));
+        dst.extend(WitnessCastable::cast_into_source(
+            witness.context_u128_value_composite,
+        ));
 
         dst.push(WitnessCastable::cast_into_source(witness.is_local_call));
     }
 
     fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
-        let this: Address = WitnessCastable::cast_from_source(
-            [
-                values[0],
-                values[1],
-                values[2],
-                values[3],
-                values[4],
-            ]
-        );
+        let this: Address = WitnessCastable::cast_from_source([
+            values[0], values[1], values[2], values[3], values[4],
+        ]);
 
-        let caller: Address = WitnessCastable::cast_from_source(
-            [
-                values[5],
-                values[6],
-                values[7],
-                values[8],
-                values[9],
-            ]
-        );
+        let caller: Address = WitnessCastable::cast_from_source([
+            values[5], values[6], values[7], values[8], values[9],
+        ]);
 
-        let code_address: Address = WitnessCastable::cast_from_source(
-            [
-                values[10],
-                values[11],
-                values[12],
-                values[13],
-                values[14],
-            ]
-        );
+        let code_address: Address = WitnessCastable::cast_from_source([
+            values[10], values[11], values[12], values[13], values[14],
+        ]);
 
         let code_page: u32 = WitnessCastable::cast_from_source(values[15]);
         let base_page: u32 = WitnessCastable::cast_from_source(values[16]);
@@ -456,19 +449,9 @@ impl<F: SmallField> CSAllocatableExt<F> for ExecutionContextRecord<F> {
         let heap_upper_bound: u32 = WitnessCastable::cast_from_source(values[17]);
         let aux_heap_upper_bound: u32 = WitnessCastable::cast_from_source(values[18]);
 
-        let reverted_queue_head = [
-            values[19],
-            values[20],
-            values[21],
-            values[22],
-        ];
+        let reverted_queue_head = [values[19], values[20], values[21], values[22]];
 
-        let reverted_queue_tail = [
-            values[23],
-            values[24],
-            values[25],
-            values[26],
-        ];
+        let reverted_queue_tail = [values[23], values[24], values[25], values[26]];
 
         let reverted_queue_segment_len: u32 = WitnessCastable::cast_from_source(values[27]);
 
@@ -485,14 +468,8 @@ impl<F: SmallField> CSAllocatableExt<F> for ExecutionContextRecord<F> {
         let caller_shard_id: u8 = WitnessCastable::cast_from_source(values[35]);
         let code_shard_id: u8 = WitnessCastable::cast_from_source(values[36]);
 
-        let context_u128_value_composite: [u32; 4] = WitnessCastable::cast_from_source(
-            [
-                values[37],
-                values[38],
-                values[39],
-                values[40],
-            ]
-        );
+        let context_u128_value_composite: [u32; 4] =
+            WitnessCastable::cast_from_source([values[37], values[38], values[39], values[40]]);
 
         let is_local_call: bool = WitnessCastable::cast_from_source(values[41]);
 
@@ -527,7 +504,6 @@ impl<F: SmallField> CSAllocatableExt<F> for ExecutionContextRecord<F> {
 
             is_local_call,
         }
-
     }
 }
 
