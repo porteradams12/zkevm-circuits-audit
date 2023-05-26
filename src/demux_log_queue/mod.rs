@@ -260,11 +260,11 @@ pub fn demultiplex_storage_logs_inner<
     );
 
     // we have 6 queues to demux into, and up to 3 sponges per any push
-    use crate::base_structures::log_query::LOG_QUERY_ABSORBTION_ROUNDS;
-    let mut optimizer = SpongeOptimizer::<F, R, 8, 12, 4, 6>::new(LOG_QUERY_ABSORBTION_ROUNDS * limit);
+    // use crate::base_structures::log_query::LOG_QUERY_ABSORBTION_ROUNDS;
+    // let mut optimizer = SpongeOptimizer::<F, R, 8, 12, 4, 6>::new(LOG_QUERY_ABSORBTION_ROUNDS * limit);
 
     for _ in 0..limit {
-        debug_assert!(optimizer.is_fresh());
+        // debug_assert!(optimizer.is_fresh());
 
         let queue_is_empty = storage_log_queue.is_empty(cs);
         let execute = queue_is_empty.negated(cs);
@@ -386,14 +386,14 @@ pub fn demultiplex_storage_logs_inner<
         let is_bitmask = check_if_bitmask_and_if_empty(cs, expected_bitmask_bits);
         is_bitmask.conditionally_enforce_true(cs, execute);
 
-        // we enforce optimizer in this round, and it clears it up
-        optimizer.enforce(cs);
+        // // we enforce optimizer in this round, and it clears it up
+        // optimizer.enforce(cs);
     }
 
     storage_log_queue.enforce_consistency(cs);
 
     // checks in "Drop" interact badly with some tools, so we check it during testing instead
-    debug_assert!(optimizer.is_fresh());
+    // debug_assert!(optimizer.is_fresh());
 }
 
 pub fn push_with_optimize<
