@@ -324,10 +324,6 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             &k2,
         );
 
-        println!("{:?}", k1_neg.witness_hook(cs)().unwrap());
-        println!("{:?}", k1.witness_hook(cs)().unwrap());
-        println!("{:?}", k2_neg.witness_hook(cs)().unwrap());
-        println!("{:?}", k2.witness_hook(cs)().unwrap());
         (k1_neg, k1, k2_neg, k2)
     };
 
@@ -350,12 +346,8 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         .collect();
     let bool_true = Boolean::allocated_constant(cs, true);
     k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
-        let ((x, y), _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
-
-        let mut k1p_added = k1p.clone();
-        k1p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
-        let mut k2p_added = k2p.clone();
-        k2p_added.add_mixed(cs, &mut (x.clone(), y.clone()));
+        let k1p_added = k1p.add(cs, &point);
+        let k2p_added = k2p.add(cs, &point);
 
         k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
             cs, *k1, &k1p_added, &k1p,
@@ -363,7 +355,10 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
             cs, k2, &k2p_added, &k2p,
         );
-        point.double(cs);
+        println!("{:?}", k1p.x.witness_hook(cs)().unwrap());
+        println!("{:?}", k1p.y.witness_hook(cs)().unwrap());
+        println!("{:?}", k1p.z.witness_hook(cs)().unwrap());
+        point = point.double(cs);
     });
 
     let k1p_negated = k1p.negated(cs);
@@ -383,8 +378,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
 
     // endomorphism
     k2p.x = k2p.x.mul(cs, &mut beta);
-    k2p.convert_to_affine_or_default(cs, Secp256Affine::one());
-    k1p.add_mixed(cs, &mut (k2p.x, k2p.y))
+    k1p.add(cs, &k2p)
 }
 
 fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
@@ -560,6 +554,10 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(cs, x, y);
     // now we do multiplication
     let mut s_times_x = wnaf_scalar_mul(cs, recovered_point, s_by_r_inv);
+    println!("!!!!!!!!!!!");
+    println!("{:?}", s_times_x.x.witness_hook(cs)().unwrap());
+    println!("{:?}", s_times_x.y.witness_hook(cs)().unwrap());
+    println!("{:?}", s_times_x.z.witness_hook(cs)().unwrap());
 
     // let hash_times_g = Secp256FixedBaseMulGate::new(message_hash_by_r_inv);
     let mut q_acc =
