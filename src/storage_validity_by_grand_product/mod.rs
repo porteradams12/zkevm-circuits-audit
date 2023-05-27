@@ -985,15 +985,14 @@ mod tests {
     use boojum::cs::implementations::reference_cs::{
         CSDevelopmentAssembly, CSReferenceImplementation,
     };
-    use boojum::cs::toolboxes::gate_config::{GatePlacementStrategy, NoGates};
     use boojum::cs::CSGeometry;
-    use boojum::cs::EmptyToolbox;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::tables::*;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;
     use ethereum_types::{Address, U256};
+    use boojum::cs::traits::gate::GatePlacementStrategy;
 
     type F = GoldilocksField;
     type P = GoldilocksField;

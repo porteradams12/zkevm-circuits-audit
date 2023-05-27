@@ -136,6 +136,7 @@ where
     // if queue length is <= max_length_if_leafs then next layer we aggregate leafs, or aggregate nodes otherwise
     let (_, uf) = max_length_if_leafs.overflowing_sub(cs, queue_state.tail.length);
     let next_layer_aggregates_nodes = uf;
+    let next_layer_aggregates_leafs = next_layer_aggregates_nodes.negated(cs);
     vk_commitment = <[Num<F>; VK_COMMITMENT_LENGTH]>::conditionally_select(
         cs,
         next_layer_aggregates_nodes,
@@ -174,6 +175,17 @@ where
     let cs = unsafe { &mut *r };
 
     let subqueues = split_queue_state_into_n(cs, queue_state, node_layer_capacity, split_points);
+
+    let leaf_layer_capacity = UInt32::allocated_constant(cs, leaf_layer_capacity as u32);
+    for el in subqueues.iter() {
+        // if we aggregate leafs, then we ensure length to be small enough.
+        // It's not mandatory, but nevertheless
+        
+        // check len <= leaf capacity
+
+        let (_, uf) = leaf_layer_capacity.overflowing_sub(cs, el.tail.length);
+        uf.conditionally_enforce_false(cs, next_layer_aggregates_leafs);
+    }
 
     assert_eq!(subqueues.len(), node_layer_capacity);
 
@@ -221,88 +233,101 @@ where
     input_commitment
 }
 
-pub(crate) fn split_first_n_from_queue_state<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
-    const N: usize,
->(
-    cs: &mut CS,
-    queue_state: QueueState<F, N>,
-    elements_to_split: UInt32<F>,
-    split_point_witness: [F; N],
-) -> (QueueState<F, N>, QueueState<F, N>) {
-    // check length <= elements_to_split
-    let (second_length, uf) = queue_state
-        .tail
-        .length
-        .overflowing_sub(cs, elements_to_split);
-    let second_is_zero = second_length.is_zero(cs);
+// pub(crate) fn split_first_n_from_queue_state<
+//     F: SmallField,
+//     CS: ConstraintSystem<F>,
+//     const N: usize,
+// >(
+//     cs: &mut CS,
+//     queue_state: QueueState<F, N>,
+//     elements_to_split: UInt32<F>,
+//     split_point_witness: [F; N],
+// ) -> (QueueState<F, N>, QueueState<F, N>) {
+//     // check length <= elements_to_split
+//     let (second_length, uf) = queue_state
+//         .tail
+//         .length
+//         .overflowing_sub(cs, elements_to_split);
+//     let second_is_zero = second_length.is_zero(cs);
 
-    let second_is_trivial = Boolean::multi_or(cs, &[second_is_zero, uf]);
+//     let second_is_trivial = Boolean::multi_or(cs, &[second_is_zero, uf]);
 
-    let intermediate = <[Num<F>; N]>::allocate(cs, split_point_witness);
-    let intermediate_state = QueueTailState {
-        tail: intermediate,
-        length: elements_to_split,
-    };
+//     let intermediate = <[Num<F>; N]>::allocate(cs, split_point_witness);
+//     let intermediate_state = QueueTailState {
+//         tail: intermediate,
+//         length: elements_to_split,
+//     };
 
-    let first_tail =
-        QueueTailState::conditionally_select(cs, uf, &queue_state.tail, &intermediate_state);
+//     let first_tail =
+//         QueueTailState::conditionally_select(cs, uf, &queue_state.tail, &intermediate_state);
 
-    for (a, b) in intermediate.iter().zip(queue_state.tail.tail.iter()) {
-        Num::conditionally_enforce_equal(cs, second_is_trivial, a, b);
-    }
+//     for (a, b) in intermediate.iter().zip(queue_state.tail.tail.iter()) {
+//         Num::conditionally_enforce_equal(cs, second_is_trivial, a, b);
+//     }
 
-    let first = QueueState {
-        head: queue_state.head,
-        tail: first_tail,
-    };
+//     let first = QueueState {
+//         head: queue_state.head,
+//         tail: first_tail,
+//     };
 
-    let second_length = second_length.mask_negated(cs, uf);
+//     let second_length = second_length.mask_negated(cs, uf);
 
-    let second = QueueState {
-        head: intermediate_state.tail,
-        tail: QueueTailState {
-            tail: queue_state.tail.tail,
-            length: second_length,
-        },
-    };
+//     let second = QueueState {
+//         head: intermediate_state.tail,
+//         tail: QueueTailState {
+//             tail: queue_state.tail.tail,
+//             length: second_length,
+//         },
+//     };
 
-    (first, second)
-}
+//     (first, second)
+// }
 
 pub(crate) fn split_queue_state_into_n<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(
     cs: &mut CS,
     queue_state: QueueState<F, N>,
     split_into: usize,
-    mut split_point_witnesses: VecDeque<[F; N]>,
+    mut split_point_witnesses: VecDeque<QueueTailStateWitness<F, N>>,
 ) -> Vec<QueueState<F, N>> {
     assert!(split_into <= u32::MAX as usize);
     assert!(split_into >= 2);
     if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
         assert_eq!(split_point_witnesses.len() + 1, split_into);
     }
-    let (div, rem) = queue_state
-        .tail
-        .length
-        .div_by_constant(cs, split_into as u32);
-    let div_plus_one = unsafe { div.increment_unchecked(cs) };
-    let rem_is_zero = rem.is_zero(cs);
-    let split_size = UInt32::conditionally_select(cs, rem_is_zero, &div, &div_plus_one);
 
-    let mut current_state = queue_state;
+    // our logic is that external caller provides splitting witness, and
+    // we just need to ensure that total length matches, and glue intermediate points.
+
+    // We also ensure consistency of split points
+
+    let mut total_len = UInt32::zero(cs);
+
+    let mut current_head = queue_state.head;
     let mut result = Vec::with_capacity(split_into);
 
     for _ in 0..(split_into - 1) {
-        let witness = split_point_witnesses.pop_front().unwrap_or([F::ZERO; N]);
-        let (first, second) =
-            split_first_n_from_queue_state(cs, current_state, split_size, witness);
+        let witness = split_point_witnesses.pop_front().unwrap_or(QueueTailState::placeholder_witness());
+        let current_tail = QueueTailState::allocate(cs, witness);
+        let first = QueueState {
+            head: current_head,
+            tail: current_tail
+        };
 
-        current_state = second;
+        current_head = current_tail.tail;
+        // add length
+        total_len = total_len.add_no_overflow(cs, current_tail.length);
+        // ensure consistency
+        first.enforce_consistency(cs);
+
         result.push(first);
     }
     // push the last one
-    result.push(current_state);
+    let last = QueueState {
+        head: current_head,
+        tail: queue_state.tail
+    };
+    last.enforce_consistency(cs);
+    result.push(last);
 
     assert_eq!(result.len(), split_into);
 
