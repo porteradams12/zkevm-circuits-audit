@@ -331,20 +331,20 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
 
     // Convert k1 and k2 to bits, and cull the tail end which should only be all zeros to save
     // on constraints.
-    let k1_bits: Vec<_> = k1
+    let k1_bits = &k1
         .limbs
         .iter()
         .take(9) // 16 * 9 = 144 bits, which is our max for any decomposed scalar with 16 bit windows
         .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
         .flatten()
-        .collect()[..129]; // We then cull the last 15 bits since 2<<128 needs 129 bits to fit
-    let k2_bits: Vec<_> = k2
+        .collect::<Vec<_>>()[..129]; // We then cull the last 15 bits since 2<<128 needs 129 bits to fit
+    let k2_bits = &k2
         .limbs
         .iter()
         .take(9)
         .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
         .flatten()
-        .collect()[..129];
+        .collect::<Vec<_>>()[..129];
     k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
         let k1p_added = k1p.add(cs, &point);
         let k2p_added = k2p.add(cs, &point);
@@ -353,10 +353,13 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             cs, *k1, &k1p_added, &k1p,
         );
         k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
-            cs, k2, &k2p_added, &k2p,
+            cs, *k2, &k2p_added, &k2p,
         );
         point = point.double(cs);
+        let (point_affine, _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
     });
+    // NOTE: this we can fix by just rigorously printing the addition process and figuring out
+    // what is off from the python impl
     let (k1p_affine, _) = k1p.convert_to_affine_or_default(cs, Secp256Affine::one());
     println!("{:?}", k1p_affine.0.witness_hook(cs)().unwrap());
     println!("{:?}", k1p_affine.1.witness_hook(cs)().unwrap());
@@ -586,7 +589,7 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
         > = Selectable::conditionally_select(cs, hash_bit, &q_plus_x, &q_acc);
     }
 
-    let mut q_acc = s_times_x.sub(cs, &q_acc);
+    let mut q_acc = s_times_x.add(cs, &q_acc);
 
     let ((mut q_x, mut q_y), is_infinity) =
         q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
