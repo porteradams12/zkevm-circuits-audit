@@ -103,6 +103,8 @@ where
         queue_witness,
     ));
 
+    queue.enforce_consistency(cs);
+
     let vk = AllocatedVerificationKey::<F, H>::allocate(cs, vk_witness);
     assert_eq!(
         vk.setup_merkle_tree_cap.len(),
