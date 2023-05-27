@@ -243,26 +243,27 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     mut scalar: Secp256ScalarNNField<F>,
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
     let scalar_params = Arc::new(secp256k1_scalar_field_params());
-    let scalar_from_hex_str = |cs: &mut CS, s: &str| -> Secp256ScalarNNField<F> {
-        let v = U256::from_str_radix(s, 16).unwrap();
-        let v = UInt256::allocated_constant(cs, v);
-        convert_uint256_to_field_element(cs, &v, &scalar_params)
-    };
     let pow_2_128 = U256::from_dec_str("340282366920938463463374607431768211456").unwrap();
     let pow_2_128 = UInt512::allocated_constant(cs, (pow_2_128, U256::zero()));
-    let mut modulus = scalar_from_hex_str(
-        cs,
-        "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
-    );
-
     let base_params = Arc::new(secp256k1_base_field_params());
+
     let beta = U256::from_str_radix(
-        "0x7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee",
+        "7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee",
         16,
     )
     .unwrap();
     let v = UInt256::allocated_constant(cs, beta);
     let mut beta = convert_uint256_to_field_element(cs, &v, &base_params);
+
+    let bigint_from_hex_str = |cs: &mut CS, s: &str| -> UInt512<F> {
+        let v = U256::from_str_radix(s, 16).unwrap();
+        UInt512::allocated_constant(cs, (v, U256::zero()))
+    };
+
+    let mut modulus_minus_one_div_two = bigint_from_hex_str(
+        cs,
+        "7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0",
+    );
 
     let (k1_neg, mut k1, k2_neg, mut k2) = {
         let u256_from_hex_str = |cs: &mut CS, s: &str| -> UInt256<F> {
@@ -278,11 +279,11 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         let k = convert_field_element_to_uint256(cs, scalar.clone());
 
         let b2_times_k = k.widening_mul(cs, &b2);
-        let b2_times_k = b2_times_k.overflowing_add(cs, &pow_2_128);
+        let b2_times_k = b2_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
         let c1 = b2_times_k.0.to_high();
 
         let b1_times_k = k.widening_mul(cs, &b1);
-        let b1_times_k = b1_times_k.overflowing_add(cs, &pow_2_128);
+        let b1_times_k = b1_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
         let c2 = b1_times_k.0.to_high();
 
         let mut a1 = convert_uint256_to_field_element(cs, &a1, &scalar_params);
@@ -303,25 +304,21 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         let k1_u256 = convert_field_element_to_uint256(cs, k1.clone());
         let k2_u256 = convert_field_element_to_uint256(cs, k2.clone());
         let low_pow_2_128 = pow_2_128.to_low();
-        let neg = Boolean::allocated_constant(cs, true);
-        let pos = Boolean::allocated_constant(cs, false);
         let (_res, mut k1_neg) = k1_u256.overflowing_sub(cs, &low_pow_2_128);
-        k1_neg = k1_neg.negated(cs);
         let k1_negated = k1.negated(cs);
         let k1 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
             cs,
             k1_neg,
-            &k1_negated,
             &k1,
+            &k1_negated,
         );
         let (_res, mut k2_neg) = k2_u256.overflowing_sub(cs, &low_pow_2_128);
-        k2_neg = k2_neg.negated(cs);
         let k2_negated = k2.negated(cs);
         let k2 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
             cs,
             k2_neg,
-            &k2_negated,
             &k2,
+            &k2_negated,
         );
 
         (k1_neg, k1, k2_neg, k2)
@@ -332,19 +329,22 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     let mut k2p =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
 
+    // Convert k1 and k2 to bits, and cull the tail end which should only be all zeros to save
+    // on constraints.
     let k1_bits: Vec<_> = k1
         .limbs
         .iter()
+        .take(9) // 16 * 9 = 144 bits, which is our max for any decomposed scalar with 16 bit windows
         .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
         .flatten()
-        .collect();
+        .collect()[..129]; // We then cull the last 15 bits since 2<<128 needs 129 bits to fit
     let k2_bits: Vec<_> = k2
         .limbs
         .iter()
+        .take(9)
         .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
         .flatten()
-        .collect();
-    let bool_true = Boolean::allocated_constant(cs, true);
+        .collect()[..129];
     k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
         let k1p_added = k1p.add(cs, &point);
         let k2p_added = k2p.add(cs, &point);
@@ -355,25 +355,25 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
             cs, k2, &k2p_added, &k2p,
         );
-        println!("{:?}", k1p.x.witness_hook(cs)().unwrap());
-        println!("{:?}", k1p.y.witness_hook(cs)().unwrap());
-        println!("{:?}", k1p.z.witness_hook(cs)().unwrap());
         point = point.double(cs);
     });
+    let (k1p_affine, _) = k1p.convert_to_affine_or_default(cs, Secp256Affine::one());
+    println!("{:?}", k1p_affine.0.witness_hook(cs)().unwrap());
+    println!("{:?}", k1p_affine.1.witness_hook(cs)().unwrap());
 
     let k1p_negated = k1p.negated(cs);
     k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
         cs,
         k1_neg,
-        &k1p_negated,
         &k1p,
+        &k1p_negated,
     );
     let k2p_negated = k2p.negated(cs);
     k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
         cs,
         k2_neg,
-        &k2p_negated,
         &k2p,
+        &k2p_negated,
     );
 
     // endomorphism
@@ -554,10 +554,9 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(cs, x, y);
     // now we do multiplication
     let mut s_times_x = wnaf_scalar_mul(cs, recovered_point, s_by_r_inv);
-    println!("!!!!!!!!!!!");
-    println!("{:?}", s_times_x.x.witness_hook(cs)().unwrap());
-    println!("{:?}", s_times_x.y.witness_hook(cs)().unwrap());
-    println!("{:?}", s_times_x.z.witness_hook(cs)().unwrap());
+    let ((x, y), _) = s_times_x.convert_to_affine_or_default(cs, Secp256Affine::one());
+    println!("{:?}", x.witness_hook(cs)().unwrap());
+    println!("{:?}", y.witness_hook(cs)().unwrap());
 
     // let hash_times_g = Secp256FixedBaseMulGate::new(message_hash_by_r_inv);
     let mut q_acc =
@@ -587,8 +586,7 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
         > = Selectable::conditionally_select(cs, hash_bit, &q_plus_x, &q_acc);
     }
 
-    q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
-    let mut q_acc = s_times_x.sub_mixed(cs, &mut (q_acc.x, q_acc.y));
+    let mut q_acc = s_times_x.sub(cs, &q_acc);
 
     let ((mut q_x, mut q_y), is_infinity) =
         q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
