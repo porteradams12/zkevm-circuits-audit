@@ -416,3 +416,259 @@ pub(crate) fn long_equals<F: SmallField, CS: ConstraintSystem<F>, const N: usize
 
     Boolean::multi_and(cs, &equals)
 }
+
+
+#[cfg(test)]
+mod tests { 
+    use super::*;
+    use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
+    use boojum::cs::implementations::reference_cs::{
+        CSDevelopmentAssembly,
+    };
+    use boojum::cs::traits::gate::GatePlacementStrategy;
+    use boojum::cs::CSGeometry;
+    use boojum::cs::*;
+    use boojum::field::goldilocks::GoldilocksField;
+    use boojum::gadgets::tables::*;
+    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::worker::Worker;
+    use ethereum_types::{Address, U256};
+    use boojum::gadgets::u160::UInt160;
+    use boojum::gadgets::u256::UInt256;
+    use boojum::gadgets::u8::UInt8;
+    use boojum::gadgets::traits::allocatable::CSPlaceholder;
+    use boojum::cs::gates::*;
+    type F = GoldilocksField;
+    type P = GoldilocksField;
+
+    #[test]
+    fn test_repack_and_prove_events_rollbacks_inner() {
+        let geometry = CSGeometry {
+            num_columns_under_copy_permutation: 100,
+            num_witness_columns: 0,
+            num_constant_columns: 8,
+            max_allowed_constraint_degree: 4,
+        };
+
+        use boojum::cs::cs_builder::*;
+
+        fn configure<T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
+            builder: CsBuilder<T, F, GC, TB>
+        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
+            let builder = builder.allow_lookup(
+                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                    width: 3,
+                    num_repetitions: 8,
+                    share_table_id: true,
+                },
+            );
+            let builder = ConstantsAllocatorGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ReductionGate::<F, 4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = BooleanConstraintGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = UIntXAddGate::<32>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = UIntXAddGate::<16>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = SelectionGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ZeroCheckGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns,false);
+            let builder = DotProductGate::<4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = NopGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+
+            builder
+        }
+
+        use boojum::config::DevCSConfig;
+        use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
+
+        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
+            geometry, 
+            1 << 26,
+            1 << 20
+        );
+        use boojum::cs::cs_builder::new_builder;
+        let builder = new_builder::<_, F>(builder_impl);
+
+        let builder = configure(builder);
+        let mut owned_cs = builder.build(());
+
+        // add tables
+        let table = create_xor8_table();
+        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+
+        let cs = &mut owned_cs;
+
+        let execute = Boolean::allocated_constant(cs, true);
+        let mut original_queue = MemoryQueriesQueue::<F, Poseidon2Goldilocks>::empty(cs);
+        let unsorted_input = witness_input_unsorted(cs);
+        for el in unsorted_input {
+            original_queue.push(cs, el, execute);
+        }
+        let mut sorted_queue = MemoryQueriesQueue::<F, Poseidon2Goldilocks>::empty(cs);
+        let sorted_input = witness_input_sorted(cs);
+        for el in sorted_input {
+            sorted_queue.push(cs, el, execute);
+        }
+
+        let mut lhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
+            DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
+        let mut rhs = [Num::allocated_constant(cs, F::from_nonreduced_u64(1));
+            DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
+        let is_start = Boolean::allocated_constant(cs, true);
+        let round_function = Poseidon2Goldilocks;
+        let fs_challenges = crate::utils::produce_fs_challenges(
+            cs,
+            original_queue.into_state().tail,
+            sorted_queue.into_state().tail,
+            &round_function,
+            );
+        let limit = 16;
+        let mut previous_sorting_key = [UInt32::allocated_constant(cs, 0); RAM_SORTING_KEY_LENGTH];
+        let mut previous_comparison_key = [UInt32::allocated_constant(cs, 0); RAM_FULL_KEY_LENGTH];
+        let mut previous_element_value =  UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap());
+        let mut previous_is_ptr = Boolean::allocated_constant(cs, false);
+        let mut num_nondeterministic_writes = UInt32::allocated_constant(cs, 0);
+        partial_accumulate_inner(
+            cs, 
+            &mut original_queue,
+            &mut sorted_queue,
+            &fs_challenges,
+            is_start,
+            &mut lhs,
+            &mut rhs,
+            &mut previous_sorting_key,
+            &mut previous_comparison_key,
+            &mut previous_element_value,
+            &mut previous_is_ptr,
+            &mut num_nondeterministic_writes,
+            limit
+        );
+
+        cs.pad_and_shrink();
+        let worker = Worker::new();
+        let mut owned_cs = owned_cs.into_assembly();
+        owned_cs.print_gate_stats();
+        assert!(owned_cs.check_if_satisfied(&worker));
+    }
+
+    fn witness_input_unsorted<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<MemoryQuery<F>> {
+        let mut unsorted_querie = vec![];
+        let bool_false = Boolean::allocated_constant(cs, false);
+        let bool_true = Boolean::allocated_constant(cs, true);
+        let zero_8 = UInt8::allocated_constant(cs, 0);
+        let one_8 = UInt8::allocated_constant(cs, 1);
+        let zero_32 = UInt32::allocated_constant(cs, 0);
+
+        let q = MemoryQuery::<F> {
+            timestamp: UInt32::allocated_constant(cs, 1024),
+            memory_page: UInt32::allocated_constant(cs, 8),
+            index: UInt32::allocated_constant(cs, 0),
+            rw_flag: bool_false,
+            is_ptr: bool_false,
+            value: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "1125899906842626",
+                )
+                .unwrap(),
+            ),
+        };
+
+        unsorted_querie.push(q);
+
+        // let q = MemoryQuery::<F> {
+        //     timestamp: UInt32::allocated_constant(cs, 1040),
+        //     memory_page: UInt32::allocated_constant(cs, 8),
+        //     index: UInt32::allocated_constant(cs, 1),
+        //     rw_flag: bool_false,
+        //     is_ptr: bool_false,
+        //     value: UInt256::allocated_constant(
+        //         cs,
+        //         U256::from_dec_str(
+        //             "2985072525719",
+        //         )
+        //         .unwrap(),
+        //     ),
+        // };
+        // unsorted_querie.push(q);
+        
+        // let q = MemoryQuery::<F> {
+        //     timestamp: UInt32::allocated_constant(cs, 1040),
+        //     memory_page: UInt32::allocated_constant(cs, 8),
+        //     index: UInt32::allocated_constant(cs, 695),
+        //     rw_flag: bool_false,
+        //     is_ptr: bool_false,
+        //     value: UInt256::allocated_constant(
+        //         cs,
+        //         U256::from_dec_str(
+        //             "0",
+        //         )
+        //         .unwrap(),
+        //     ),
+        // };
+        // unsorted_querie.push(q);
+
+        unsorted_querie
+    }
+
+    fn witness_input_sorted<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<MemoryQuery<F>> {
+        let mut sorted_querie = vec![];
+        let bool_false = Boolean::allocated_constant(cs, false);
+        let bool_true = Boolean::allocated_constant(cs, true);
+        let zero_8 = UInt8::allocated_constant(cs, 0);
+        let one_8 = UInt8::allocated_constant(cs, 1);
+        let zero_32 = UInt32::allocated_constant(cs, 0);
+
+        let q = MemoryQuery::<F> {
+            timestamp: UInt32::allocated_constant(cs, 1024),
+            memory_page: UInt32::allocated_constant(cs, 8),
+            index: UInt32::allocated_constant(cs, 0),
+            rw_flag: bool_false,
+            is_ptr: bool_false,
+            value: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "1125899906842626",
+                )
+                .unwrap(),
+            ),
+        };
+
+        sorted_querie.push(q);
+
+        // let q = MemoryQuery::<F> {
+        //     timestamp: UInt32::allocated_constant(cs, 1040),
+        //     memory_page: UInt32::allocated_constant(cs, 8),
+        //     index: UInt32::allocated_constant(cs, 1),
+        //     rw_flag: bool_false,
+        //     is_ptr: bool_false,
+        //     value: UInt256::allocated_constant(
+        //         cs,
+        //         U256::from_dec_str(
+        //             "2985072525719",
+        //         )
+        //         .unwrap(),
+        //     ),
+        // };
+        // sorted_querie.push(q);
+        
+        // let q = MemoryQuery::<F> {
+        //     timestamp: UInt32::allocated_constant(cs, 1040),
+        //     memory_page: UInt32::allocated_constant(cs, 8),
+        //     index: UInt32::allocated_constant(cs, 695),
+        //     rw_flag: bool_false,
+        //     is_ptr: bool_false,
+        //     value: UInt256::allocated_constant(
+        //         cs,
+        //         U256::from_dec_str(
+        //             "0",
+        //         )
+        //         .unwrap(),
+        //     ),
+        // };
+        // sorted_querie.push(q);
+
+        sorted_querie
+    }
+
+
+}
