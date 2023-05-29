@@ -20,6 +20,7 @@ use boojum::gadgets::non_native_field::traits::NonNativeField;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
+use boojum::gadgets::tables::And8Table;
 use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
@@ -265,6 +266,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         "7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0",
     );
 
+    // Scalar decomposition
     let (k1_neg, mut k1, k2_neg, mut k2) = {
         let u256_from_hex_str = |cs: &mut CS, s: &str| -> UInt256<F> {
             let v = U256::from_str_radix(s, 16).unwrap();
@@ -324,64 +326,122 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         (k1_neg, k1, k2_neg, k2)
     };
 
-    let mut k1p =
+    // WNAF
+    // The scalar multiplication window size.
+    const GLV_WINDOW_SIZE: usize = 4;
+
+    // The table size, used for w-ary NAF recoding.
+    const TABLE_SIZE: u32 = 1 << (GLV_WINDOW_SIZE + 1);
+    let table_size = UInt32::allocated_constant(cs, TABLE_SIZE);
+    let half_table_size = UInt32::allocated_constant(cs, 1 << (GLV_WINDOW_SIZE) + 1);
+    let MASK_FOR_MOD_TABLE_SIZE = UInt32::allocated_constant(cs, (TABLE_SIZE as u32) - 1);
+    // The GLV table length.
+    const L: usize = 1 << (GLV_WINDOW_SIZE - 1);
+
+    let mut t1 = Vec::with_capacity(L);
+    let (mut double, _) = point
+        .double(cs)
+        .convert_to_affine_or_default(cs, Secp256Affine::one());
+    t1.push(point.clone());
+    for i in 1..L {
+        let next = t1[i - 1].add_mixed(cs, &mut double);
+        t1.push(next);
+    }
+
+    let t1 = t1
+        .iter_mut()
+        .map(|el| el.convert_to_affine_or_default(cs, Secp256Affine::one()).0)
+        .collect::<Vec<_>>();
+
+    let t2 = t1
+        .clone()
+        .into_iter()
+        .map(|mut el| (el.0.mul(cs, &mut beta), el.1))
+        .collect::<Vec<_>>();
+
+    let and_table_id = cs
+        .get_table_id_for_marker::<And8Table>()
+        .expect("table must exist");
+    let mask_for_mod_table_size_bytes = MASK_FOR_MOD_TABLE_SIZE.to_le_bytes(cs);
+
+    let mod_signed = |d: UInt32<F>| {
+        let d_bytes = d.to_le_bytes(cs);
+        let d_mod_window_size = d_bytes
+            .iter()
+            .zip(mask_for_mod_table_size_bytes)
+            .map(|(one, two)| {
+                UInt8::from_variable_unchecked(
+                    cs.perform_lookup::<2, 1>(
+                        and_table_id,
+                        &[one.get_variable(), two.get_variable()],
+                    )[0],
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut d_mod_window_size_arr = [UInt8::zero(cs); 4];
+        d_mod_window_size_arr.copy_from_slice(&d_mod_window_size);
+        let d_mod_window_size = UInt32::from_le_bytes(cs, d_mod_window_size_arr);
+        let (d_mod_window_size_minus_table, _) = d_mod_window_size.overflowing_sub(cs, table_size);
+        let (_, overflow) = d_mod_window_size.overflowing_sub(cs, half_table_size);
+        Selectable::conditionally_select(
+            cs,
+            overflow,
+            &d_mod_window_size,
+            &d_mod_window_size_minus_table,
+        )
+    };
+    let zero = UInt32::zero(cs);
+    let to_wnaf = |e: Secp256ScalarNNField<F>, neg: Boolean<F>| -> Vec<UInt32<F>> {
+        let mut naf = vec![];
+        let mut e = convert_field_element_to_uint256(cs, e);
+        // Loop for max amount of bits in e to ensure homogenous circuit
+        for _ in (0..129) {
+            // TODO: implement is_odd
+            let next = if e.is_odd() {
+                let naf_sign = mod_signed(e.inner[0]);
+                // TODO: need to do an overflowing sub with 2^31
+                if naf_sign < 0 {
+                    // TODO: how do we do this? assuming just bitflips
+                    let neg_naf_sign = naf_sign.negate(cs);
+                    (e.inner[0], _) = e.inner[0].overflowing_add(cs, neg_naf_sign);
+                } else {
+                    (e.inner[0], _) = e.inner[0].overflowing_sub(cs, naf_sign);
+                }
+                naf_sign
+            } else {
+                zero
+            };
+
+            let next_neg = next.negated(cs);
+            let next = Selectable::conditionally_select(cs, neg, &next, &next_neg);
+            naf.push(next);
+
+            // TODO: implement div2
+            e.div2();
+        }
+
+        naf
+    };
+
+    let naf1 = to_wnaf(k1, k1_neg);
+    let naf2 = to_wnaf(k2, k2_neg);
+    let mut acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
-    let mut k2p =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
+    for i in (0..max_len).rev() {
+        if i < naf_1.len() {
+            naf_add(&t_1, naf_1[i], &mut acc)
+        }
 
-    // Convert k1 and k2 to bits, and cull the tail end which should only be all zeros to save
-    // on constraints.
-    let k1_bits = &k1
-        .limbs
-        .iter()
-        .take(9) // 16 * 9 = 144 bits, which is our max for any decomposed scalar with 16 bit windows
-        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
-        .flatten()
-        .collect::<Vec<_>>()[..129]; // We then cull the last 15 bits since 2<<128 needs 129 bits to fit
-    let k2_bits = &k2
-        .limbs
-        .iter()
-        .take(9)
-        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
-        .flatten()
-        .collect::<Vec<_>>()[..129];
-    k1_bits.iter().zip(k2_bits).for_each(|(k1, k2)| {
-        let k1p_added = k1p.add(cs, &point);
-        let k2p_added = k2p.add(cs, &point);
+        if i < naf_2.len() {
+            naf_add(&t_2, naf_2[i], &mut acc)
+        }
 
-        k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
-            cs, *k1, &k1p_added, &k1p,
-        );
-        k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
-            cs, *k2, &k2p_added, &k2p,
-        );
-        point = point.double(cs);
-        let (point_affine, _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
-    });
-    // NOTE: this we can fix by just rigorously printing the addition process and figuring out
-    // what is off from the python impl
-    let (k1p_affine, _) = k1p.convert_to_affine_or_default(cs, Secp256Affine::one());
-    println!("{:?}", k1p_affine.0.witness_hook(cs)().unwrap());
-    println!("{:?}", k1p_affine.1.witness_hook(cs)().unwrap());
+        if i != 0 {
+            acc = acc.double(cs);
+        }
+    }
 
-    let k1p_negated = k1p.negated(cs);
-    k1p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
-        cs,
-        k1_neg,
-        &k1p,
-        &k1p_negated,
-    );
-    let k2p_negated = k2p.negated(cs);
-    k2p = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::conditionally_select(
-        cs,
-        k2_neg,
-        &k2p,
-        &k2p_negated,
-    );
-
-    // endomorphism
-    k2p.x = k2p.x.mul(cs, &mut beta);
-    k1p.add(cs, &k2p)
+    acc
 }
 
 fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
@@ -556,15 +616,40 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     let mut recovered_point =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(cs, x, y);
     // now we do multiplication
-    let mut s_times_x = wnaf_scalar_mul(cs, recovered_point, s_by_r_inv);
-    let ((x, y), _) = s_times_x.convert_to_affine_or_default(cs, Secp256Affine::one());
-    println!("{:?}", x.witness_hook(cs)().unwrap());
-    println!("{:?}", y.witness_hook(cs)().unwrap());
+    let mut s_times_x = wnaf_scalar_mul(cs, recovered_point.clone(), s_by_r_inv.clone());
+    let (mut s_times_x_affine, _) =
+        s_times_x.convert_to_affine_or_default(cs, Secp256Affine::one());
+    println!("{:?}", s_times_x_affine.0.witness_hook(cs)().unwrap());
+    println!("{:?}", s_times_x_affine.1.witness_hook(cs)().unwrap());
 
     // let hash_times_g = Secp256FixedBaseMulGate::new(message_hash_by_r_inv);
     let mut q_acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
-    let generator = Secp256Affine::one();
+
+    let s_by_r_inv_bits: Vec<_> = s_by_r_inv
+        .limbs
+        .iter()
+        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
+        .flatten()
+        .collect();
+    for (cycle, x_bit) in s_by_r_inv_bits.into_iter().rev().enumerate() {
+        if cycle != 0 {
+            q_acc = q_acc.double(cs);
+        }
+        let q_plus_x = q_acc.add_mixed(
+            cs,
+            &mut (recovered_point.x.clone(), recovered_point.y.clone()),
+        );
+        let mut q_acc: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> =
+            Selectable::conditionally_select(cs, x_bit, &q_plus_x, &q_acc);
+    }
+    let (mut q_acc, _) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
+    println!("{:?}", q_acc.0.witness_hook(cs)().unwrap());
+    println!("{:?}", q_acc.1.witness_hook(cs)().unwrap());
+
+    let mut q_acc =
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
+    let mut generator = Secp256Affine::one();
     let (x, y) = generator.into_xy_unchecked();
     let x = Secp256BaseNNField::allocated_constant(cs, x, base_field_params);
     let y = Secp256BaseNNField::allocated_constant(cs, y, base_field_params);
@@ -576,27 +661,21 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
         .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
         .flatten()
         .collect();
-
     for (cycle, hash_bit) in message_hash_by_r_inv_lsb_bits.into_iter().rev().enumerate() {
         if cycle != 0 {
             q_acc = q_acc.double(cs);
         }
         let q_plus_x = q_acc.add_mixed(cs, &mut generator);
-        let mut q_acc: SWProjectivePoint<
-            F,
-            Secp256Affine,
-            NonNativeFieldOverU16<F, Secp256Fq, 17>,
-        > = Selectable::conditionally_select(cs, hash_bit, &q_plus_x, &q_acc);
+        let mut q_acc: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> =
+            Selectable::conditionally_select(cs, hash_bit, &q_plus_x, &q_acc);
     }
 
-    let mut q_acc = s_times_x.add(cs, &q_acc);
+    let (mut q_acc, _) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
+    let mut q_acc = s_times_x.sub_mixed(cs, &mut q_acc);
 
     let ((mut q_x, mut q_y), is_infinity) =
         q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
     exception_flags.push(is_infinity);
-    exception_flags
-        .iter()
-        .for_each(|v| println!("{:?}", v.witness_hook(cs)().unwrap()));
     let any_exception = Boolean::multi_or(cs, &exception_flags[..]);
 
     q_x.normalize(cs);
