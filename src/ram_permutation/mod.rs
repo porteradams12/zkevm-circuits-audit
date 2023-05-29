@@ -442,7 +442,7 @@ mod tests {
     type P = GoldilocksField;
 
     #[test]
-    fn test_repack_and_prove_events_rollbacks_inner() {
+    fn test_ram_permutation_inner() {
         let geometry = CSGeometry {
             num_columns_under_copy_permutation: 100,
             num_witness_columns: 0,
@@ -526,7 +526,7 @@ mod tests {
         let mut previous_comparison_key = [UInt32::allocated_constant(cs, 0); RAM_FULL_KEY_LENGTH];
         let mut previous_element_value =  UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap());
         let mut previous_is_ptr = Boolean::allocated_constant(cs, false);
-        let mut num_nondeterministic_writes = UInt32::allocated_constant(cs, 0);
+        let mut num_nondeterministic_writes = UInt32::allocated_constant(cs, 1);
         partial_accumulate_inner(
             cs, 
             &mut original_queue,
@@ -558,11 +558,28 @@ mod tests {
         let one_8 = UInt8::allocated_constant(cs, 1);
         let zero_32 = UInt32::allocated_constant(cs, 0);
 
+
         let q = MemoryQuery::<F> {
-            timestamp: UInt32::allocated_constant(cs, 1024),
-            memory_page: UInt32::allocated_constant(cs, 8),
+            timestamp: UInt32::allocated_constant(cs, 1025),
+            memory_page: UInt32::allocated_constant(cs, 30),
             index: UInt32::allocated_constant(cs, 0),
             rw_flag: bool_false,
+            is_ptr: bool_false,
+            value: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "1125899906842626",
+                )
+                .unwrap(),
+            ),
+        };
+        unsorted_querie.push(q);
+
+        let q = MemoryQuery::<F> {
+            timestamp: UInt32::allocated_constant(cs, 1024),
+            memory_page: UInt32::allocated_constant(cs, 30),
+            index: UInt32::allocated_constant(cs, 0),
+            rw_flag: bool_true,
             is_ptr: bool_false,
             value: UInt256::allocated_constant(
                 cs,
@@ -574,38 +591,22 @@ mod tests {
         };
 
         unsorted_querie.push(q);
-
-        // let q = MemoryQuery::<F> {
-        //     timestamp: UInt32::allocated_constant(cs, 1040),
-        //     memory_page: UInt32::allocated_constant(cs, 8),
-        //     index: UInt32::allocated_constant(cs, 1),
-        //     rw_flag: bool_false,
-        //     is_ptr: bool_false,
-        //     value: UInt256::allocated_constant(
-        //         cs,
-        //         U256::from_dec_str(
-        //             "2985072525719",
-        //         )
-        //         .unwrap(),
-        //     ),
-        // };
-        // unsorted_querie.push(q);
         
-        // let q = MemoryQuery::<F> {
-        //     timestamp: UInt32::allocated_constant(cs, 1040),
-        //     memory_page: UInt32::allocated_constant(cs, 8),
-        //     index: UInt32::allocated_constant(cs, 695),
-        //     rw_flag: bool_false,
-        //     is_ptr: bool_false,
-        //     value: UInt256::allocated_constant(
-        //         cs,
-        //         U256::from_dec_str(
-        //             "0",
-        //         )
-        //         .unwrap(),
-        //     ),
-        // };
-        // unsorted_querie.push(q);
+        let q = MemoryQuery::<F> {
+            timestamp: UInt32::allocated_constant(cs, 0),
+            memory_page: UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE),
+            index: UInt32::allocated_constant(cs, 695),
+            rw_flag: bool_true,
+            is_ptr: bool_false,
+            value: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "12345678",
+                )
+                .unwrap(),
+            ),
+        };
+        unsorted_querie.push(q);
 
         unsorted_querie
     }
@@ -617,10 +618,42 @@ mod tests {
         let zero_8 = UInt8::allocated_constant(cs, 0);
         let one_8 = UInt8::allocated_constant(cs, 1);
         let zero_32 = UInt32::allocated_constant(cs, 0);
+        
+        let q = MemoryQuery::<F> {
+            timestamp: UInt32::allocated_constant(cs, 0),
+            memory_page: UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE),
+            index: UInt32::allocated_constant(cs, 695),
+            rw_flag: bool_true,
+            is_ptr: bool_false,
+            value: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "12345678",
+                )
+                .unwrap(),
+            ),
+        };
+        sorted_querie.push(q);
 
         let q = MemoryQuery::<F> {
             timestamp: UInt32::allocated_constant(cs, 1024),
-            memory_page: UInt32::allocated_constant(cs, 8),
+            memory_page: UInt32::allocated_constant(cs, 30),
+            index: UInt32::allocated_constant(cs, 0),
+            rw_flag: bool_true,
+            is_ptr: bool_false,
+            value: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "1125899906842626",
+                )
+                .unwrap(),
+            ),
+        };
+        sorted_querie.push(q);
+
+        let q = MemoryQuery::<F> {
+            timestamp: UInt32::allocated_constant(cs, 1025),
+            memory_page: UInt32::allocated_constant(cs, 30),
             index: UInt32::allocated_constant(cs, 0),
             rw_flag: bool_false,
             is_ptr: bool_false,
@@ -632,40 +665,7 @@ mod tests {
                 .unwrap(),
             ),
         };
-
         sorted_querie.push(q);
-
-        // let q = MemoryQuery::<F> {
-        //     timestamp: UInt32::allocated_constant(cs, 1040),
-        //     memory_page: UInt32::allocated_constant(cs, 8),
-        //     index: UInt32::allocated_constant(cs, 1),
-        //     rw_flag: bool_false,
-        //     is_ptr: bool_false,
-        //     value: UInt256::allocated_constant(
-        //         cs,
-        //         U256::from_dec_str(
-        //             "2985072525719",
-        //         )
-        //         .unwrap(),
-        //     ),
-        // };
-        // sorted_querie.push(q);
-        
-        // let q = MemoryQuery::<F> {
-        //     timestamp: UInt32::allocated_constant(cs, 1040),
-        //     memory_page: UInt32::allocated_constant(cs, 8),
-        //     index: UInt32::allocated_constant(cs, 695),
-        //     rw_flag: bool_false,
-        //     is_ptr: bool_false,
-        //     value: UInt256::allocated_constant(
-        //         cs,
-        //         U256::from_dec_str(
-        //             "0",
-        //         )
-        //         .unwrap(),
-        //     ),
-        // };
-        // sorted_querie.push(q);
 
         sorted_querie
     }
