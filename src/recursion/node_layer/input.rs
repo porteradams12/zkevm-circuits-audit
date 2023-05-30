@@ -56,6 +56,6 @@ pub struct RecursionNodeInstanceWitness<
 > {
     pub input: RecursionNodeInputWitness<F>,
     pub vk_witness: VerificationKey<F, H::NonCircuitSimulator>,
-    pub split_points: VecDeque<[F; FULL_SPONGE_QUEUE_STATE_WIDTH]>,
+    pub split_points: VecDeque<QueueTailStateWitness<F, FULL_SPONGE_QUEUE_STATE_WIDTH>>,
     pub proof_witnesses: VecDeque<Proof<F, H::NonCircuitSimulator, EXT>>,
 }
