@@ -96,7 +96,8 @@ where
 
     let RecursionLeafParameters {
         circuit_type,
-        vk_commitment,
+        leaf_layer_vk_commitment: _,
+        basic_circuit_vk_commitment,
     } = params;
 
     queue.witness = Arc::new(FullStateCircuitQueueWitness::from_inner_witness(
@@ -113,7 +114,7 @@ where
     let vk_commitment_computed: [_; VK_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &vk, round_function);
 
-    for (a, b) in vk_commitment.iter().zip(vk_commitment_computed.iter()) {
+    for (a, b) in basic_circuit_vk_commitment.iter().zip(vk_commitment_computed.iter()) {
         Num::enforce_equal(cs, a, b);
     }
 

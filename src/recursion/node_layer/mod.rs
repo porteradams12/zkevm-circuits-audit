@@ -7,6 +7,7 @@ use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 use boojum::gadgets::recursion::recursive_transcript::RecursiveTranscript;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 
 use std::collections::VecDeque;
 
@@ -106,18 +107,18 @@ where
     let vk_commitment_computed: [_; VK_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &vk, round_function);
 
-    // select VK commitment over which we will work with
-    // make unreachable palceholder
-    let zero_num = Num::zero(cs);
-    let mut vk_commitment = [zero_num; VK_COMMITMENT_LENGTH];
+    // select over which branch we work
+    use crate::recursion::leaf_layer::input::RecursionLeafParameters;
+    use boojum::gadgets::traits::allocatable::CSPlaceholder;
+    let mut leaf_params = RecursionLeafParameters::placeholder(cs);
 
     for el in leaf_layer_parameters.iter() {
         let this_type = Num::equals(cs, &branch_circuit_type, &el.circuit_type);
-        vk_commitment = <[Num<F>; VK_COMMITMENT_LENGTH]>::conditionally_select(
+        leaf_params = RecursionLeafParameters::conditionally_select(
             cs,
             this_type,
-            &el.vk_commitment,
-            &vk_commitment,
+            el,
+            &leaf_params
         );
     }
 
@@ -137,6 +138,9 @@ where
     let (_, uf) = max_length_if_leafs.overflowing_sub(cs, queue_state.tail.length);
     let next_layer_aggregates_nodes = uf;
     let next_layer_aggregates_leafs = next_layer_aggregates_nodes.negated(cs);
+
+    let mut vk_commitment = leaf_params.leaf_layer_vk_commitment;
+
     vk_commitment = <[Num<F>; VK_COMMITMENT_LENGTH]>::conditionally_select(
         cs,
         next_layer_aggregates_nodes,
@@ -218,9 +222,38 @@ where
             &vk,
         );
 
-        assert_eq!(public_inputs.len(), INPUT_OUTPUT_COMMITMENT_LENGTH);
-
         is_valid.conditionally_enforce_true(cs, chunk_is_meaningful);
+
+        // if it's a meaningful proof we should also check that it indeed proofs a subqueue
+
+        let next_layer_input_if_node = RecursionNodeInput {
+            branch_circuit_type: branch_circuit_type,
+            leaf_layer_parameters: leaf_layer_parameters,
+            node_layer_vk_commitment: node_layer_vk_commitment,
+            queue_state: subqueue,
+        };
+        let input_commitment_if_node: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
+            commit_variable_length_encodable_item(cs, &next_layer_input_if_node, round_function);
+
+        use crate::recursion::leaf_layer::input::RecursionLeafInput;
+        let next_layer_input_if_leaf = RecursionLeafInput {
+            params: leaf_params,
+            queue_state: subqueue,
+        };
+        let input_commitment_if_leaf: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
+            commit_variable_length_encodable_item(cs, &next_layer_input_if_leaf, round_function);
+
+        let input_commitment = <[Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]>::conditionally_select(
+            cs, 
+            next_layer_aggregates_nodes, 
+            &input_commitment_if_node,
+            &input_commitment_if_leaf,
+        );
+
+        assert_eq!(public_inputs.len(), INPUT_OUTPUT_COMMITMENT_LENGTH);
+        for (a, b) in input_commitment.iter().zip(public_inputs.into_iter()) {
+            Num::conditionally_enforce_equal(cs, chunk_is_meaningful, a, &b);
+        }
     }
 
     let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
@@ -322,9 +355,13 @@ pub(crate) fn split_queue_state_into_n<F: SmallField, CS: ConstraintSystem<F>, c
         result.push(first);
     }
     // push the last one
+    let last_len = queue_state.tail.length.sub_no_overflow(cs, total_len);
     let last = QueueState {
         head: current_head,
-        tail: queue_state.tail
+        tail: QueueTailState { 
+            tail: queue_state.tail.tail, 
+            length: last_len, 
+        }
     };
     last.enforce_consistency(cs);
     result.push(last);

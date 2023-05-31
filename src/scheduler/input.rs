@@ -118,20 +118,15 @@ pub struct SchedulerCircuitInstanceWitness<
     pub previous_block_meta_hash: [u8; 32],
     pub previous_block_aux_hash: [u8; 32],
 
-    // extra information about our recursion tree
-    pub recursion_node_verification_key_hash: [u8; 32],
-    pub recursion_leaf_verification_key_hash: [u8; 32],
-    pub all_different_circuits_keys_hash: [u8; 32],
-
     // proofs for every individual circuit type's aggregation subtree
     #[derivative(Debug = "ignore")]
     pub proof_witnesses: VecDeque<Proof<F, H::NonCircuitSimulator, EXT>>,
     #[derivative(Debug = "ignore")]
-    pub node_leyer_vk_witness: VerificationKey<F, H::NonCircuitSimulator>,
+    pub node_layer_vk_witness: VerificationKey<F, H::NonCircuitSimulator>,
     #[derivative(Debug = "ignore")]
     pub leaf_layer_parameters: [RecursionLeafParametersWitness<F>; NUM_BASE_LAYER_CIRCUITS],
-    #[derivative(Debug = "ignore")]
-    pub leaf_layer_parameters_commitment: [F; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH],
-    #[derivative(Debug = "ignore")]
-    pub node_layer_vk_commitment: [F; VK_COMMITMENT_LENGTH],
+    // #[derivative(Debug = "ignore")]
+    // pub leaf_layer_parameters_commitment: [F; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH],
+    // #[derivative(Debug = "ignore")]
+    // pub node_layer_vk_commitment: [F; VK_COMMITMENT_LENGTH],
 }

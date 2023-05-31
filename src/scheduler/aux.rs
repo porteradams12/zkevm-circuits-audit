@@ -41,6 +41,28 @@ pub enum BaseLayerCircuitType {
     L1MessagesHasher = 13,
 }
 
+impl BaseLayerCircuitType {
+    pub fn from_numeric_value(value: u8) -> Self {
+        match value {
+            a if a == Self::VM as u8 => Self::VM,
+            a if a == Self::DecommitmentsFilter as u8 => Self::DecommitmentsFilter,
+            a if a == Self::Decommiter as u8 => Self::Decommiter,
+            a if a == Self::LogDemultiplexer as u8 => Self::LogDemultiplexer,
+            a if a == Self::KeccakPrecompile as u8 => Self::KeccakPrecompile,
+            a if a == Self::Sha256Precompile as u8 => Self::Sha256Precompile,
+            a if a == Self::EcrecoverPrecompile as u8 => Self::EcrecoverPrecompile,
+            a if a == Self::RamValidation as u8 => Self::RamValidation,
+            a if a == Self::StorageFilter as u8 => Self::StorageFilter,
+            a if a == Self::StorageApplicator as u8 => Self::StorageApplicator,
+            a if a == Self::EventsRevertsFilter as u8 => Self::EventsRevertsFilter,
+            a if a == Self::L1MessagesRevertsFilter as u8 => Self::L1MessagesRevertsFilter,
+            a if a == Self::L1MessagesHasher as u8 => Self::L1MessagesHasher,
+            _ => {panic!("unknown circuit type {}", value)}
+
+        }
+    }
+}
+
 #[track_caller]
 pub(crate) fn compute_precompile_commitment<
     F: SmallField,

@@ -771,32 +771,13 @@ pub fn scheduler_function<
         .clone()
         .map(|el| RecursionLeafParameters::allocate(cs, el));
 
-    let leaf_layer_parameters_commitment =
-        <[Num<F>; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH]>::allocate(
-            cs,
-            witness.leaf_layer_parameters_commitment,
-        );
-    let computed_leaf_layer_parameters_commitment: [_; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH] =
+    let leaf_layer_parameters_commitment: [_; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &leaf_layer_parameters, round_function);
-    for (a, b) in leaf_layer_parameters_commitment
-        .iter()
-        .zip(computed_leaf_layer_parameters_commitment.iter())
-    {
-        Num::enforce_equal(cs, a, b);
-    }
 
-    let node_layer_vk_commitment =
-        <[Num<F>; VK_COMMITMENT_LENGTH]>::allocate(cs, witness.node_layer_vk_commitment);
     let node_layer_vk =
-        AllocatedVerificationKey::<F, H>::allocate(cs, witness.node_leyer_vk_witness.clone());
-    let recomputed_node_vk_commitment: [_; VK_COMMITMENT_LENGTH] =
+        AllocatedVerificationKey::<F, H>::allocate(cs, witness.node_layer_vk_witness.clone());
+    let node_layer_vk_commitment: [_; VK_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &node_layer_vk, round_function);
-    for (a, b) in node_layer_vk_commitment
-        .iter()
-        .zip(recomputed_node_vk_commitment.iter())
-    {
-        Num::enforce_equal(cs, a, b);
-    }
 
     let mut proof_witnesses = witness.proof_witnesses;
 
