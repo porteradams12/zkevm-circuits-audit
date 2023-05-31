@@ -16,6 +16,7 @@ use boojum::field::SmallField;
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
@@ -510,6 +511,10 @@ pub fn scheduler_function<
                     ecrecover_circuit_observable_output_commitment,
                 ),
                 (
+                    BaseLayerCircuitType::RamValidation,
+                    [zero_num; CLOSED_FORM_COMMITTMENT_LENGTH], // formally set here
+                ),
+                (
                     BaseLayerCircuitType::EventsRevertsFilter,
                     events_filter_output_com,
                 ),
@@ -546,7 +551,7 @@ pub fn scheduler_function<
         BaseLayerCircuitType::StorageApplicator,
         BaseLayerCircuitType::EventsRevertsFilter,
         BaseLayerCircuitType::L1MessagesRevertsFilter,
-        BaseLayerCircuitType::L1MessagesHasher,
+        // BaseLayerCircuitType::L1MessagesHasher,
     ];
 
     for pair in sequence_of_circuit_types.windows(2) {
@@ -671,7 +676,8 @@ pub fn scheduler_function<
             let sample_circuit_commitment = input_commitments_as_map
                 .get(circuit_type)
                 .cloned()
-                .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
+                .expect(&format!("circuit input commitment for type {:?}", circuit_type));
+                // .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
 
             let validate = if let Some(skip_flag) = skip_flag {
                 Boolean::multi_and(cs, &[*stage_flag, execution_flag, *skip_flag])
@@ -679,20 +685,31 @@ pub fn scheduler_function<
                 Boolean::multi_and(cs, &[*stage_flag, execution_flag])
             };
 
+            let validate_input = validate; // input commitment is ALWAYS the same for all the circuits of some type
+
             conditionally_enforce_circuit_commitment(
                 cs,
-                validate,
+                validate_input,
                 &closed_form_input.observable_input_committment,
                 &sample_circuit_commitment,
             );
 
+            let validate_output = if let Some(skip_flag) = skip_flag {
+                let not_skip = skip_flag.negated(cs);
+                Boolean::multi_and(cs, &[closed_form_input.completion_flag, not_skip, *stage_flag])
+            } else {
+                Boolean::multi_and(cs, &[closed_form_input.completion_flag, *stage_flag])
+            };
+
             let sample_circuit_commitment = output_commitments_as_map
                 .get(circuit_type)
                 .cloned()
-                .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
+                .expect(&format!("circuit output commitment for type {:?}", circuit_type));
+                // .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
+
             conditionally_enforce_circuit_commitment(
                 cs,
-                validate,
+                validate_output,
                 &closed_form_input.observable_output_committment,
                 &sample_circuit_commitment,
             );
@@ -702,6 +719,7 @@ pub fn scheduler_function<
             } else {
                 closed_form_input.completion_flag
             };
+
             let stage_just_finished =
                 Boolean::multi_and(cs, &[should_start_next, execution_flag, *stage_flag]);
             next_mask[idx] = stage_just_finished;
@@ -747,18 +765,26 @@ pub fn scheduler_function<
 
         previous_completion_flag = Boolean::multi_or(cs, &next_mask);
         // for the next stage we do shifted AND
-        let src = execution_stage_bitmask;
+        let mut tmp = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
         // note skip(1)
-        for ((a, b), dst) in src
-            .iter()
-            .zip(next_mask.iter())
-            .zip(execution_stage_bitmask.iter_mut().skip(1))
+        for (idx, start_next) in next_mask.iter().enumerate()
         {
-            *dst = Boolean::multi_and(cs, &[*a, *b]);
+            let finished_this_stage = *start_next;
+            let not_finished = finished_this_stage.negated(cs);
+            let proceed_current = Boolean::multi_and(cs, &[execution_stage_bitmask[idx], not_finished]);
+            // update 
+            let start_as_next = tmp[idx];
+            let do_this_stage = Boolean::multi_or(cs, &[start_as_next, proceed_current]);
+            execution_stage_bitmask[idx] = do_this_stage;
+            if idx + 1 < NUM_CIRCUIT_TYPES_TO_SCHEDULE {
+                tmp[idx+1] = finished_this_stage;
+            }
         }
+
         // and check if we are done
-        let finished = Boolean::multi_and(cs, &[*src.last().unwrap(), *next_mask.last().unwrap()]);
-        let should_continue = finished.negated(cs);
+        let just_finished = *next_mask.last().unwrap();
+        let should_continue = just_finished.negated(cs);
+
         execution_flag = Boolean::multi_and(cs, &[execution_flag, should_continue]);
     }
 
