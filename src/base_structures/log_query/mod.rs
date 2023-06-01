@@ -657,7 +657,7 @@ impl<F: SmallField> ByteSerializable<F, L2_TO_L1_MESSAGE_BYTE_LENGTH> for LogQue
         offset += 1;
 
         let bytes_be = self.tx_number_in_block.to_be_bytes(cs);
-        result[offset..(offset + bytes_be.len())].copy_from_slice(&bytes_be[2..]);
+        result[offset..(offset + (bytes_be.len() - 2))].copy_from_slice(&bytes_be[2..]);
         offset += bytes_be.len() - 2;
 
         // we truncated, so let's enforce that those were unsused
