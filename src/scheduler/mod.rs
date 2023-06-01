@@ -37,6 +37,7 @@ use crate::recursion::VK_COMMITMENT_LENGTH;
 use crate::scheduler::aux::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
+use boojum::config::*;
 
 use crate::base_structures::precompile_input_outputs::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -844,9 +845,24 @@ pub fn scheduler_function<
         let expected_input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
             commit_variable_length_encodable_item(cs, &input, round_function);
 
-        let proof_witness = proof_witnesses
-            .pop_front()
-            .unwrap_or(config.padding_proof.clone());
+        // here we do the trick to protect ourselves from setup pending from witness, but
+        // nevertheless do not create new types for proofs with fixed number of inputs, etc
+        let proof_witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
+            config.padding_proof.clone()
+        } else {
+            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
+                // proving mode
+                proof_witnesses
+                .pop_front()
+                .unwrap_or(config.padding_proof.clone())
+            } else {
+                // we are in the testing mode
+                proof_witnesses
+                .pop_front()
+                .unwrap_or(config.padding_proof.clone())
+            }
+        };
+
         let proof = AllocatedProof::allocate(cs, proof_witness);
 
         let (is_valid, inputs) = verifier.verify::<H, TR, CTR, POW>(
