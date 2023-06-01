@@ -8,6 +8,7 @@ use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 use boojum::gadgets::recursion::recursive_transcript::RecursiveTranscript;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
+use crate::base_structures::recursion_query::RecursionQueue;
 
 use std::collections::VecDeque;
 
@@ -148,8 +149,12 @@ where
         &vk_commitment,
     );
 
+    // small trick to simplify setup. If we have nothing to verify, we do not care about VK
+    // being one that we want
+    let is_meaningful = RecursionQueue::<F, R>::from_state(cs, queue_state).is_empty(cs).negated(cs);
+
     for (a, b) in vk_commitment.iter().zip(vk_commitment_computed.iter()) {
-        Num::enforce_equal(cs, a, b);
+        Num::conditionally_enforce_equal(cs, is_meaningful, a, b);
     }
 
     // split the original queue into "node_layer_capacity" elements, regardless if next layer
