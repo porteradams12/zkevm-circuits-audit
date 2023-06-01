@@ -32,6 +32,7 @@ use crate::base_structures::memory_query::MemoryQueue;
 
 use crate::base_structures::recursion_query::*;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use crate::linear_hasher::input::LinearHasherOutputData;
 use crate::recursion::VK_COMMITMENT_LENGTH;
 use crate::scheduler::aux::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
 use boojum::gadgets::num::Num;
@@ -187,10 +188,10 @@ pub fn scheduler_function<
         witness.l1messages_sorter_observable_output.clone(),
     );
 
-    // let l1messages_linear_hasher_observable_output = PubdataHasherOutputData::allocate(
-    //     cs,
-    //     l1messages_linear_hasher_observable_output,
-    // );
+    let l1messages_linear_hasher_observable_output = LinearHasherOutputData::allocate(
+        cs,
+        witness.l1messages_linear_hasher_observable_output,
+    );
 
     // auxilary intermediate states
     let rollup_storage_sorter_intermediate_queue_state = QueueTailState::allocate(
@@ -350,13 +351,13 @@ pub fn scheduler_function<
             round_function,
         );
 
-    // let (l1_messages_hasher_input_com, l1_messages_hasher_output_com) =
-    //     compute_pubdata_hasher_circuit_commitment(
-    //         cs,
-    //         &l1messages_sorter_observable_output.final_queue_state,
-    //         &l1messages_linear_hasher_observable_output.pubdata_hash,
-    //         round_function,
-    //     );
+    let (l1_messages_hasher_input_com, l1_messages_hasher_output_com) =
+        compute_hasher_circuit_commitment(
+            cs,
+            &l1messages_sorter_observable_output.final_queue_state,
+            &l1messages_linear_hasher_observable_output.keccak256_hash,
+            round_function,
+        );
 
     const NUM_PROCESSABLE_SHARDS: usize = 1;
 
@@ -474,10 +475,10 @@ pub fn scheduler_function<
                     BaseLayerCircuitType::StorageApplicator,
                     storage_applicator_input_commitments[0],
                 ),
-                // (
-                //     BaseLayerCircuitType::L1MessagesHasher,
-                //     l1_messages_hasher_input_com
-                // ),
+                (
+                    BaseLayerCircuitType::L1MessagesHasher,
+                    l1_messages_hasher_input_com
+                ),
             ]
             .into_iter(),
         );
@@ -530,10 +531,10 @@ pub fn scheduler_function<
                     BaseLayerCircuitType::StorageApplicator,
                     storage_applicator_output_commitments[0],
                 ),
-                // (
-                //     BaseLayerCircuitType::L1MessagesHasher,
-                //     l1_messages_hasher_output_com
-                // ),
+                (
+                    BaseLayerCircuitType::L1MessagesHasher,
+                    l1_messages_hasher_output_com
+                ),
             ]
             .into_iter(),
         );
@@ -551,7 +552,7 @@ pub fn scheduler_function<
         BaseLayerCircuitType::StorageApplicator,
         BaseLayerCircuitType::EventsRevertsFilter,
         BaseLayerCircuitType::L1MessagesRevertsFilter,
-        // BaseLayerCircuitType::L1MessagesHasher,
+        BaseLayerCircuitType::L1MessagesHasher,
     ];
 
     for pair in sequence_of_circuit_types.windows(2) {
@@ -628,8 +629,9 @@ pub fn scheduler_function<
             .length
             .is_zero(cs),
     );
+    // In practice we do NOT skip it
     // skip_flags[(BaseLayerCircuitType::L1MessagesHasher as u8 as usize) - 1] = Some(
-    //     log_demuxer_observable_output.events_access_queue_state.tail.length.is_zero(cs)
+    //     l1messages_sorter_observable_output.final_queue_state.tail.length.is_zero(cs)
     // );
 
     // now we just walk one by one
@@ -914,7 +916,7 @@ pub fn scheduler_function<
             .state_diffs_keccak256_hash,
         bootloader_heap_initial_content,
         events_queue_state,
-        l1_messages_linear_hash: [zero_u8; 32],
+        l1_messages_linear_hash: l1messages_linear_hasher_observable_output.keccak256_hash,
     };
 
     let block_content_header = BlockContentHeader {

@@ -12,6 +12,7 @@ use crate::base_structures::vm_state::*;
 use crate::code_unpacker_sha256::input::CodeDecommitterOutputDataWitness;
 
 use crate::fsm_input_output::circuit_inputs::main_vm::VmOutputDataWitness;
+use crate::linear_hasher::input::LinearHasherOutputDataWitness;
 use crate::log_sorter::input::EventsDeduplicatorOutputDataWitness;
 
 use crate::fsm_input_output::ClosedFormInputCompactFormWitness;
@@ -98,7 +99,7 @@ pub struct SchedulerCircuitInstanceWitness<
     pub storage_application_observable_output: StorageApplicationOutputDataWitness<F>,
     pub events_sorter_observable_output: EventsDeduplicatorOutputDataWitness<F>,
     pub l1messages_sorter_observable_output: EventsDeduplicatorOutputDataWitness<F>,
-    // pub l1messages_linear_hasher_observable_output: PubdataHasherOutputDataWitness<E>,
+    pub l1messages_linear_hasher_observable_output: LinearHasherOutputDataWitness<F>,
 
     // very few things that we need to properly produce this block
     pub storage_log_tail: [F; QUEUE_STATE_WIDTH],
@@ -125,8 +126,4 @@ pub struct SchedulerCircuitInstanceWitness<
     pub node_layer_vk_witness: VerificationKey<F, H::NonCircuitSimulator>,
     #[derivative(Debug = "ignore")]
     pub leaf_layer_parameters: [RecursionLeafParametersWitness<F>; NUM_BASE_LAYER_CIRCUITS],
-    // #[derivative(Debug = "ignore")]
-    // pub leaf_layer_parameters_commitment: [F; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH],
-    // #[derivative(Debug = "ignore")]
-    // pub node_layer_vk_commitment: [F; VK_COMMITMENT_LENGTH],
 }

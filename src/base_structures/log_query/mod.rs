@@ -643,7 +643,7 @@ pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> 
 
 // we will output L2 to L1 messages as byte packed messages, so let's make it
 
-pub const L2_TO_L1_MESSAGE_BYTE_LENGTH: usize = 88;
+pub const L2_TO_L1_MESSAGE_BYTE_LENGTH: usize = 90;
 
 impl<F: SmallField> ByteSerializable<F, L2_TO_L1_MESSAGE_BYTE_LENGTH> for LogQuery<F> {
     fn into_bytes<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> [UInt8<F>; L2_TO_L1_MESSAGE_BYTE_LENGTH] {
@@ -672,7 +672,7 @@ impl<F: SmallField> ByteSerializable<F, L2_TO_L1_MESSAGE_BYTE_LENGTH> for LogQue
         result[offset..(offset + bytes_be.len())].copy_from_slice(&bytes_be);
         offset += bytes_be.len();
 
-        assert_eq!(offset, 88);
+        assert_eq!(offset, L2_TO_L1_MESSAGE_BYTE_LENGTH);
 
         result
     }

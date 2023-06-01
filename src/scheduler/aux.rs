@@ -4,6 +4,7 @@ use crate::fsm_input_output::commit_variable_length_encodable_item;
 
 use crate::base_structures::vm_state::*;
 use crate::fsm_input_output::*;
+use crate::linear_hasher::input::LinearHasherInputData;
 use boojum::gadgets::u32::UInt32;
 
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -170,29 +171,32 @@ pub(crate) fn compute_storage_applicator_circuit_commitment<
     (input_data_commitment, output_data_commitment)
 }
 
-// #[track_caller]
-// fn compute_hasher_circuit_commitment<
-//     F: SmallField,
-//     CS: ConstraintSystem<E>,
-//     R: CircuitArithmeticRoundFunction<E, 2, 3, StateElement = Num<E>>,
-// >(
-//     cs: &mut CS,
-//     input_queue_state: &FixedWidthEncodingGenericQueueState<E>,
-//     pubdata_hash: &Bytes32<E>,
-//     round_function: &R,
-// ) -> Result<(Num<E>, Num<E>), SynthesisError> {
-//     let input_data = PubdataHasherInputData::<E> {
-//         input_queue_state: input_queue_state.clone(),
-//     };
-//     let input_data_commitment = commit_encodable_item(cs, &input_data, round_function)?;
+#[track_caller]
+pub(crate) fn compute_hasher_circuit_commitment<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+>(
+    cs: &mut CS,
+    input_queue_state: &QueueState<F, QUEUE_STATE_WIDTH>,
+    pubdata_hash: &[UInt8<F>; 32],
+    round_function: &R,
+) -> (
+    [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH],
+    [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH],
+) {
+    let input_data = LinearHasherInputData {
+        queue_state: input_queue_state.clone(),
+    };
+    let input_data_commitment = commit_variable_length_encodable_item(cs, &input_data, round_function);
 
-//     let output_data = PubdataHasherOutputData::<E> {
-//         pubdata_hash: pubdata_hash.clone(),
-//     };
-//     let output_data_commitment = commit_encodable_item(cs, &output_data, round_function)?;
+    let output_data = LinearHasherOutputData {
+        keccak256_hash: *pubdata_hash,
+    };
+    let output_data_commitment = commit_variable_length_encodable_item(cs, &output_data, round_function);
 
-//     Ok((input_data_commitment, output_data_commitment))
-// }
+    (input_data_commitment, output_data_commitment)
+}
 
 #[track_caller]
 pub(crate) fn conditionally_enforce_circuit_commitment<F: SmallField, CS: ConstraintSystem<F>>(
