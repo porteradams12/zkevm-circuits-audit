@@ -639,3 +639,41 @@ use boojum::gadgets::queue::CircuitQueue;
 
 pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
     CircuitQueue<F, LogQuery<F>, AW, SW, CW, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;
+
+
+// we will output L2 to L1 messages as byte packed messages, so let's make it
+
+pub const L2_TO_L1_MESSAGE_BYTE_LENGTH: usize = 88;
+
+impl<F: SmallField> ByteSerializable<F, L2_TO_L1_MESSAGE_BYTE_LENGTH> for LogQuery<F> {
+    fn into_bytes<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> [UInt8<F>; L2_TO_L1_MESSAGE_BYTE_LENGTH] {
+        let zero_u8 = UInt8::zero(cs);
+
+        let mut result = [zero_u8; L2_TO_L1_MESSAGE_BYTE_LENGTH];
+        let mut offset = 0;
+        result[offset] = self.shard_id;
+        offset += 1;
+        result[offset] = unsafe {UInt8::from_variable_unchecked(self.is_service.get_variable())};
+        offset += 1;
+
+        let bytes_be = self.tx_number_in_block.to_be_bytes(cs);
+        result[offset..(offset + bytes_be.len())].copy_from_slice(&bytes_be);
+        offset += bytes_be.len();
+
+        let bytes_be = self.address.to_be_bytes(cs);
+        result[offset..(offset + bytes_be.len())].copy_from_slice(&bytes_be);
+        offset += bytes_be.len();
+
+        let bytes_be = self.key.to_be_bytes(cs);
+        result[offset..(offset + bytes_be.len())].copy_from_slice(&bytes_be);
+        offset += bytes_be.len();
+
+        let bytes_be = self.written_value.to_be_bytes(cs);
+        result[offset..(offset + bytes_be.len())].copy_from_slice(&bytes_be);
+        offset += bytes_be.len();
+
+        assert_eq!(offset, 88);
+
+        result
+    }
+}
