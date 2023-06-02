@@ -391,6 +391,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         )
     };
     let zero = UInt32::zero(cs);
+    let overflow_checker = UInt32::allocated_constant(cs, 2u32.pow(31));
     let to_wnaf = |e: Secp256ScalarNNField<F>, neg: Boolean<F>| -> Vec<UInt32<F>> {
         let mut naf = vec![];
         let mut e = convert_field_element_to_uint256(cs, e);
@@ -398,19 +399,18 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         for _ in 0..129 {
             let is_odd = e.is_odd(cs);
             let naf_sign = mod_signed(e.inner[0]);
-            // TODO: need to do an overflowing sub with 2^31
-            let naf_sign_is_negative = naf_sign < 0;
+            let (_, naf_sign_is_positive) = naf_sign.overflowing_sub(cs, overflow_checker);
             let neg_naf_sign = naf_sign.negate(cs);
             let naf_value = Selectable::conditionally_select(
                 cs,
-                naf_sign_is_negative,
-                &neg_naf_sign,
+                naf_sign_is_positive,
                 &naf_sign,
+                &neg_naf_sign,
             );
             let (added, _) = e.inner[0].overflowing_add(cs, naf_value);
             let (subbed, _) = e.inner[0].overflowing_sub(cs, naf_value);
             e.inner[0] =
-                Selectable::conditionally_select(cs, &naf_sign_is_negative, &added, &subbed);
+                Selectable::conditionally_select(cs, naf_sign_is_positive, &added, &subbed);
             let next = Selectable::conditionally_select(cs, is_odd, &naf_sign, &zero);
 
             let next_neg = next.negate(cs);
@@ -431,9 +431,9 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             let is_zero = naf.is_zero(cs);
             let mut p_1 = table[(naf.abs() >> 1) as usize];
             // TODO: need to do an overflowing sub with 2^31
-            let naf_is_negative = naf < 0;
+            let (_, naf_is_positive) = naf.overflowing_sub(cs, overflow_checker);
             let p_1_neg = p_1.negated(cs);
-            let mut p_1 = Selectable::conditionally_select(cs, naf_is_negative, &p_1_neg, &p_1);
+            let mut p_1 = Selectable::conditionally_select(cs, naf_is_positive, &p_1, &p_1_neg);
             let acc_added = acc.add_mixed(cs, &mut p_1);
             acc = Selectable::conditionally_select(cs, is_zero, &acc, &acc_added);
         };
