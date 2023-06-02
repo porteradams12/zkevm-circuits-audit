@@ -395,24 +395,25 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         let mut naf = vec![];
         let mut e = convert_field_element_to_uint256(cs, e);
         // Loop for max amount of bits in e to ensure homogenous circuit
-        for _ in (0..129) {
-            // TODO: implement is_odd
-            let next = if e.is_odd() {
-                let naf_sign = mod_signed(e.inner[0]);
-                // TODO: need to do an overflowing sub with 2^31
-                if naf_sign < 0 {
-                    // TODO: how do we do this? assuming just bitflips
-                    let neg_naf_sign = naf_sign.negate(cs);
-                    (e.inner[0], _) = e.inner[0].overflowing_add(cs, neg_naf_sign);
-                } else {
-                    (e.inner[0], _) = e.inner[0].overflowing_sub(cs, naf_sign);
-                }
-                naf_sign
-            } else {
-                zero
-            };
+        for _ in 0..129 {
+            let is_odd = e.is_odd(cs);
+            let naf_sign = mod_signed(e.inner[0]);
+            // TODO: need to do an overflowing sub with 2^31
+            let naf_sign_is_negative = naf_sign < 0;
+            let neg_naf_sign = naf_sign.negate(cs);
+            let naf_value = Selectable::conditionally_select(
+                cs,
+                naf_sign_is_negative,
+                &neg_naf_sign,
+                &naf_sign,
+            );
+            let (added, _) = e.inner[0].overflowing_add(cs, naf_value);
+            let (subbed, _) = e.inner[0].overflowing_sub(cs, naf_value);
+            e.inner[0] =
+                Selectable::conditionally_select(cs, &naf_sign_is_negative, &added, &subbed);
+            let next = Selectable::conditionally_select(cs, is_odd, &naf_sign, &zero);
 
-            let next_neg = next.negated(cs);
+            let next_neg = next.negate(cs);
             let next = Selectable::conditionally_select(cs, neg, &next, &next_neg);
             naf.push(next);
 
@@ -423,19 +424,27 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         naf
     };
 
+    let naf_add =
+        |table: &[SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>],
+         naf: UInt32<F>,
+         acc: &mut SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>| {
+            let is_zero = naf.is_zero(cs);
+            let mut p_1 = table[(naf.abs() >> 1) as usize];
+            // TODO: need to do an overflowing sub with 2^31
+            let naf_is_negative = naf < 0;
+            let p_1_neg = p_1.negated(cs);
+            let mut p_1 = Selectable::conditionally_select(cs, naf_is_negative, &p_1_neg, &p_1);
+            let acc_added = acc.add_mixed(cs, &mut p_1);
+            acc = Selectable::conditionally_select(cs, is_zero, &acc, &acc_added);
+        };
+
     let naf1 = to_wnaf(k1, k1_neg);
     let naf2 = to_wnaf(k2, k2_neg);
     let mut acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
-    for i in (0..max_len).rev() {
-        if i < naf_1.len() {
-            naf_add(&t_1, naf_1[i], &mut acc)
-        }
-
-        if i < naf_2.len() {
-            naf_add(&t_2, naf_2[i], &mut acc)
-        }
-
+    for i in (0..129).rev() {
+        naf_add(&t_1, naf_1[i], &mut acc);
+        naf_add(&t_2, naf_2[i], &mut acc);
         if i != 0 {
             acc = acc.double(cs);
         }
