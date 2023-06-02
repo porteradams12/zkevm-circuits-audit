@@ -6,6 +6,7 @@ use ethereum_types::U256;
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
+use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
 use crate::base_structures::{decommit_query::*, memory_query::*};
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
@@ -16,7 +17,7 @@ use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
     queue::*,
-    traits::{allocatable::CSAllocatableExt, selectable::Selectable},
+    traits::{allocatable::{CSAllocatableExt, CSAllocatable}, selectable::Selectable},
     u16::UInt16,
     u256::UInt256,
     u32::UInt32,
