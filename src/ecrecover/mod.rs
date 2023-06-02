@@ -425,17 +425,16 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     };
 
     let naf_add =
-        |table: &[SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>],
+        |table: &[(Secp256BaseNNField<F>, Secp256BaseNNField<F>)],
          naf: UInt32<F>,
          acc: &mut SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>| {
             let is_zero = naf.is_zero(cs);
             let mut p_1 = table[(naf.abs() >> 1) as usize];
-            // TODO: need to do an overflowing sub with 2^31
             let (_, naf_is_positive) = naf.overflowing_sub(cs, overflow_checker);
             let p_1_neg = p_1.negated(cs);
-            let mut p_1 = Selectable::conditionally_select(cs, naf_is_positive, &p_1, &p_1_neg);
+            *p_1 = Selectable::conditionally_select(cs, naf_is_positive, &p_1, &p_1_neg);
             let acc_added = acc.add_mixed(cs, &mut p_1);
-            acc = Selectable::conditionally_select(cs, is_zero, &acc, &acc_added);
+            *acc = Selectable::conditionally_select(cs, is_zero, &acc, &acc_added);
         };
 
     let naf1 = to_wnaf(k1, k1_neg);
@@ -443,8 +442,8 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     let mut acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
     for i in (0..129).rev() {
-        naf_add(&t_1, naf_1[i], &mut acc);
-        naf_add(&t_2, naf_2[i], &mut acc);
+        naf_add(&t1, naf1[i], &mut acc);
+        naf_add(&t2, naf2[i], &mut acc);
         if i != 0 {
             acc = acc.double(cs);
         }
