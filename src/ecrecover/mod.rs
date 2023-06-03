@@ -333,7 +333,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     // The table size, used for w-ary NAF recoding.
     const TABLE_SIZE: u32 = 1 << (GLV_WINDOW_SIZE + 1);
     let table_size = UInt32::allocated_constant(cs, TABLE_SIZE);
-    let half_table_size = UInt32::allocated_constant(cs, 1 << (GLV_WINDOW_SIZE) + 1);
+    let half_table_size = UInt32::allocated_constant(cs, 1 << GLV_WINDOW_SIZE);
     let MASK_FOR_MOD_TABLE_SIZE = UInt32::allocated_constant(cs, (TABLE_SIZE as u32) - 1);
     // The GLV table length.
     const L: usize = 1 << (GLV_WINDOW_SIZE - 1);
@@ -409,8 +409,9 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             );
             let (added, _) = e.inner[0].overflowing_add(cs, naf_value);
             let (subbed, _) = e.inner[0].overflowing_sub(cs, naf_value);
-            e.inner[0] =
-                Selectable::conditionally_select(cs, naf_sign_is_positive, &added, &subbed);
+            let e_inner_value =
+                Selectable::conditionally_select(cs, naf_sign_is_positive, &subbed, &added);
+            e.inner[0] = Selectable::conditionally_select(cs, is_odd, &e_inner_value, &e.inner[0]);
             let next = Selectable::conditionally_select(cs, is_odd, &naf_sign, &zero);
 
             let next_neg = next.negate(cs);
@@ -637,33 +638,30 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     println!("{:?}", s_times_x_affine.1.witness_hook(cs)().unwrap());
 
     // let hash_times_g = Secp256FixedBaseMulGate::new(message_hash_by_r_inv);
-    let mut q_acc =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
+    // let mut s_times_x =
+    //     SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
 
-    let s_by_r_inv_bits: Vec<_> = s_by_r_inv
-        .limbs
-        .iter()
-        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
-        .flatten()
-        .collect();
-    for (cycle, x_bit) in s_by_r_inv_bits.into_iter().rev().enumerate() {
-        if cycle != 0 {
-            q_acc = q_acc.double(cs);
-        }
-        let q_plus_x = q_acc.add_mixed(
-            cs,
-            &mut (recovered_point.x.clone(), recovered_point.y.clone()),
-        );
-        let mut q_acc: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> =
-            Selectable::conditionally_select(cs, x_bit, &q_plus_x, &q_acc);
-    }
-    let (mut q_acc, _) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
-    println!("{:?}", q_acc.0.witness_hook(cs)().unwrap());
-    println!("{:?}", q_acc.1.witness_hook(cs)().unwrap());
+    // let s_by_r_inv_bits: Vec<_> = s_by_r_inv
+    //     .limbs
+    //     .iter()
+    //     .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
+    //     .flatten()
+    //     .collect();
+    // for (cycle, x_bit) in s_by_r_inv_bits.into_iter().rev().enumerate() {
+    //     if cycle != 0 {
+    //         s_times_x = s_times_x.double(cs);
+    //     }
+    //     let q_plus_x = s_times_x.add_mixed(
+    //         cs,
+    //         &mut (recovered_point.x.clone(), recovered_point.y.clone()),
+    //     );
+    //     s_times_x = Selectable::conditionally_select(cs, x_bit, &q_plus_x, &s_times_x);
+    // }
 
     let mut q_acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
     let mut generator = Secp256Affine::one();
+    generator.negate();
     let (x, y) = generator.into_xy_unchecked();
     let x = Secp256BaseNNField::allocated_constant(cs, x, base_field_params);
     let y = Secp256BaseNNField::allocated_constant(cs, y, base_field_params);
@@ -680,12 +678,11 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
             q_acc = q_acc.double(cs);
         }
         let q_plus_x = q_acc.add_mixed(cs, &mut generator);
-        let mut q_acc: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> =
-            Selectable::conditionally_select(cs, hash_bit, &q_plus_x, &q_acc);
+        q_acc = Selectable::conditionally_select(cs, hash_bit, &q_plus_x, &q_acc);
     }
 
     let (mut q_acc, _) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
-    let mut q_acc = s_times_x.sub_mixed(cs, &mut q_acc);
+    let mut q_acc = s_times_x.add_mixed(cs, &mut q_acc);
 
     let ((mut q_x, mut q_y), is_infinity) =
         q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
