@@ -364,12 +364,12 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         .expect("table must exist");
     let mask_for_mod_table_size_bytes = MASK_FOR_MOD_TABLE_SIZE.to_le_bytes(cs);
 
-    let mod_signed = |d: UInt32<F>| {
+    let mod_signed = |cs: &mut CS, d: UInt32<F>| {
         let d_bytes = d.to_le_bytes(cs);
         let d_mod_window_size = d_bytes
             .iter()
             .zip(mask_for_mod_table_size_bytes)
-            .map(|(one, two)| {
+            .map(|(one, two)| unsafe {
                 UInt8::from_variable_unchecked(
                     cs.perform_lookup::<2, 1>(
                         and_table_id,
@@ -392,13 +392,13 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     };
     let zero = UInt32::zero(cs);
     let overflow_checker = UInt32::allocated_constant(cs, 2u32.pow(31));
-    let to_wnaf = |e: Secp256ScalarNNField<F>, neg: Boolean<F>| -> Vec<UInt32<F>> {
+    let to_wnaf = |cs: &mut CS, e: Secp256ScalarNNField<F>, neg: Boolean<F>| -> Vec<UInt32<F>> {
         let mut naf = vec![];
         let mut e = convert_field_element_to_uint256(cs, e);
         // Loop for max amount of bits in e to ensure homogenous circuit
         for _ in 0..129 {
             let is_odd = e.is_odd(cs);
-            let naf_sign = mod_signed(e.inner[0]);
+            let naf_sign = mod_signed(cs, e.inner[0]);
             let (_, naf_sign_is_positive) = naf_sign.overflowing_sub(cs, overflow_checker);
             let neg_naf_sign = naf_sign.negate(cs);
             let naf_value = Selectable::conditionally_select(
@@ -417,33 +417,39 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             let next = Selectable::conditionally_select(cs, neg, &next, &next_neg);
             naf.push(next);
 
-            // TODO: implement div2
-            e.div2();
+            e = e.div2(cs);
         }
 
         naf
     };
 
     let naf_add =
-        |table: &[(Secp256BaseNNField<F>, Secp256BaseNNField<F>)],
+        |cs: &mut CS,
+         table: &[(Secp256BaseNNField<F>, Secp256BaseNNField<F>)],
          naf: UInt32<F>,
          acc: &mut SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>| {
             let is_zero = naf.is_zero(cs);
-            let mut p_1 = table[(naf.abs() >> 1) as usize];
+            let mut coords = &table[(naf.abs(cs).div2(cs)).witness_hook(cs)().unwrap() as usize];
+            let mut p_1 =
+                SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(
+                    cs,
+                    coords.0.clone(),
+                    coords.1.clone(),
+                );
             let (_, naf_is_positive) = naf.overflowing_sub(cs, overflow_checker);
             let p_1_neg = p_1.negated(cs);
-            *p_1 = Selectable::conditionally_select(cs, naf_is_positive, &p_1, &p_1_neg);
-            let acc_added = acc.add_mixed(cs, &mut p_1);
+            p_1 = Selectable::conditionally_select(cs, naf_is_positive, &p_1, &p_1_neg);
+            let acc_added = acc.add_mixed(cs, &mut (p_1.x, p_1.y));
             *acc = Selectable::conditionally_select(cs, is_zero, &acc, &acc_added);
         };
 
-    let naf1 = to_wnaf(k1, k1_neg);
-    let naf2 = to_wnaf(k2, k2_neg);
+    let naf1 = to_wnaf(cs, k1, k1_neg);
+    let naf2 = to_wnaf(cs, k2, k2_neg);
     let mut acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
     for i in (0..129).rev() {
-        naf_add(&t1, naf1[i], &mut acc);
-        naf_add(&t2, naf2[i], &mut acc);
+        naf_add(cs, &t1, naf1[i], &mut acc);
+        naf_add(cs, &t2, naf2[i], &mut acc);
         if i != 0 {
             acc = acc.double(cs);
         }
@@ -1137,6 +1143,12 @@ mod test {
         // add tables
         let table = create_xor8_table();
         owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+
+        let table = create_or8_table();
+        owned_cs.add_lookup_table::<Or8Table, 3>(table);
+
+        let table = create_div_two8_table();
+        owned_cs.add_lookup_table::<DivTwo8Table, 3>(table);
 
         let table = create_and8_table();
         owned_cs.add_lookup_table::<And8Table, 3>(table);
