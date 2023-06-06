@@ -3,8 +3,6 @@ use super::*;
 pub mod input;
 pub use self::input::*;
 
-pub mod keccak_aggregator;
-
 use boojum::cs::implementations::verifier::VerificationKey;
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
@@ -26,23 +24,15 @@ use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 
-// performs recursion between "independent" units for FIXED verification key
+// We recursively verify SINGLE proofs over FIXED VK and output it's inputs
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug)]
 #[serde(bound = "H::Output: serde::Serialize + serde::de::DeserializeOwned")]
-pub struct InterblockRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
+pub struct CompressionRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
     pub proof_config: ProofConfig,
     pub verification_key: VerificationKey<F, H>,
-    pub capacity: usize,
     pub padding_proof: Proof<F, H, EXT>,
-}
-
-pub trait InputAggregationFunction<F: SmallField> {
-    type Params;
-
-    fn new<CS: ConstraintSystem<F>>(cs: &mut CS, params: Self::Params) -> Self;
-    fn aggregate_inputs<CS: ConstraintSystem<F>>(&self, cs: &mut CS, inputs: &[Vec<Num<F>>], validity_flags: &[Boolean<F>]) -> Vec<Num<F>>;
 }
 
 pub fn interblock_recursion_function<
@@ -61,24 +51,20 @@ pub fn interblock_recursion_function<
         TransciptParameters = TR::TransciptParameters,
     >,
     POW: RecursivePoWRunner<F>,
-    AGG: InputAggregationFunction<F>,
 >(
     cs: &mut CS,
-    witness: InterblockRecursionCircuitInstanceWitness<F, H, EXT>,
-    config: InterblockRecursionConfig<F, H::NonCircuitSimulator, EXT>,
+    witness: CompressionCircuitInstanceWitness<F, H, EXT>,
+    config: CompressionRecursionConfig<F, H::NonCircuitSimulator, EXT>,
     verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
     transcript_params: TR::TransciptParameters,
-    aggregation_params: AGG::Params,
 ) {
-    let InterblockRecursionCircuitInstanceWitness { proof_witnesses } = witness;
-    let mut proof_witnesses = proof_witnesses;
+    let CompressionCircuitInstanceWitness { proof_witness } = witness;
 
     // as usual - create verifier for FIXED VK, verify, aggregate inputs, output inputs
 
-    let InterblockRecursionConfig {
+    let CompressionRecursionConfig {
         proof_config,
         verification_key,
-        capacity,
         padding_proof,
     } = config;
 
@@ -94,56 +80,40 @@ pub fn interblock_recursion_function<
 
     let cs = unsafe { &mut *r };
 
-    let mut validity_flags = Vec::with_capacity(capacity);
-    let mut inputs = Vec::with_capacity(capacity);
-
     let vk = AllocatedVerificationKey::allocate_constant(cs, verification_key);
 
-    for _ in 0..capacity {
-        // here we do the trick to protect ourselves from setup pending from witness, but
-        // nevertheless do not create new types for proofs with fixed number of inputs, etc
-        let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
-            padding_proof.clone()
+    // here we do the trick to protect ourselves from setup pending from witness, but
+    // nevertheless do not create new types for proofs with fixed number of inputs, etc
+    let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
+        padding_proof
+    } else {
+        if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
+            // proving mode
+            proof_witness.unwrap()
         } else {
-            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
-                // proving mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            } else {
-                // we are in the testing mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            }
-        };
-        let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
+            // we are in the testing mode
+            proof_witness.unwrap()
+        }
+    };
+    let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
 
-        // verify the proof
-        let (is_valid, public_inputs) = verifier.verify::<H, TR, CTR, POW>(
-            cs,
-            transcript_params.clone(),
-            &proof,
-            &fixed_parameters,
-            &proof_config,
-            &vk,
-        );
-
-        assert_eq!(public_inputs.len(), INPUT_OUTPUT_COMMITMENT_LENGTH);
-        assert_eq!(public_inputs.len(), fixed_parameters.num_public_inputs());
-
-        validity_flags.push(is_valid);
-        inputs.push(public_inputs);
-    }
-
-    // now actually aggregate
-
-    let aggregator = AGG::new(cs, aggregation_params);
-    let aggregated_input = aggregator.aggregate_inputs(
+    // verify the proof
+    let (is_valid, public_inputs) = verifier.verify::<H, TR, CTR, POW>(
         cs,
-        &inputs,
-        &validity_flags,
+        transcript_params.clone(),
+        &proof,
+        &fixed_parameters,
+        &proof_config,
+        &vk,
     );
 
-    assert_eq!(aggregated_input.len(), INPUT_OUTPUT_COMMITMENT_LENGTH);
+    let boolean_true = Boolean::allocated_constant(cs, true);
+    Boolean::enforce_equal(cs, &is_valid, &boolean_true);
 
-    for el in aggregated_input.into_iter() {
+    assert_eq!(public_inputs.len(), INPUT_OUTPUT_COMMITMENT_LENGTH);
+    assert_eq!(public_inputs.len(), fixed_parameters.num_public_inputs());
+
+    for el in public_inputs.into_iter() {
         use boojum::cs::gates::PublicInputGate;
         let gate = PublicInputGate::new(el.get_variable());
         gate.add_to_cs(cs);

@@ -25,8 +25,6 @@ cs_derive = { git = "https://github.com/matter-labs/boojum.git", branch = "main"
 serde_json = "*"
 itertools = "0.10"
 rand_new = { package = "rand", version = "0.8" }
-num-integer = "0.1"
-num-traits = "0.2"
 hex = "*"
 
 

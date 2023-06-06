@@ -12,11 +12,11 @@ use boojum::gadgets::traits::allocatable::CSAllocatable;
 #[derivative(Clone, Debug, Default(bound = ""))]
 #[serde(
     bound = "<H::CircuitOutput as CSAllocatable<F>>::Witness: serde::Serialize + serde::de::DeserializeOwned")]
-pub struct InterblockRecursionCircuitInstanceWitness<
+pub struct CompressionCircuitInstanceWitness<
     F: SmallField,
     H: RecursiveTreeHasher<F, Num<F>>,
     EXT: FieldExtension<2, BaseField = F>,
 > {
     #[derivative(Debug = "ignore")]
-    pub proof_witnesses: VecDeque<Proof<F, H::NonCircuitSimulator, EXT>>,
+    pub proof_witness: Option<Proof<F, H::NonCircuitSimulator, EXT>>,
 }
