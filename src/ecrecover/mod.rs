@@ -635,27 +635,6 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     let (mut s_times_x_affine, _) =
         s_times_x.convert_to_affine_or_default(cs, Secp256Affine::one());
 
-    // let hash_times_g = Secp256FixedBaseMulGate::new(message_hash_by_r_inv);
-    // let mut s_times_x =
-    //     SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
-
-    // let s_by_r_inv_bits: Vec<_> = s_by_r_inv
-    //     .limbs
-    //     .iter()
-    //     .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
-    //     .flatten()
-    //     .collect();
-    // for (cycle, x_bit) in s_by_r_inv_bits.into_iter().rev().enumerate() {
-    //     if cycle != 0 {
-    //         s_times_x = s_times_x.double(cs);
-    //     }
-    //     let q_plus_x = s_times_x.add_mixed(
-    //         cs,
-    //         &mut (recovered_point.x.clone(), recovered_point.y.clone()),
-    //     );
-    //     s_times_x = Selectable::conditionally_select(cs, x_bit, &q_plus_x, &s_times_x);
-    // }
-
     let mut q_acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
     let mut generator = Secp256Affine::one();
