@@ -3,6 +3,7 @@ use crate::base_structures::log_query::*;
 use crate::base_structures::memory_query::*;
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
 use crate::demux_log_queue::StorageLogQueue;
+use crate::ecrecover::secp256k1::fixed_base_mul_table::FixedBaseMulTable;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::fsm_input_output::*;
 use arrayvec::ArrayVec;
@@ -635,6 +636,88 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     let (mut s_times_x_affine, _) =
         s_times_x.convert_to_affine_or_default(cs, Secp256Affine::one());
 
+    let mut hash_times_g = {
+        let bytes = message_hash_by_r_inv
+            .limbs
+            .iter()
+            .flat_map(|el| unsafe { UInt16::from_variable_unchecked(*el).to_le_bytes(cs) })
+            .collect::<Vec<UInt8<F>>>();
+
+        let fixed_base_mul_table_id_0 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<0>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_1 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<1>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_2 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<2>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_3 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<3>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_4 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<4>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_5 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<5>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_6 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<6>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_7 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<7>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_8 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<8>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_9 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<9>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_10 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<10>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_11 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<11>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_12 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<12>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_13 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<13>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_14 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<14>>()
+            .expect("table must exist");
+        let fixed_base_mul_table_id_15 = cs
+            .get_table_id_for_marker::<FixedBaseMulTable<15>>()
+            .expect("table must exist");
+        let mut acc = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(
+            cs,
+            base_field_params,
+        );
+        bytes.iter().enumerate().rev().for_each(|(i, el)| {
+            let index = UInt8::allocated_constant(cs, i as u8).get_variable();
+            let res = cs
+                .perform_lookup::<2, 16>(fixed_base_mul_table_id, &[el.get_variable(), index])
+                .into_iter()
+                .map(|v| unsafe { UInt32::from_variable_unchecked(v) })
+                .collect::<Vec<UInt32<F>>>();
+            let mut x = [UInt32::zero(cs); 8];
+            x.copy_from_slice(&res[..8]);
+            let x = UInt256 { inner: x };
+            let x = convert_uint256_to_field_element(cs, &x, base_field_params);
+            let mut y = [UInt32::zero(cs); 8];
+            y.copy_from_slice(&res[8..]);
+            let y = UInt256 { inner: y };
+            let y = convert_uint256_to_field_element(cs, &y, base_field_params);
+            acc = acc.add_mixed(cs, &mut (x, y));
+        });
+        acc
+    };
+    let (hash_times_g, _) = hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
+    println!("{:?}", hash_times_g.0.witness_hook(cs)().unwrap());
+    println!("{:?}", hash_times_g.1.witness_hook(cs)().unwrap());
+
     let mut q_acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
     let mut generator = Secp256Affine::one();
@@ -659,6 +742,8 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     }
 
     let (mut q_acc, _) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
+    println!("{:?}", q_acc.0.witness_hook(cs)().unwrap());
+    println!("{:?}", q_acc.1.witness_hook(cs)().unwrap());
     let mut q_acc = s_times_x.add_mixed(cs, &mut q_acc);
 
     let ((mut q_x, mut q_y), is_infinity) =
@@ -1019,6 +1104,9 @@ mod test {
         u256
     }
 
+    use crate::ecrecover::secp256k1::fixed_base_mul_table::{
+        create_fixed_base_mul_table, FixedBaseMulTable,
+    };
     use boojum::cs::cs_builder::*;
     use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
     use boojum::cs::gates::*;
@@ -1126,6 +1214,39 @@ mod test {
 
         let table = create_and8_table();
         owned_cs.add_lookup_table::<And8Table, 3>(table);
+
+        let table = create_fixed_base_mul_table::<F, 0>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<0>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 1>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<1>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 2>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<2>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 3>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<3>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 4>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<4>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 5>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<5>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 6>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<6>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 7>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<7>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 8>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<8>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 9>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<9>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 10>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<10>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 11>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<11>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 12>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<12>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 13>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<13>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 14>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<14>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 15>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<15>, 3>(table);
 
         let table = create_byte_split_table::<F, 1>();
         owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
