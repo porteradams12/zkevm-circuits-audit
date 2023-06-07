@@ -5,8 +5,6 @@
 #![feature(generic_const_exprs)]
 #![feature(array_chunks)]
 #![feature(more_qualified_paths)]
-#![feature(const_eval_limit)]
-#![const_eval_limit = "100000000"]
 
 use derivative::*;
 
