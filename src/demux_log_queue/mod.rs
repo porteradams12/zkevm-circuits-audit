@@ -459,7 +459,7 @@ pub fn check_if_bitmask_and_if_empty<F: SmallField, CS: ConstraintSystem<F>, con
 mod tests { 
     use super::*;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
-    use boojum::cs::toolboxes::gate_config::{GatePlacementStrategy};
+    use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
@@ -469,6 +469,7 @@ mod tests {
     use ethereum_types::{Address, U256};
     use boojum::gadgets::u160::UInt160;
     use boojum::gadgets::u256::UInt256;
+    use boojum::gadgets::u32::UInt32;
     use boojum::gadgets::u8::UInt8;
     type F = GoldilocksField;
     type P = GoldilocksField;
