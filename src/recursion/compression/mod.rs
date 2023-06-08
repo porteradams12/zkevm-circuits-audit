@@ -35,7 +35,7 @@ pub struct CompressionRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: Fiel
     pub padding_proof: Proof<F, H, EXT>,
 }
 
-pub fn interblock_recursion_function<
+pub fn proof_compression_function<
     F: SmallField,
     CS: ConstraintSystem<F> + 'static,
     H: RecursiveTreeHasher<F, Num<F>>,
