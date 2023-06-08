@@ -3,7 +3,6 @@ use super::*;
 pub mod input;
 
 use crate::fsm_input_output::ClosedFormInputCompactForm;
-
 use crate::base_structures::{
     log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
     vm_state::*,
@@ -14,11 +13,12 @@ use boojum::field::SmallField;
 use boojum::gadgets::queue::queue_optimizer::SpongeOptimizer;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::u8::UInt8;
+use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
     queue::*,
-    traits::{allocatable::CSAllocatableExt, selectable::Selectable},
+    traits::{allocatable::CSAllocatableExt, selectable::Selectable, encodable::CircuitEncodableExt},
     u160::*,
 };
 
@@ -260,11 +260,11 @@ pub fn demultiplex_storage_logs_inner<
     );
 
     // we have 6 queues to demux into, and up to 3 sponges per any push
-    use crate::base_structures::log_query::LOG_QUERY_ABSORBTION_ROUNDS;
-    let mut optimizer = SpongeOptimizer::<F, R, 8, 12, 4, 6>::new(LOG_QUERY_ABSORBTION_ROUNDS);
+    // use crate::base_structures::log_query::LOG_QUERY_ABSORBTION_ROUNDS;
+    // let mut optimizer = SpongeOptimizer::<F, R, 8, 12, 4, 6>::new(LOG_QUERY_ABSORBTION_ROUNDS * limit);
 
     for _ in 0..limit {
-        debug_assert!(optimizer.is_fresh());
+        // debug_assert!(optimizer.is_fresh());
 
         let queue_is_empty = storage_log_queue.is_empty(cs);
         let execute = queue_is_empty.negated(cs);
@@ -310,47 +310,70 @@ pub fn demultiplex_storage_logs_inner<
         let execute_ecrecover_call =
             Boolean::multi_and(cs, &[is_precompile_aux_byte, is_ecrecover_address, execute]);
 
-        rollup_storage_queue.push_with_optimizer(
-            cs,
-            popped.0,
+        // rollup_storage_queue.push_encoding_with_optimizer_without_changing_witness(
+        //     cs, 
+        //     popped.1, 
+        //     execute_rollup_storage, 
+        //     LogType::RollupStorage as usize, 
+        //     &mut optimizer
+        // );
+        // events_queue.push_encoding_with_optimizer_without_changing_witness(
+        //     cs, 
+        //     popped.1, 
+        //     execute_event, 
+        //     LogType::Events as usize, 
+        //     &mut optimizer
+        // );
+        // l1_messages_queue.push_encoding_with_optimizer_without_changing_witness(
+        //     cs, 
+        //     popped.1, 
+        //     execute_l1_message, 
+        //     LogType::L1Messages as usize, 
+        //     &mut optimizer
+        // );
+        // keccak_calls_queue.push_encoding_with_optimizer_without_changing_witness(
+        //     cs, 
+        //     popped.1, 
+        //     execute_keccak_call, 
+        //     LogType::KeccakCalls as usize, 
+        //     &mut optimizer
+        // );
+        // sha256_calls_queue.push_encoding_with_optimizer_without_changing_witness(
+        //     cs, 
+        //     popped.1, 
+        //     execute_sha256_call, 
+        //     LogType::Sha256Calls as usize, 
+        //     &mut optimizer
+        // );
+        // ecdsa_calls_queue.push_encoding_with_optimizer_without_changing_witness(
+        //     cs, 
+        //     popped.1, 
+        //     execute_ecrecover_call, 
+        //     LogType::ECRecoverCalls as usize, 
+        //     &mut optimizer
+        // );
+
+        let bitmask = [
             execute_rollup_storage,
-            LogType::RollupStorage as usize,
-            &mut optimizer,
-        );
-        events_queue.push_with_optimizer(
-            cs,
-            popped.0,
             execute_event,
-            LogType::Events as usize,
-            &mut optimizer,
-        );
-        l1_messages_queue.push_with_optimizer(
-            cs,
-            popped.0,
             execute_l1_message,
-            LogType::L1Messages as usize,
-            &mut optimizer,
-        );
-        keccak_calls_queue.push_with_optimizer(
-            cs,
-            popped.0,
             execute_keccak_call,
-            LogType::KeccakCalls as usize,
-            &mut optimizer,
-        );
-        sha256_calls_queue.push_with_optimizer(
-            cs,
-            popped.0,
             execute_sha256_call,
-            LogType::Sha256Calls as usize,
-            &mut optimizer,
-        );
-        ecdsa_calls_queue.push_with_optimizer(
-            cs,
-            popped.0,
             execute_ecrecover_call,
-            LogType::ECRecoverCalls as usize,
-            &mut optimizer,
+        ];
+
+        push_with_optimize(
+            cs,
+            [
+                rollup_storage_queue,
+                events_queue,
+                l1_messages_queue,
+                keccak_calls_queue,
+                sha256_calls_queue,
+                ecdsa_calls_queue,
+            ],
+            bitmask,
+            popped.0,
         );
 
         let expected_bitmask_bits = [
@@ -363,14 +386,59 @@ pub fn demultiplex_storage_logs_inner<
         let is_bitmask = check_if_bitmask_and_if_empty(cs, expected_bitmask_bits);
         is_bitmask.conditionally_enforce_true(cs, execute);
 
-        // we enforce optimizer in this round, and it clears it up
-        optimizer.enforce(cs);
+        // // we enforce optimizer in this round, and it clears it up
+        // optimizer.enforce(cs);
     }
 
     storage_log_queue.enforce_consistency(cs);
 
     // checks in "Drop" interact badly with some tools, so we check it during testing instead
-    debug_assert!(optimizer.is_fresh());
+    // debug_assert!(optimizer.is_fresh());
+}
+
+pub fn push_with_optimize<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    EL: CircuitEncodableExt<F, N>,
+    const AW: usize,
+    const SW: usize,
+    const CW: usize,
+    const T: usize,
+    const N: usize,
+    R: CircuitRoundFunction<F, AW, SW, CW>,
+    const NUM_QUEUE: usize,
+>(
+    cs: &mut CS,
+    mut queues: [&mut CircuitQueue<F, EL, AW, SW, CW, T, N, R>; NUM_QUEUE],
+    bitmask: [Boolean<F>; NUM_QUEUE],
+    value_encoding: EL,
+) where
+    [(); <EL as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
+    let mut states = queues.iter().map(|x| x.into_state());
+    let mut state = states.next().unwrap();
+
+    for (bit, next_state) in bitmask.iter().skip(1).zip(states) {
+        state = QueueState::conditionally_select(cs, *bit, &next_state, &state);
+    }
+
+    let mut exec_queue = CircuitQueue::<F, EL, AW, SW, CW, T, N, R>::from_raw_parts(
+        cs,
+        state.head,
+        state.tail.tail,
+        state.tail.length,
+    );
+
+    let boolean_true = Boolean::allocated_constant(cs, true);
+
+    exec_queue.push(cs, value_encoding, boolean_true);
+
+    for (bit, queue) in bitmask.into_iter().zip(queues.iter_mut()) {
+        // We don't need to update head
+        // queue.head = <[Num<F>; T]>::conditionally_select(cs, bit, &exec_queue.head, &queue.head);
+        queue.tail = <[Num<F>; T]>::conditionally_select(cs, bit, &exec_queue.tail, &queue.tail);
+        queue.length = UInt32::conditionally_select(cs, bit, &exec_queue.length, &queue.length);
+    }
 }
 
 pub fn check_if_bitmask_and_if_empty<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(

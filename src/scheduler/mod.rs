@@ -16,6 +16,7 @@ use boojum::field::SmallField;
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
@@ -31,10 +32,12 @@ use crate::base_structures::memory_query::MemoryQueue;
 
 use crate::base_structures::recursion_query::*;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use crate::linear_hasher::input::LinearHasherOutputData;
 use crate::recursion::VK_COMMITMENT_LENGTH;
 use crate::scheduler::aux::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
+use boojum::config::*;
 
 use crate::base_structures::precompile_input_outputs::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -186,10 +189,10 @@ pub fn scheduler_function<
         witness.l1messages_sorter_observable_output.clone(),
     );
 
-    // let l1messages_linear_hasher_observable_output = PubdataHasherOutputData::allocate(
-    //     cs,
-    //     l1messages_linear_hasher_observable_output,
-    // );
+    let l1messages_linear_hasher_observable_output = LinearHasherOutputData::allocate(
+        cs,
+        witness.l1messages_linear_hasher_observable_output,
+    );
 
     // auxilary intermediate states
     let rollup_storage_sorter_intermediate_queue_state = QueueTailState::allocate(
@@ -349,13 +352,13 @@ pub fn scheduler_function<
             round_function,
         );
 
-    // let (l1_messages_hasher_input_com, l1_messages_hasher_output_com) =
-    //     compute_pubdata_hasher_circuit_commitment(
-    //         cs,
-    //         &l1messages_sorter_observable_output.final_queue_state,
-    //         &l1messages_linear_hasher_observable_output.pubdata_hash,
-    //         round_function,
-    //     );
+    let (l1_messages_hasher_input_com, l1_messages_hasher_output_com) =
+        compute_hasher_circuit_commitment(
+            cs,
+            &l1messages_sorter_observable_output.final_queue_state,
+            &l1messages_linear_hasher_observable_output.keccak256_hash,
+            round_function,
+        );
 
     const NUM_PROCESSABLE_SHARDS: usize = 1;
 
@@ -473,10 +476,10 @@ pub fn scheduler_function<
                     BaseLayerCircuitType::StorageApplicator,
                     storage_applicator_input_commitments[0],
                 ),
-                // (
-                //     BaseLayerCircuitType::L1MessagesHasher,
-                //     l1_messages_hasher_input_com
-                // ),
+                (
+                    BaseLayerCircuitType::L1MessagesHasher,
+                    l1_messages_hasher_input_com
+                ),
             ]
             .into_iter(),
         );
@@ -510,6 +513,10 @@ pub fn scheduler_function<
                     ecrecover_circuit_observable_output_commitment,
                 ),
                 (
+                    BaseLayerCircuitType::RamValidation,
+                    [zero_num; CLOSED_FORM_COMMITTMENT_LENGTH], // formally set here
+                ),
+                (
                     BaseLayerCircuitType::EventsRevertsFilter,
                     events_filter_output_com,
                 ),
@@ -525,10 +532,10 @@ pub fn scheduler_function<
                     BaseLayerCircuitType::StorageApplicator,
                     storage_applicator_output_commitments[0],
                 ),
-                // (
-                //     BaseLayerCircuitType::L1MessagesHasher,
-                //     l1_messages_hasher_output_com
-                // ),
+                (
+                    BaseLayerCircuitType::L1MessagesHasher,
+                    l1_messages_hasher_output_com
+                ),
             ]
             .into_iter(),
         );
@@ -623,8 +630,9 @@ pub fn scheduler_function<
             .length
             .is_zero(cs),
     );
+    // In practice we do NOT skip it
     // skip_flags[(BaseLayerCircuitType::L1MessagesHasher as u8 as usize) - 1] = Some(
-    //     log_demuxer_observable_output.events_access_queue_state.tail.length.is_zero(cs)
+    //     l1messages_sorter_observable_output.final_queue_state.tail.length.is_zero(cs)
     // );
 
     // now we just walk one by one
@@ -671,7 +679,8 @@ pub fn scheduler_function<
             let sample_circuit_commitment = input_commitments_as_map
                 .get(circuit_type)
                 .cloned()
-                .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
+                .expect(&format!("circuit input commitment for type {:?}", circuit_type));
+                // .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
 
             let validate = if let Some(skip_flag) = skip_flag {
                 Boolean::multi_and(cs, &[*stage_flag, execution_flag, *skip_flag])
@@ -679,20 +688,31 @@ pub fn scheduler_function<
                 Boolean::multi_and(cs, &[*stage_flag, execution_flag])
             };
 
+            let validate_input = validate; // input commitment is ALWAYS the same for all the circuits of some type
+
             conditionally_enforce_circuit_commitment(
                 cs,
-                validate,
+                validate_input,
                 &closed_form_input.observable_input_committment,
                 &sample_circuit_commitment,
             );
 
+            let validate_output = if let Some(skip_flag) = skip_flag {
+                let not_skip = skip_flag.negated(cs);
+                Boolean::multi_and(cs, &[closed_form_input.completion_flag, not_skip, *stage_flag])
+            } else {
+                Boolean::multi_and(cs, &[closed_form_input.completion_flag, *stage_flag])
+            };
+
             let sample_circuit_commitment = output_commitments_as_map
                 .get(circuit_type)
                 .cloned()
-                .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
+                .expect(&format!("circuit output commitment for type {:?}", circuit_type));
+                // .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
+
             conditionally_enforce_circuit_commitment(
                 cs,
-                validate,
+                validate_output,
                 &closed_form_input.observable_output_committment,
                 &sample_circuit_commitment,
             );
@@ -702,6 +722,7 @@ pub fn scheduler_function<
             } else {
                 closed_form_input.completion_flag
             };
+
             let stage_just_finished =
                 Boolean::multi_and(cs, &[should_start_next, execution_flag, *stage_flag]);
             next_mask[idx] = stage_just_finished;
@@ -747,18 +768,26 @@ pub fn scheduler_function<
 
         previous_completion_flag = Boolean::multi_or(cs, &next_mask);
         // for the next stage we do shifted AND
-        let src = execution_stage_bitmask;
+        let mut tmp = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
         // note skip(1)
-        for ((a, b), dst) in src
-            .iter()
-            .zip(next_mask.iter())
-            .zip(execution_stage_bitmask.iter_mut().skip(1))
+        for (idx, start_next) in next_mask.iter().enumerate()
         {
-            *dst = Boolean::multi_and(cs, &[*a, *b]);
+            let finished_this_stage = *start_next;
+            let not_finished = finished_this_stage.negated(cs);
+            let proceed_current = Boolean::multi_and(cs, &[execution_stage_bitmask[idx], not_finished]);
+            // update 
+            let start_as_next = tmp[idx];
+            let do_this_stage = Boolean::multi_or(cs, &[start_as_next, proceed_current]);
+            execution_stage_bitmask[idx] = do_this_stage;
+            if idx + 1 < NUM_CIRCUIT_TYPES_TO_SCHEDULE {
+                tmp[idx+1] = finished_this_stage;
+            }
         }
+
         // and check if we are done
-        let finished = Boolean::multi_and(cs, &[*src.last().unwrap(), *next_mask.last().unwrap()]);
-        let should_continue = finished.negated(cs);
+        let just_finished = *next_mask.last().unwrap();
+        let should_continue = just_finished.negated(cs);
+
         execution_flag = Boolean::multi_and(cs, &[execution_flag, should_continue]);
     }
 
@@ -771,32 +800,13 @@ pub fn scheduler_function<
         .clone()
         .map(|el| RecursionLeafParameters::allocate(cs, el));
 
-    let leaf_layer_parameters_commitment =
-        <[Num<F>; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH]>::allocate(
-            cs,
-            witness.leaf_layer_parameters_commitment,
-        );
-    let computed_leaf_layer_parameters_commitment: [_; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH] =
+    let leaf_layer_parameters_commitment: [_; LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &leaf_layer_parameters, round_function);
-    for (a, b) in leaf_layer_parameters_commitment
-        .iter()
-        .zip(computed_leaf_layer_parameters_commitment.iter())
-    {
-        Num::enforce_equal(cs, a, b);
-    }
 
-    let node_layer_vk_commitment =
-        <[Num<F>; VK_COMMITMENT_LENGTH]>::allocate(cs, witness.node_layer_vk_commitment);
     let node_layer_vk =
-        AllocatedVerificationKey::<F, H>::allocate(cs, witness.node_leyer_vk_witness.clone());
-    let recomputed_node_vk_commitment: [_; VK_COMMITMENT_LENGTH] =
+        AllocatedVerificationKey::<F, H>::allocate(cs, witness.node_layer_vk_witness.clone());
+    let node_layer_vk_commitment: [_; VK_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &node_layer_vk, round_function);
-    for (a, b) in node_layer_vk_commitment
-        .iter()
-        .zip(recomputed_node_vk_commitment.iter())
-    {
-        Num::enforce_equal(cs, a, b);
-    }
 
     let mut proof_witnesses = witness.proof_witnesses;
 
@@ -835,9 +845,24 @@ pub fn scheduler_function<
         let expected_input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
             commit_variable_length_encodable_item(cs, &input, round_function);
 
-        let proof_witness = proof_witnesses
-            .pop_front()
-            .unwrap_or(config.padding_proof.clone());
+        // here we do the trick to protect ourselves from setup pending from witness, but
+        // nevertheless do not create new types for proofs with fixed number of inputs, etc
+        let proof_witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
+            config.padding_proof.clone()
+        } else {
+            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
+                // proving mode
+                proof_witnesses
+                .pop_front()
+                .unwrap_or(config.padding_proof.clone())
+            } else {
+                // we are in the testing mode
+                proof_witnesses
+                .pop_front()
+                .unwrap_or(config.padding_proof.clone())
+            }
+        };
+
         let proof = AllocatedProof::allocate(cs, proof_witness);
 
         let (is_valid, inputs) = verifier.verify::<H, TR, CTR, POW>(
@@ -907,7 +932,7 @@ pub fn scheduler_function<
             .state_diffs_keccak256_hash,
         bootloader_heap_initial_content,
         events_queue_state,
-        l1_messages_linear_hash: [zero_u8; 32],
+        l1_messages_linear_hash: l1messages_linear_hasher_observable_output.keccak256_hash,
     };
 
     let block_content_header = BlockContentHeader {

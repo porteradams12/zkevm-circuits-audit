@@ -554,10 +554,6 @@ mod tests {
         let mut unsorted_querie = vec![];
         let bool_false = Boolean::allocated_constant(cs, false);
         let bool_true = Boolean::allocated_constant(cs, true);
-        let zero_8 = UInt8::allocated_constant(cs, 0);
-        let one_8 = UInt8::allocated_constant(cs, 1);
-        let zero_32 = UInt32::allocated_constant(cs, 0);
-
 
         let q = MemoryQuery::<F> {
             timestamp: UInt32::allocated_constant(cs, 1025),
@@ -615,10 +611,7 @@ mod tests {
         let mut sorted_querie = vec![];
         let bool_false = Boolean::allocated_constant(cs, false);
         let bool_true = Boolean::allocated_constant(cs, true);
-        let zero_8 = UInt8::allocated_constant(cs, 0);
-        let one_8 = UInt8::allocated_constant(cs, 1);
-        let zero_32 = UInt32::allocated_constant(cs, 0);
-        
+
         let q = MemoryQuery::<F> {
             timestamp: UInt32::allocated_constant(cs, 0),
             memory_page: UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE),

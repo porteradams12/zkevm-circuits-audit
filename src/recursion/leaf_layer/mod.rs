@@ -96,7 +96,8 @@ where
 
     let RecursionLeafParameters {
         circuit_type,
-        vk_commitment,
+        leaf_layer_vk_commitment: _,
+        basic_circuit_vk_commitment,
     } = params;
 
     queue.witness = Arc::new(FullStateCircuitQueueWitness::from_inner_witness(
@@ -104,6 +105,10 @@ where
     ));
 
     queue.enforce_consistency(cs);
+
+    // small trick to simplify setup. If we have nothing to verify, we do not care about VK
+    // being one that we want
+    let is_meaningful = queue.is_empty(cs).negated(cs);
 
     let vk = AllocatedVerificationKey::<F, H>::allocate(cs, vk_witness);
     assert_eq!(
@@ -113,8 +118,8 @@ where
     let vk_commitment_computed: [_; VK_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &vk, round_function);
 
-    for (a, b) in vk_commitment.iter().zip(vk_commitment_computed.iter()) {
-        Num::enforce_equal(cs, a, b);
+    for (a, b) in basic_circuit_vk_commitment.iter().zip(vk_commitment_computed.iter()) {
+        Num::conditionally_enforce_equal(cs, is_meaningful, a, b);
     }
 
     let mut proof_witnesses = proof_witnesses;

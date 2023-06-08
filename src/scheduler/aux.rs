@@ -4,6 +4,7 @@ use crate::fsm_input_output::commit_variable_length_encodable_item;
 
 use crate::base_structures::vm_state::*;
 use crate::fsm_input_output::*;
+use crate::linear_hasher::input::LinearHasherInputData;
 use boojum::gadgets::u32::UInt32;
 
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -39,6 +40,28 @@ pub enum BaseLayerCircuitType {
     EventsRevertsFilter = 11,
     L1MessagesRevertsFilter = 12,
     L1MessagesHasher = 13,
+}
+
+impl BaseLayerCircuitType {
+    pub fn from_numeric_value(value: u8) -> Self {
+        match value {
+            a if a == Self::VM as u8 => Self::VM,
+            a if a == Self::DecommitmentsFilter as u8 => Self::DecommitmentsFilter,
+            a if a == Self::Decommiter as u8 => Self::Decommiter,
+            a if a == Self::LogDemultiplexer as u8 => Self::LogDemultiplexer,
+            a if a == Self::KeccakPrecompile as u8 => Self::KeccakPrecompile,
+            a if a == Self::Sha256Precompile as u8 => Self::Sha256Precompile,
+            a if a == Self::EcrecoverPrecompile as u8 => Self::EcrecoverPrecompile,
+            a if a == Self::RamValidation as u8 => Self::RamValidation,
+            a if a == Self::StorageFilter as u8 => Self::StorageFilter,
+            a if a == Self::StorageApplicator as u8 => Self::StorageApplicator,
+            a if a == Self::EventsRevertsFilter as u8 => Self::EventsRevertsFilter,
+            a if a == Self::L1MessagesRevertsFilter as u8 => Self::L1MessagesRevertsFilter,
+            a if a == Self::L1MessagesHasher as u8 => Self::L1MessagesHasher,
+            _ => {panic!("unknown circuit type {}", value)}
+
+        }
+    }
 }
 
 #[track_caller]
@@ -148,29 +171,32 @@ pub(crate) fn compute_storage_applicator_circuit_commitment<
     (input_data_commitment, output_data_commitment)
 }
 
-// #[track_caller]
-// fn compute_hasher_circuit_commitment<
-//     F: SmallField,
-//     CS: ConstraintSystem<E>,
-//     R: CircuitArithmeticRoundFunction<E, 2, 3, StateElement = Num<E>>,
-// >(
-//     cs: &mut CS,
-//     input_queue_state: &FixedWidthEncodingGenericQueueState<E>,
-//     pubdata_hash: &Bytes32<E>,
-//     round_function: &R,
-// ) -> Result<(Num<E>, Num<E>), SynthesisError> {
-//     let input_data = PubdataHasherInputData::<E> {
-//         input_queue_state: input_queue_state.clone(),
-//     };
-//     let input_data_commitment = commit_encodable_item(cs, &input_data, round_function)?;
+#[track_caller]
+pub(crate) fn compute_hasher_circuit_commitment<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+>(
+    cs: &mut CS,
+    input_queue_state: &QueueState<F, QUEUE_STATE_WIDTH>,
+    pubdata_hash: &[UInt8<F>; 32],
+    round_function: &R,
+) -> (
+    [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH],
+    [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH],
+) {
+    let input_data = LinearHasherInputData {
+        queue_state: input_queue_state.clone(),
+    };
+    let input_data_commitment = commit_variable_length_encodable_item(cs, &input_data, round_function);
 
-//     let output_data = PubdataHasherOutputData::<E> {
-//         pubdata_hash: pubdata_hash.clone(),
-//     };
-//     let output_data_commitment = commit_encodable_item(cs, &output_data, round_function)?;
+    let output_data = LinearHasherOutputData {
+        keccak256_hash: *pubdata_hash,
+    };
+    let output_data_commitment = commit_variable_length_encodable_item(cs, &output_data, round_function);
 
-//     Ok((input_data_commitment, output_data_commitment))
-// }
+    (input_data_commitment, output_data_commitment)
+}
 
 #[track_caller]
 pub(crate) fn conditionally_enforce_circuit_commitment<F: SmallField, CS: ConstraintSystem<F>>(

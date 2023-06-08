@@ -25,7 +25,8 @@ use boojum::serde_utils::BigArraySerde;
 #[DerivePrettyComparison("true")]
 pub struct RecursionLeafParameters<F: SmallField> {
     pub circuit_type: Num<F>,
-    pub vk_commitment: [Num<F>; VK_COMMITMENT_LENGTH],
+    pub basic_circuit_vk_commitment: [Num<F>; VK_COMMITMENT_LENGTH],
+    pub leaf_layer_vk_commitment: [Num<F>; VK_COMMITMENT_LENGTH],
 }
 
 impl<F: SmallField> CSPlaceholder<F> for RecursionLeafParameters<F> {
@@ -33,7 +34,8 @@ impl<F: SmallField> CSPlaceholder<F> for RecursionLeafParameters<F> {
         let zero = Num::zero(cs);
         Self {
             circuit_type: zero,
-            vk_commitment: [zero; VK_COMMITMENT_LENGTH],
+            basic_circuit_vk_commitment: [zero; VK_COMMITMENT_LENGTH],
+            leaf_layer_vk_commitment: [zero; VK_COMMITMENT_LENGTH],
         }
     }
 }
