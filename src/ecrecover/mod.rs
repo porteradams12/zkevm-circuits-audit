@@ -329,7 +329,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
 
     // WNAF
     // The scalar multiplication window size.
-    const GLV_WINDOW_SIZE: usize = 4;
+    const GLV_WINDOW_SIZE: usize = 2;
 
     // The table size, used for w-ary NAF recoding.
     const TABLE_SIZE: u32 = 1 << (GLV_WINDOW_SIZE + 1);
