@@ -96,6 +96,43 @@ pub(crate) fn compute_precompile_commitment<
 }
 
 #[track_caller]
+pub(crate) fn compute_storage_sorter_circuit_commitment<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+>(
+    cs: &mut CS,
+    shard_id: UInt8<F>,
+    queue_state_before: &QueueState<F, QUEUE_STATE_WIDTH>,
+    intermediate_queue_state: &QueueTailState<F, QUEUE_STATE_WIDTH>,
+    queue_state_after: &QueueState<F, QUEUE_STATE_WIDTH>,
+    round_function: &R,
+) -> (
+    [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH],
+    [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH],
+) {
+    // We use here the naming events_deduplicator but the function is applicable for
+    // storage deduplicator is well - may be we should make this fact more observable
+    let mut full_state = QueueState::empty(cs);
+    full_state.tail = *intermediate_queue_state;
+    let input_data = StorageDeduplicatorInputData {
+        shard_id_to_process: shard_id,
+        unsorted_log_queue_state: queue_state_before.clone(),
+        intermediate_sorted_queue_state: full_state,
+    };
+    let input_data_commitment =
+        commit_variable_length_encodable_item(cs, &input_data, round_function);
+
+    let output_data = StorageDeduplicatorOutputData {
+        final_sorted_queue_state: queue_state_after.clone(),
+    };
+    let output_data_commitment =
+        commit_variable_length_encodable_item(cs, &output_data, round_function);
+
+    (input_data_commitment, output_data_commitment)
+}
+
+#[track_caller]
 pub(crate) fn compute_filter_circuit_commitment<
     F: SmallField,
     CS: ConstraintSystem<F>,

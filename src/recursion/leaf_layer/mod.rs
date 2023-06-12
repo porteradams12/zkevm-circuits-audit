@@ -52,6 +52,7 @@ pub struct LeafLayerRecursionConfig<
     pub padding_proof: Proof<F, H, EXT>,
 }
 
+// NOTE: does NOT allocate public inputs! we will deal with locations of public inputs being the same at the "outer" stage
 pub fn leaf_layer_recursion_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F> + 'static,
@@ -139,16 +140,7 @@ where
 
     let verifier = verifier_builder.create_recursive_verifier(cs);
 
-    // use boojum::gadgets::recursion::recursive_verifier_builder::CsRecursiveVerifierBuilder;
-    // let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
-    //     cs,
-    //     vk_fixed_parameters.parameters,
-    // );
-    // use boojum::cs::cs_builder::new_builder;
-    // let builder = new_builder::<_, F>(builder_impl);
-
-    // let builder = e.configure_builder(builder);
-    // let verifier = builder.build(());
+    drop(cs);
 
     let cs = unsafe { &mut *r };
 
@@ -166,6 +158,8 @@ where
                 proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
             }
         };
+        assert!(Proof::is_same_geometry(&witness, &padding_proof));
+
         let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
 
         let queue_is_empty = queue.is_empty(cs);
@@ -215,10 +209,10 @@ where
 
     let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &input, round_function);
-    for el in input_commitment.iter() {
-        let gate = PublicInputGate::new(el.get_variable());
-        gate.add_to_cs(cs);
-    }
+    // for el in input_commitment.iter() {
+    //     let gate = PublicInputGate::new(el.get_variable());
+    //     gate.add_to_cs(cs);
+    // }
 
     input_commitment
 }

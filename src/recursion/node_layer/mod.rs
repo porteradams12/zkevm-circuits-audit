@@ -57,6 +57,7 @@ pub struct NodeLayerRecursionConfig<
 
 use boojum::cs::traits::circuit::*;
 
+// NOTE: does NOT allocate public inputs! we will deal with locations of public inputs being the same at the "outer" stage
 pub fn node_layer_recursion_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F> + 'static,
@@ -99,6 +100,11 @@ where
         node_layer_vk_commitment,
         queue_state,
     } = input;
+
+    assert_eq!(
+        config.vk_fixed_parameters,
+        vk_witness.fixed_parameters,
+    );
 
     let vk = AllocatedVerificationKey::<F, H>::allocate(cs, vk_witness);
     assert_eq!(
@@ -170,16 +176,7 @@ where
 
     let verifier = verifier_builder.create_recursive_verifier(cs);
 
-    // use boojum::gadgets::recursion::recursive_verifier_builder::CsRecursiveVerifierBuilder;
-    // let builder_impl = CsRecursiveVerifierBuilder::<'_, F, EXT, _>::new_from_parameters(
-    //     cs,
-    //     vk_fixed_parameters.parameters,
-    // );
-    // use boojum::cs::cs_builder::new_builder;
-    // let builder = new_builder::<_, F>(builder_impl);
-
-    // let builder = e.configure_builder(builder);
-    // let verifier = builder.build(());
+    drop(cs);
 
     let cs = unsafe { &mut *r };
 
@@ -212,6 +209,8 @@ where
                 proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
             }
         };
+        assert!(Proof::is_same_geometry(&witness, &padding_proof));
+
         let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
 
         let chunk_is_empty = subqueue.tail.length.is_zero(cs);
@@ -263,63 +262,13 @@ where
 
     let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &input, round_function);
-    for el in input_commitment.iter() {
-        let gate = PublicInputGate::new(el.get_variable());
-        gate.add_to_cs(cs);
-    }
+    // for el in input_commitment.iter() {
+    //     let gate = PublicInputGate::new(el.get_variable());
+    //     gate.add_to_cs(cs);
+    // }
 
     input_commitment
 }
-
-// pub(crate) fn split_first_n_from_queue_state<
-//     F: SmallField,
-//     CS: ConstraintSystem<F>,
-//     const N: usize,
-// >(
-//     cs: &mut CS,
-//     queue_state: QueueState<F, N>,
-//     elements_to_split: UInt32<F>,
-//     split_point_witness: [F; N],
-// ) -> (QueueState<F, N>, QueueState<F, N>) {
-//     // check length <= elements_to_split
-//     let (second_length, uf) = queue_state
-//         .tail
-//         .length
-//         .overflowing_sub(cs, elements_to_split);
-//     let second_is_zero = second_length.is_zero(cs);
-
-//     let second_is_trivial = Boolean::multi_or(cs, &[second_is_zero, uf]);
-
-//     let intermediate = <[Num<F>; N]>::allocate(cs, split_point_witness);
-//     let intermediate_state = QueueTailState {
-//         tail: intermediate,
-//         length: elements_to_split,
-//     };
-
-//     let first_tail =
-//         QueueTailState::conditionally_select(cs, uf, &queue_state.tail, &intermediate_state);
-
-//     for (a, b) in intermediate.iter().zip(queue_state.tail.tail.iter()) {
-//         Num::conditionally_enforce_equal(cs, second_is_trivial, a, b);
-//     }
-
-//     let first = QueueState {
-//         head: queue_state.head,
-//         tail: first_tail,
-//     };
-
-//     let second_length = second_length.mask_negated(cs, uf);
-
-//     let second = QueueState {
-//         head: intermediate_state.tail,
-//         tail: QueueTailState {
-//             tail: queue_state.tail.tail,
-//             length: second_length,
-//         },
-//     };
-
-//     (first, second)
-// }
 
 pub(crate) fn split_queue_state_into_n<F: SmallField, CS: ConstraintSystem<F>, const N: usize>(
     cs: &mut CS,

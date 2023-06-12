@@ -85,7 +85,7 @@ pub fn proof_compression_function<
     // here we do the trick to protect ourselves from setup pending from witness, but
     // nevertheless do not create new types for proofs with fixed number of inputs, etc
     let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
-        padding_proof
+        padding_proof.clone()
     } else {
         if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
             // proving mode
@@ -95,6 +95,8 @@ pub fn proof_compression_function<
             proof_witness.unwrap()
         }
     };
+    assert!(Proof::is_same_geometry(&witness, &padding_proof));
+
     let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
 
     // verify the proof

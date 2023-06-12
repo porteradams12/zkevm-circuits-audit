@@ -395,10 +395,14 @@ pub fn scheduler_function<
     assert_eq!(NUM_PROCESSABLE_SHARDS, 1); // no support of porter as of yet
 
     for shard_id in 0..NUM_PROCESSABLE_SHARDS {
+        assert!(shard_id <= u8::MAX as usize);
+
+        let shard_id_uint8 = UInt8::allocated_constant(cs, shard_id as u8);
         // storage acesses filter
         let (storage_filter_input_com, storage_filter_output_com) =
-            compute_filter_circuit_commitment(
+            compute_storage_sorter_circuit_commitment(
                 cs,
+                shard_id_uint8,
                 &storage_queues_state[shard_id],
                 &storage_intermediate_sorted_queue_state[shard_id],
                 &filtered_storage_queues_state[shard_id],
@@ -683,7 +687,8 @@ pub fn scheduler_function<
                 // .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
 
             let validate = if let Some(skip_flag) = skip_flag {
-                Boolean::multi_and(cs, &[*stage_flag, execution_flag, *skip_flag])
+                let not_skip = skip_flag.negated(cs); // this is memoized
+                Boolean::multi_and(cs, &[*stage_flag, execution_flag, not_skip])
             } else {
                 Boolean::multi_and(cs, &[*stage_flag, execution_flag])
             };
@@ -698,7 +703,7 @@ pub fn scheduler_function<
             );
 
             let validate_output = if let Some(skip_flag) = skip_flag {
-                let not_skip = skip_flag.negated(cs);
+                let not_skip = skip_flag.negated(cs); // this is memoized
                 Boolean::multi_and(cs, &[closed_form_input.completion_flag, not_skip, *stage_flag])
             } else {
                 Boolean::multi_and(cs, &[closed_form_input.completion_flag, *stage_flag])
@@ -820,6 +825,8 @@ pub fn scheduler_function<
 
     let verifier = verifier_builder.create_recursive_verifier(cs);
 
+    drop(cs);
+
     let cs = unsafe { &mut *r };
 
     for (_idx, (circuit_type, state)) in sequence_of_circuit_types
@@ -827,6 +834,8 @@ pub fn scheduler_function<
         .zip(recursive_queue_state_tails.into_iter())
         .enumerate()
     {
+        println!("Verifying idx = {}", _idx);
+        
         let should_skip = state.length.is_zero(cs);
         let should_verify = should_skip.negated(cs);
 
@@ -862,6 +871,7 @@ pub fn scheduler_function<
                 .unwrap_or(config.padding_proof.clone())
             }
         };
+        assert!(Proof::is_same_geometry(&proof_witness, &config.padding_proof));
 
         let proof = AllocatedProof::allocate(cs, proof_witness);
 

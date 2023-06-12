@@ -113,6 +113,8 @@ pub fn interblock_recursion_function<
                 proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
             }
         };
+        assert!(Proof::is_same_geometry(&witness, &padding_proof));
+        
         let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
 
         // verify the proof
