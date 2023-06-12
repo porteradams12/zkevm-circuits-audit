@@ -643,107 +643,68 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
             .flat_map(|el| unsafe { UInt16::from_variable_unchecked(*el).to_le_bytes(cs) })
             .collect::<Vec<UInt8<F>>>();
 
-        let fixed_base_mul_table_id_0 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<0>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_1 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<1>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_2 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<2>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_3 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<3>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_4 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<4>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_5 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<5>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_6 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<6>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_7 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<7>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_8 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<8>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_9 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<9>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_10 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<10>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_11 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<11>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_12 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<12>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_13 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<13>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_14 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<14>>()
-            .expect("table must exist");
-        let fixed_base_mul_table_id_15 = cs
-            .get_table_id_for_marker::<FixedBaseMulTable<15>>()
-            .expect("table must exist");
+        let ids = vec![
+            cs.get_table_id_for_marker::<FixedBaseMulTable<0>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<1>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<2>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<3>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<4>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<5>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<6>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<7>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<8>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<9>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<10>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<11>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<12>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<13>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<14>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<15>>()
+                .expect("table must exist"),
+        ];
         let mut acc = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(
             cs,
             base_field_params,
         );
-        bytes.iter().enumerate().rev().for_each(|(i, el)| {
+        bytes[..32].iter().enumerate().rev().for_each(|(i, el)| {
             let index = UInt8::allocated_constant(cs, i as u8).get_variable();
-            let res = cs
-                .perform_lookup::<2, 16>(fixed_base_mul_table_id, &[el.get_variable(), index])
-                .into_iter()
-                .map(|v| unsafe { UInt32::from_variable_unchecked(v) })
+            let chunks = ids
+                .iter()
+                .map(|id| unsafe {
+                    UInt32::from_variable_unchecked(
+                        cs.perform_lookup::<2, 1>(*id, &[el.get_variable(), index])[0],
+                    )
+                })
                 .collect::<Vec<UInt32<F>>>();
             let mut x = [UInt32::zero(cs); 8];
-            x.copy_from_slice(&res[..8]);
+            x.copy_from_slice(&chunks[..8]);
             let x = UInt256 { inner: x };
             let x = convert_uint256_to_field_element(cs, &x, base_field_params);
             let mut y = [UInt32::zero(cs); 8];
-            y.copy_from_slice(&res[8..]);
+            y.copy_from_slice(&chunks[8..]);
             let y = UInt256 { inner: y };
             let y = convert_uint256_to_field_element(cs, &y, base_field_params);
             acc = acc.add_mixed(cs, &mut (x, y));
         });
         acc
     };
-    let (hash_times_g, _) = hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
-    println!("{:?}", hash_times_g.0.witness_hook(cs)().unwrap());
-    println!("{:?}", hash_times_g.1.witness_hook(cs)().unwrap());
 
-    let mut q_acc =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
-    let mut generator = Secp256Affine::one();
-    generator.negate();
-    let (x, y) = generator.into_xy_unchecked();
-    let x = Secp256BaseNNField::allocated_constant(cs, x, base_field_params);
-    let y = Secp256BaseNNField::allocated_constant(cs, y, base_field_params);
-    let mut generator = (x, y);
-
-    let message_hash_by_r_inv_lsb_bits: Vec<_> = message_hash_by_r_inv
-        .limbs
-        .iter()
-        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
-        .flatten()
-        .collect();
-    for (cycle, hash_bit) in message_hash_by_r_inv_lsb_bits.into_iter().rev().enumerate() {
-        if cycle != 0 {
-            q_acc = q_acc.double(cs);
-        }
-        let q_plus_x = q_acc.add_mixed(cs, &mut generator);
-        q_acc = Selectable::conditionally_select(cs, hash_bit, &q_plus_x, &q_acc);
-    }
-
-    let (mut q_acc, _) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
-    println!("{:?}", q_acc.0.witness_hook(cs)().unwrap());
-    println!("{:?}", q_acc.1.witness_hook(cs)().unwrap());
+    let (mut q_acc, _) = hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
     let mut q_acc = s_times_x.add_mixed(cs, &mut q_acc);
 
     let ((mut q_x, mut q_y), is_infinity) =
@@ -1124,7 +1085,7 @@ mod test {
             max_allowed_constraint_degree: 4,
         };
         let max_variables = 1 << 26;
-        let max_trace_len = 1 << 20;
+        let max_trace_len = 1 << 21;
 
         fn configure<
             F: SmallField,
