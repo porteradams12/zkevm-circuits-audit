@@ -7,11 +7,11 @@ use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u32::UInt32;
 
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::Variable;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
-use boojum::gadgets::traits::selectable::Selectable;
-use boojum::cs::traits::cs::DstBuffer;
 use boojum::gadgets::traits::encodable::CircuitVarLengthEncodable;
+use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
 
 use cs_derive::*;

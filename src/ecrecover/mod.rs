@@ -945,6 +945,8 @@ where
         let _ = memory_queue.push(cs, value_query, should_process);
     }
 
+    requests_queue.enforce_consistency(cs);
+
     // form the final state
     let done = requests_queue.is_empty(cs);
     structured_input.completion_flag = done;
@@ -1071,6 +1073,7 @@ mod test {
     use boojum::cs::cs_builder::*;
     use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
     use boojum::cs::gates::*;
+    use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::gadgets::tables::byte_split::ByteSplitTable;

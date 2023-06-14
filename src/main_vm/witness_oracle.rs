@@ -1,8 +1,8 @@
 use ethereum_types::U256;
 
-use boojum::field::SmallField;
 use crate::base_structures::decommit_query::DecommitQueryWitness;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecordWitness;
+use boojum::field::SmallField;
 
 use super::*;
 

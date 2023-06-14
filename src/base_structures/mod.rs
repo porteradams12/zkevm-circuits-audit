@@ -1,11 +1,18 @@
+use boojum::{gadgets::u8::UInt8, cs::traits::cs::ConstraintSystem};
+use boojum::field::SmallField;
+
 use super::*;
 
 pub mod decommit_query;
 pub mod log_query;
 pub mod memory_query;
+pub mod recursion_query;
 pub mod register;
 pub mod vm_state;
-pub mod recursion_query;
 
-pub mod state_diff_record;
 pub mod precompile_input_outputs;
+pub mod state_diff_record;
+
+pub trait ByteSerializable<F: SmallField, const N: usize> {
+    fn into_bytes<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> [UInt8<F>; N];
+}

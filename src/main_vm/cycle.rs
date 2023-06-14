@@ -2,26 +2,28 @@ use arrayvec::ArrayVec;
 
 use super::opcodes::context::apply_context;
 use super::pre_state::{create_prestate, PendingSponge};
-use super::state_diffs::{StateDiffsAccumulator, MAX_ADD_SUB_RELATIONS_PER_CYCLE, MAX_MUL_DIV_RELATIONS_PER_CYCLE};
+use super::state_diffs::{
+    StateDiffsAccumulator, MAX_ADD_SUB_RELATIONS_PER_CYCLE, MAX_MUL_DIV_RELATIONS_PER_CYCLE,
+};
 use super::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::CSGeometry;
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
-use boojum::gadgets::traits::selectable::MultiSelectable;
-use boojum::gadgets::u256::{UInt256, recompose_u256_as_u32x8};
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
+
 use crate::base_structures::decommit_query::DecommitQuery;
 use crate::base_structures::log_query::LogQuery;
 use crate::base_structures::memory_query::{self, MemoryQuery};
 use crate::base_structures::register::VMRegister;
 use crate::base_structures::vm_state::callstack::Callstack;
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
-use crate::base_structures::vm_state::{GlobalContext, ArithmeticFlagsPort};
+use crate::base_structures::vm_state::{ArithmeticFlagsPort, GlobalContext};
 use crate::base_structures::vm_state::{VmLocalState, FULL_SPONGE_QUEUE_STATE_WIDTH};
 use crate::main_vm::opcodes::*;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use boojum::cs::traits::cs::DstBuffer;
+use boojum::gadgets::u256::UInt256;
 
 pub(crate) fn vm_cycle<
     F: SmallField,
@@ -130,18 +132,18 @@ where
         round_function,
     );
     apply_mul_div(
-        cs, 
-        &draft_next_state, 
+        cs,
+        &draft_next_state,
         &common_opcode_state,
         &opcode_carry_parts,
-        &mut diffs_accumulator
+        &mut diffs_accumulator,
     );
     apply_shifts(
-        cs, 
-        &draft_next_state, 
+        cs,
+        &draft_next_state,
         &common_opcode_state,
         &opcode_carry_parts,
-        &mut diffs_accumulator
+        &mut diffs_accumulator,
     );
     apply_uma(
         cs,
@@ -184,13 +186,15 @@ where
         should_update_dst1.push(el.0);
     }
 
-    let can_update_dst0_as_register_only =
-        Boolean::multi_or(cs, &can_update_dst0_as_register_only);
+    let can_update_dst0_as_register_only = Boolean::multi_or(cs, &can_update_dst0_as_register_only);
 
-    let dst0_is_ptr_candidates_iter = diffs_accumulator
-        .dst_0_values
-        .iter()
-        .map(|el: &(bool, Boolean<F>, VMRegister<F>)| (el.1.get_variable(), el.2.is_pointer.get_variable()));
+    let dst0_is_ptr_candidates_iter =
+        diffs_accumulator
+            .dst_0_values
+            .iter()
+            .map(|el: &(bool, Boolean<F>, VMRegister<F>)| {
+                (el.1.get_variable(), el.2.is_pointer.get_variable())
+            });
     let num_candidates_len = dst0_is_ptr_candidates_iter.len();
 
     // Safety: we know by orthogonality of opcodes that boolean selectors in our iterators form either a mask,
@@ -198,25 +202,20 @@ where
     // it's not a problem because in the same situation we will not have an update of register/memory anyway
 
     use boojum::gadgets::num::dot_product;
-    let dst0_is_ptr = dot_product(
-        cs,
-        dst0_is_ptr_candidates_iter,
-        num_candidates_len,
-    );
+    let dst0_is_ptr = dot_product(cs, dst0_is_ptr_candidates_iter, num_candidates_len);
     let dst0_is_ptr = unsafe { Boolean::from_variable_unchecked(dst0_is_ptr) };
 
     let mut dst0_value = UInt256::zero(cs);
     for (idx, dst) in dst0_value.inner.iter_mut().enumerate() {
-        let src = diffs_accumulator
-        .dst_0_values
-        .iter()
-        .map(|el: &(bool, Boolean<F>, VMRegister<F>)| (el.1.get_variable(), el.2.value.inner[idx].get_variable()));
+        let src =
+            diffs_accumulator
+                .dst_0_values
+                .iter()
+                .map(|el: &(bool, Boolean<F>, VMRegister<F>)| {
+                    (el.1.get_variable(), el.2.value.inner[idx].get_variable())
+                });
 
-        let limb = dot_product(
-            cs,
-            src,
-            num_candidates_len,
-        );
+        let limb = dot_product(cs, src, num_candidates_len);
 
         let limb = unsafe { UInt32::from_variable_unchecked(limb) };
         *dst = limb;
@@ -228,30 +227,24 @@ where
         .map(|el| (el.0.get_variable(), el.1.is_pointer.get_variable()));
     let num_candidates_len = dst1_is_ptr_candidates_iter.len();
 
-    let dst1_is_ptr = dot_product(
-        cs,
-        dst1_is_ptr_candidates_iter,
-        num_candidates_len,
-    );
+    let dst1_is_ptr = dot_product(cs, dst1_is_ptr_candidates_iter, num_candidates_len);
     let dst1_is_ptr = unsafe { Boolean::from_variable_unchecked(dst1_is_ptr) };
 
     let mut dst1_value = UInt256::zero(cs);
     for (idx, dst) in dst1_value.inner.iter_mut().enumerate() {
         let src = diffs_accumulator
-        .dst_1_values
-        .iter()
-        .map(|el: &(Boolean<F>, VMRegister<F>)| (el.0.get_variable(), el.1.value.inner[idx].get_variable()));
+            .dst_1_values
+            .iter()
+            .map(|el: &(Boolean<F>, VMRegister<F>)| {
+                (el.0.get_variable(), el.1.value.inner[idx].get_variable())
+            });
 
-        let limb = dot_product(
-            cs,
-            src,
-            num_candidates_len,
-        );
+        let limb = dot_product(cs, src, num_candidates_len);
 
         let limb = unsafe { UInt32::from_variable_unchecked(limb) };
         *dst = limb;
     }
-    
+
     let perform_dst0_memory_write_update = Boolean::multi_and(
         cs,
         &[
@@ -305,14 +298,10 @@ where
     let dst0_performs_reg_update = opcode_carry_parts.dst0_performs_memory_access.negated(cs);
     let t = Boolean::multi_and(
         cs,
-        &[
-            dst0_performs_reg_update,
-            dst0_update_potentially_to_memory,
-        ],
+        &[dst0_performs_reg_update, dst0_update_potentially_to_memory],
     );
 
-    let dst0_update_register =
-        Boolean::multi_or(cs, &[can_update_dst0_as_register_only, t]);
+    let dst0_update_register = Boolean::multi_or(cs, &[can_update_dst0_as_register_only, t]);
 
     if crate::config::CIRCUIT_VERSOBE {
         dbg!(dst0_value.witness_hook(&*cs)().unwrap());
@@ -336,8 +325,7 @@ where
         .enumerate()
     {
         // form an iterator for all possible candidates
-        let write_as_dst0 =
-            Boolean::multi_and(cs, &[dst0_update_register, *flag_dst0]);
+        let write_as_dst0 = Boolean::multi_and(cs, &[dst0_update_register, *flag_dst0]);
         // dst1 is always register
         let write_as_dst1 = *flag_dst1;
 
@@ -392,7 +380,7 @@ where
 
         let any_ptr_update_as_dst0 = Boolean::multi_or(cs, &apply_ptr_update_as_dst0);
         let any_ptr_update_as_dst1 = Boolean::multi_or(cs, &apply_ptr_update_as_dst1);
-        
+
         // Safety: our update flags are preconditioned by the applicability of the opcodes, and if opcode
         // updates specific registers it does NOT write using "normal" dst0/dst1 addressing, so our mask
         // is indeed a bitmask or empty
@@ -401,11 +389,13 @@ where
         let num_candidates = it_is_ptr_as_dst0.len();
         let is_ptr_as_dst0 = dot_product(
             cs,
-            it_is_ptr_as_dst0.into_iter().map(|el| (el.0.get_variable(), el.1.get_variable())),
+            it_is_ptr_as_dst0
+                .into_iter()
+                .map(|el| (el.0.get_variable(), el.1.get_variable())),
             num_candidates,
         );
         let is_ptr_as_dst0 = unsafe { Boolean::from_variable_unchecked(is_ptr_as_dst0) };
-    
+
         new_state.registers[idx].is_pointer = Boolean::conditionally_select(
             cs,
             any_ptr_update_as_dst0,
@@ -417,7 +407,9 @@ where
         let num_candidates = it_is_ptr_as_dst1.len();
         let is_ptr_as_dst1 = dot_product(
             cs,
-            it_is_ptr_as_dst1.into_iter().map(|el| (el.0.get_variable(), el.1.get_variable())),
+            it_is_ptr_as_dst1
+                .into_iter()
+                .map(|el| (el.0.get_variable(), el.1.get_variable())),
             num_candidates,
         );
         let is_ptr_as_dst1 = unsafe { Boolean::from_variable_unchecked(is_ptr_as_dst1) };
@@ -427,17 +419,16 @@ where
             &is_ptr_as_dst1,
             &new_state.registers[idx].is_pointer,
         );
-        
+
         // for registers we just use parallel select, that has the same efficiency as multiselect,
         // because internally it's [UInt32<F>; 8]
 
-        for (flag, value) in it_value_as_dst0.into_iter().chain(it_value_as_dst1.into_iter()) {
-            new_state.registers[idx].value = UInt256::conditionally_select(
-                cs,
-                flag,
-                &value,
-                &new_state.registers[idx].value,
-            );
+        for (flag, value) in it_value_as_dst0
+            .into_iter()
+            .chain(it_value_as_dst1.into_iter())
+        {
+            new_state.registers[idx].value =
+                UInt256::conditionally_select(cs, flag, &value, &new_state.registers[idx].value);
         }
     }
 
@@ -446,41 +437,41 @@ where
     // PC
     for (flag, value) in diffs_accumulator.new_pc_candidates.drain(..) {
         new_state.callstack.current_context.saved_context.pc = UInt16::conditionally_select(
-            cs, 
-            flag, 
-            &value, 
-            &new_state.callstack.current_context.saved_context.pc
+            cs,
+            flag,
+            &value,
+            &new_state.callstack.current_context.saved_context.pc,
         );
     }
 
     // Ergs
     for (flag, value) in diffs_accumulator.new_ergs_left_candidates.drain(..) {
-        new_state.callstack.current_context.saved_context.ergs_remaining = UInt32::conditionally_select(
-            cs, 
-            flag, 
-            &value, 
-            &new_state.callstack.current_context.saved_context.ergs_remaining
+        new_state
+            .callstack
+            .current_context
+            .saved_context
+            .ergs_remaining = UInt32::conditionally_select(
+            cs,
+            flag,
+            &value,
+            &new_state
+                .callstack
+                .current_context
+                .saved_context
+                .ergs_remaining,
         );
     }
 
     // Ergs per pubdata
     for (flag, value) in diffs_accumulator.new_ergs_per_pubdata.into_iter() {
-        new_state.ergs_per_pubdata_byte = UInt32::conditionally_select(
-            cs, 
-            flag, 
-            &value, 
-            &new_state.ergs_per_pubdata_byte
-        );
+        new_state.ergs_per_pubdata_byte =
+            UInt32::conditionally_select(cs, flag, &value, &new_state.ergs_per_pubdata_byte);
     }
 
     // Tx number in block
     for (flag, value) in diffs_accumulator.new_tx_number.into_iter() {
-        new_state.tx_number_in_block = UInt32::conditionally_select(
-            cs, 
-            flag, 
-            &value, 
-            &new_state.tx_number_in_block
-        );
+        new_state.tx_number_in_block =
+            UInt32::conditionally_select(cs, flag, &value, &new_state.tx_number_in_block);
     }
 
     // Page counter
@@ -488,122 +479,136 @@ where
 
     // Context value
     for (flag, value) in diffs_accumulator.context_u128_candidates.drain(..) {
-        new_state.context_composite_u128 = UInt32::parallel_select(
-            cs, 
-            flag, 
-            &value, 
-            &new_state.context_composite_u128
-        );
+        new_state.context_composite_u128 =
+            UInt32::parallel_select(cs, flag, &value, &new_state.context_composite_u128);
     }
 
     // Heap limit
     for (flag, value) in diffs_accumulator.new_heap_bounds.drain(..) {
-        new_state.callstack.current_context.saved_context.heap_upper_bound = UInt32::conditionally_select(
-            cs, 
-            flag, 
-            &value, 
-            &new_state.callstack.current_context.saved_context.heap_upper_bound
+        new_state
+            .callstack
+            .current_context
+            .saved_context
+            .heap_upper_bound = UInt32::conditionally_select(
+            cs,
+            flag,
+            &value,
+            &new_state
+                .callstack
+                .current_context
+                .saved_context
+                .heap_upper_bound,
         );
     }
 
     // Axu heap limit
     for (flag, value) in diffs_accumulator.new_aux_heap_bounds.drain(..) {
-        new_state.callstack.current_context.saved_context.aux_heap_upper_bound = UInt32::conditionally_select(
-            cs, 
-            flag, 
-            &value, 
-            &new_state.callstack.current_context.saved_context.aux_heap_upper_bound
+        new_state
+            .callstack
+            .current_context
+            .saved_context
+            .aux_heap_upper_bound = UInt32::conditionally_select(
+            cs,
+            flag,
+            &value,
+            &new_state
+                .callstack
+                .current_context
+                .saved_context
+                .aux_heap_upper_bound,
         );
     }
 
-    // variable queue states 
+    // variable queue states
 
     // Memory due to UMA
     for (flag, length, state) in diffs_accumulator.memory_queue_candidates.into_iter() {
-        new_state.memory_queue_length = UInt32::conditionally_select(
-            cs, 
-            flag, 
-            &length, 
-            &new_state.memory_queue_length
-        );
+        new_state.memory_queue_length =
+            UInt32::conditionally_select(cs, flag, &length, &new_state.memory_queue_length);
 
-        new_state.memory_queue_state = Num::parallel_select(
-            cs, 
-            flag, 
-            &state, 
-            &new_state.memory_queue_state
-        );
+        new_state.memory_queue_state =
+            Num::parallel_select(cs, flag, &state, &new_state.memory_queue_state);
     }
 
     // decommittment due to far call
     for (flag, length, state) in diffs_accumulator.decommitment_queue_candidates.into_iter() {
         new_state.code_decommittment_queue_length = UInt32::conditionally_select(
-            cs, 
-            flag, 
-            &length, 
-            &new_state.code_decommittment_queue_length
+            cs,
+            flag,
+            &length,
+            &new_state.code_decommittment_queue_length,
         );
 
-        new_state.code_decommittment_queue_state = Num::parallel_select(
-            cs, 
-            flag, 
-            &state, 
-            &new_state.code_decommittment_queue_state
-        );
+        new_state.code_decommittment_queue_state =
+            Num::parallel_select(cs, flag, &state, &new_state.code_decommittment_queue_state);
     }
 
     // forward storage log
     for (flag, length, state) in diffs_accumulator.log_queue_forward_candidates.into_iter() {
-        new_state.callstack.current_context.log_queue_forward_part_length = UInt32::conditionally_select(
-            cs, 
-            flag, 
-            &length, 
-            &new_state.callstack.current_context.log_queue_forward_part_length
+        new_state
+            .callstack
+            .current_context
+            .log_queue_forward_part_length = UInt32::conditionally_select(
+            cs,
+            flag,
+            &length,
+            &new_state
+                .callstack
+                .current_context
+                .log_queue_forward_part_length,
         );
 
         new_state.callstack.current_context.log_queue_forward_tail = Num::parallel_select(
-            cs, 
-            flag, 
-            &state, 
-            &new_state.callstack.current_context.log_queue_forward_tail
+            cs,
+            flag,
+            &state,
+            &new_state.callstack.current_context.log_queue_forward_tail,
         );
     }
 
     // rollback log head(!)
     for (flag, length, state) in diffs_accumulator.log_queue_rollback_candidates.into_iter() {
-        new_state.callstack.current_context.saved_context.reverted_queue_segment_len = UInt32::conditionally_select(
-            cs, 
-            flag, 
-            &length, 
-            &new_state.callstack.current_context.saved_context.reverted_queue_segment_len
+        new_state
+            .callstack
+            .current_context
+            .saved_context
+            .reverted_queue_segment_len = UInt32::conditionally_select(
+            cs,
+            flag,
+            &length,
+            &new_state
+                .callstack
+                .current_context
+                .saved_context
+                .reverted_queue_segment_len,
         );
 
-        new_state.callstack.current_context.saved_context.reverted_queue_head = Num::parallel_select(
-            cs, 
-            flag, 
-            &state, 
-            &new_state.callstack.current_context.saved_context.reverted_queue_head 
+        new_state
+            .callstack
+            .current_context
+            .saved_context
+            .reverted_queue_head = Num::parallel_select(
+            cs,
+            flag,
+            &state,
+            &new_state
+                .callstack
+                .current_context
+                .saved_context
+                .reverted_queue_head,
         );
     }
 
     // flags
     for (flag, flags) in diffs_accumulator.flags.iter() {
-        new_state.flags = ArithmeticFlagsPort::conditionally_select(
-            cs, 
-            *flag, 
-            flags,
-            &new_state.flags
-        );
+        new_state.flags =
+            ArithmeticFlagsPort::conditionally_select(cs, *flag, flags, &new_state.flags);
     }
 
     // and now we either replace or not the callstack in full
     for (flag, callstack) in diffs_accumulator.callstacks.into_iter() {
-        new_state.callstack = Callstack::conditionally_select(
-            cs, 
-            flag, 
-            &callstack, 
-            &new_state.callstack
-        );
+        new_state.callstack =
+            Callstack::conditionally_select(cs, flag, &callstack, &new_state.callstack);
     }
 
     // other state parts
@@ -624,14 +629,9 @@ where
         if let Some((_, selected)) = relations.pop() {
             let mut selected = selected;
             for (flag, el) in relations.into_iter() {
-                selected = AddSubRelation::conditionally_select(
-                    cs,
-                    flag,
-                    &el,
-                    &selected
-                );
+                selected = AddSubRelation::conditionally_select(cs, flag, &el, &selected);
             }
-    
+
             enforce_addition_relation(cs, selected);
         }
     }
@@ -648,14 +648,9 @@ where
         if let Some((_, selected)) = relations.pop() {
             let mut selected = selected;
             for (flag, el) in relations.into_iter() {
-                selected = MulDivRelation::conditionally_select(
-                    cs,
-                    flag,
-                    &el,
-                    &selected
-                );
+                selected = MulDivRelation::conditionally_select(cs, flag, &el, &selected);
             }
-    
+
             enforce_mul_relation(cs, selected);
         }
     }
@@ -675,7 +670,9 @@ where
     };
 
     let mut first_sponge_candidate = src0_read_state_pending_sponge;
-    for (can_use_sponge_for_src0, can_use_sponge_for_dst0, opcode_applies, sponge_data) in diffs_accumulator.sponge_candidates_to_run.iter_mut() {
+    for (can_use_sponge_for_src0, can_use_sponge_for_dst0, opcode_applies, sponge_data) in
+        diffs_accumulator.sponge_candidates_to_run.iter_mut()
+    {
         assert!(*can_use_sponge_for_src0 == false);
         assert!(*can_use_sponge_for_dst0 == false);
 
@@ -688,7 +685,7 @@ where
             };
 
             first_sponge_candidate = Selectable::conditionally_select(
-                cs, 
+                cs,
                 *opcode_applies,
                 &formal_sponge,
                 &first_sponge_candidate,
@@ -697,7 +694,9 @@ where
     }
 
     let mut second_sponge_candidate = dst0_write_state_pending_sponge;
-    for (can_use_sponge_for_src0, can_use_sponge_for_dst0, opcode_applies, sponge_data) in diffs_accumulator.sponge_candidates_to_run.iter_mut() {
+    for (can_use_sponge_for_src0, can_use_sponge_for_dst0, opcode_applies, sponge_data) in
+        diffs_accumulator.sponge_candidates_to_run.iter_mut()
+    {
         assert!(*can_use_sponge_for_src0 == false);
         assert!(*can_use_sponge_for_dst0 == false);
 
@@ -710,7 +709,7 @@ where
             };
 
             second_sponge_candidate = Selectable::conditionally_select(
-                cs, 
+                cs,
                 *opcode_applies,
                 &formal_sponge,
                 &second_sponge_candidate,
@@ -725,7 +724,9 @@ where
 
     for _ in 2..MAX_SPONGES_PER_CYCLE {
         let mut selected = None;
-        for (_, _, opcode_applies, sponge_data) in diffs_accumulator.sponge_candidates_to_run.iter_mut() {    
+        for (_, _, opcode_applies, sponge_data) in
+            diffs_accumulator.sponge_candidates_to_run.iter_mut()
+        {
             if let Some((should_enforce, initial_state, final_state)) = sponge_data.pop() {
                 if let Some(selected) = selected.as_mut() {
                     // we can conditionally select
@@ -736,7 +737,7 @@ where
                     };
 
                     *selected = Selectable::conditionally_select(
-                        cs, 
+                        cs,
                         *opcode_applies,
                         &formal_sponge,
                         &*selected,
@@ -768,11 +769,7 @@ where
 
     // actually enforce_sponges
 
-    enforce_sponges(
-        cs,
-        &selected_sponges_to_enforce,
-        round_function
-    );
+    enforce_sponges(cs, &selected_sponges_to_enforce, round_function);
 
     if crate::config::CIRCUIT_VERSOBE {
         // synchronization point
@@ -933,10 +930,14 @@ fn enforce_sponges<
 >(
     cs: &mut CS,
     candidates: &[PendingSponge<F>],
-    _round_function: &R
+    _round_function: &R,
 ) {
     for el in candidates.iter() {
-        let PendingSponge { initial_state, final_state, should_enforce } = el;
+        let PendingSponge {
+            initial_state,
+            final_state,
+            should_enforce,
+        } = el;
         let true_final = R::compute_round_function_over_nums(cs, *initial_state);
         for (a, b) in true_final.iter().zip(final_state.iter()) {
             Num::conditionally_enforce_equal(cs, *should_enforce, a, b);

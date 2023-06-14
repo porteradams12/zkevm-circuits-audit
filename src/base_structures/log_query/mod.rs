@@ -1,21 +1,21 @@
 use super::*;
-use boojum::field::SmallField;
-use boojum::gadgets::boolean::Boolean;
-use boojum::gadgets::u160::{recompose_address_from_u32x5, UInt160};
-use boojum::gadgets::u256::{recompose_u256_as_u32x8, UInt256};
-use boojum::gadgets::u32::UInt32;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::traits::cs::DstBuffer;
 use boojum::cs::Variable;
+use boojum::field::SmallField;
+use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
+use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt};
 use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::traits::encodable::CircuitEncodableExt;
 use boojum::gadgets::traits::encodable::{CircuitEncodable, CircuitVarLengthEncodable};
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
+use boojum::gadgets::u160::{recompose_address_from_u32x5, UInt160};
+use boojum::gadgets::u256::{recompose_u256_as_u32x8, UInt256};
+use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
-use boojum::gadgets::traits::allocatable::CSPlaceholder;
 use cs_derive::*;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable, CSVarLengthEncodable)]
@@ -639,3 +639,46 @@ use boojum::gadgets::queue::CircuitQueue;
 
 pub type LogQueryQueue<F, const AW: usize, const SW: usize, const CW: usize, R> =
     CircuitQueue<F, LogQuery<F>, AW, SW, CW, QUEUE_STATE_WIDTH, LOG_QUERY_PACKED_WIDTH, R>;
+
+
+// we will output L2 to L1 messages as byte packed messages, so let's make it
+
+pub const L2_TO_L1_MESSAGE_BYTE_LENGTH: usize = 88;
+
+impl<F: SmallField> ByteSerializable<F, L2_TO_L1_MESSAGE_BYTE_LENGTH> for LogQuery<F> {
+    fn into_bytes<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> [UInt8<F>; L2_TO_L1_MESSAGE_BYTE_LENGTH] {
+        let zero_u8 = UInt8::zero(cs);
+
+        let mut result = [zero_u8; L2_TO_L1_MESSAGE_BYTE_LENGTH];
+        let mut offset = 0;
+        result[offset] = self.shard_id;
+        offset += 1;
+        result[offset] = unsafe {UInt8::from_variable_unchecked(self.is_service.get_variable())};
+        offset += 1;
+
+        let bytes_be = self.tx_number_in_block.to_be_bytes(cs);
+        result[offset..(offset + (bytes_be.len() - 2))].copy_from_slice(&bytes_be[2..]);
+        offset += bytes_be.len() - 2;
+
+        // we truncated, so let's enforce that those were unsused
+        for el in bytes_be[..2].iter() {
+            Num::enforce_equal(cs, &zero_u8.into_num(), &el.into_num());
+        }
+
+        let bytes_be = self.address.to_be_bytes(cs);
+        result[offset..(offset + bytes_be.len())].copy_from_slice(&bytes_be);
+        offset += bytes_be.len();
+
+        let bytes_be = self.key.to_be_bytes(cs);
+        result[offset..(offset + bytes_be.len())].copy_from_slice(&bytes_be);
+        offset += bytes_be.len();
+
+        let bytes_be = self.written_value.to_be_bytes(cs);
+        result[offset..(offset + bytes_be.len())].copy_from_slice(&bytes_be);
+        offset += bytes_be.len();
+
+        assert_eq!(offset, L2_TO_L1_MESSAGE_BYTE_LENGTH);
+
+        result
+    }
+}

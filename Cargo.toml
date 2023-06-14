@@ -14,7 +14,6 @@ smallvec = { version = "*", features = [
     "const_new",
     "serde",
 ] }
-lazy_static = "*"
 arrayvec = "*"
 zkevm_opcode_defs = {path = "../zkevm_opcode_defs"}
 # boojum = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
@@ -22,11 +21,10 @@ boojum = { path = "../boojum" }
 bincode = "*"
 ethereum-types = "0.12.*"
 cs_derive = { path = "../boojum/cs_derive" }
+# cs_derive = { git = "https://github.com/matter-labs/boojum.git", branch = "main" }
 serde_json = "*"
 itertools = "0.10"
 rand_new = { package = "rand", version = "0.8" }
-num-integer = "0.1"
-num-traits = "0.2"
 hex = "*"
 
 

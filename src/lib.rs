@@ -1,8 +1,10 @@
+#![allow(clippy::drop_ref)]
+#![allow(dead_code)]
+#![allow(dropping_references)]
+#![allow(unused_imports)]
 #![feature(generic_const_exprs)]
 #![feature(array_chunks)]
 #![feature(more_qualified_paths)]
-#![feature(const_eval_limit)]
-#![const_eval_limit = "100000000"]
 
 use derivative::*;
 
@@ -19,14 +21,15 @@ pub mod keccak256_round_function;
 pub mod log_sorter;
 pub mod main_vm;
 pub mod ram_permutation;
+pub mod recursion;
+pub mod scheduler;
 pub mod sha256_round_function;
 pub mod sort_decommittment_requests;
 pub mod storage_application;
 pub mod storage_validity_by_grand_product;
+pub mod linear_hasher;
 pub mod tables;
 pub mod utils;
-pub mod recursion;
-pub mod scheduler;
 
 use boojum::pairing::ff;
 

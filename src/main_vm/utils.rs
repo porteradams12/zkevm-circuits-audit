@@ -1,15 +1,15 @@
 use boojum::field::SmallField;
 
-use boojum::cs::gates::ConstantAllocatableCS;
-use boojum::gadgets::traits::encodable::CircuitEncodable;
-use boojum::gadgets::u256::UInt256;
-use crate::base_structures::memory_query::{MemoryQuery, MemoryValue};
-use crate::base_structures::register::VMRegister;
-use boojum::config::*;
 use super::decoded_opcode::OpcodePropertiesDecoding;
 use super::witness_oracle::SynchronizedWitnessOracle;
 use super::*;
+use crate::base_structures::memory_query::{MemoryQuery, MemoryValue};
+use crate::base_structures::register::VMRegister;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::config::*;
+use boojum::cs::gates::ConstantAllocatableCS;
+use boojum::gadgets::traits::encodable::CircuitEncodable;
+use boojum::gadgets::u256::UInt256;
 
 pub fn mask_into_nop<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
@@ -116,13 +116,13 @@ pub(crate) fn should_read_memory<F: SmallField, CS: ConstraintSystem<F>>(
 
     let can_skip = Boolean::multi_and(cs, &[code_pages_are_equal, super_pc_are_equal]);
 
-    can_skip.negated(cs)    
+    can_skip.negated(cs)
 }
 
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
 use crate::main_vm::pre_state::MemoryLocation;
 use crate::main_vm::witness_oracle::WitnessOracle;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
 /// NOTE: final state is one if we INDEED READ, so extra care should be taken to select and preserve markers
 /// if we ever need it or not
