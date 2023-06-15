@@ -712,9 +712,6 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     exception_flags.push(is_infinity);
     let any_exception = Boolean::multi_or(cs, &exception_flags[..]);
 
-    q_x.normalize(cs);
-    q_y.normalize(cs);
-
     let zero_u8 = UInt8::zero(cs);
 
     let mut bytes_to_hash = [zero_u8; 64];
