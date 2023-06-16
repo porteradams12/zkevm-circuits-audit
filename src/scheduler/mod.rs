@@ -6,7 +6,7 @@ use self::block_header::*;
 pub mod input;
 use self::input::*;
 
-pub mod aux;
+pub mod auxiliary;
 
 use boojum::cs::implementations::proof::Proof;
 
@@ -34,7 +34,7 @@ use crate::base_structures::recursion_query::*;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::linear_hasher::input::LinearHasherOutputData;
 use crate::recursion::VK_COMMITMENT_LENGTH;
-use crate::scheduler::aux::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
+use crate::scheduler::auxiliary::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
 use boojum::config::*;
@@ -62,7 +62,7 @@ use crate::log_sorter::input::*;
 use crate::ram_permutation::input::*;
 use crate::recursion::leaf_layer::input::*;
 use crate::recursion::node_layer::input::*;
-use crate::scheduler::aux::*;
+use crate::scheduler::auxiliary::*;
 use crate::sort_decommittment_requests::input::*;
 use crate::storage_application::input::*;
 use crate::storage_validity_by_grand_product::input::*;
