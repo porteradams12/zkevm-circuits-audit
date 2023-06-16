@@ -7,6 +7,7 @@ pub mod input;
 use self::input::*;
 
 pub mod auxiliary;
+pub use auxiliary as aux;
 
 use boojum::cs::implementations::proof::Proof;
 
