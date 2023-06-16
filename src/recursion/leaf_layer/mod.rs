@@ -49,7 +49,7 @@ pub struct LeafLayerRecursionConfig<
     pub proof_config: ProofConfig,
     pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
     pub capacity: usize,
-    pub padding_proof: Proof<F, H, EXT>,
+    pub padding_proof: Option<Proof<F, H, EXT>>,
 }
 
 // NOTE: does NOT allocate public inputs! we will deal with locations of public inputs being the same at the "outer" stage
@@ -145,22 +145,25 @@ where
     let cs = unsafe { &mut *r };
 
     for _ in 0..capacity {
-        // here we do the trick to protect ourselves from setup pending from witness, but
-        // nevertheless do not create new types for proofs with fixed number of inputs, etc
-        let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
-            padding_proof.clone()
-        } else {
-            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
-                // proving mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            } else {
-                // we are in the testing mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            }
-        };
-        assert!(Proof::is_same_geometry(&witness, &padding_proof));
+        let proof_witness = proof_witnesses
+            .pop_front()
+            .map(|el| Some(el))
+            .unwrap_or(padding_proof.clone());
 
-        let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
+        // sanity check
+        if let Some(proof_witness) = proof_witness.as_ref() {
+            if let Some(padding_proof) = padding_proof.as_ref() {
+                assert!(Proof::is_same_geometry(proof_witness, padding_proof));
+            }
+        }
+
+        let proof = AllocatedProof::allocate_from_witness(
+            cs,
+            proof_witness,
+            &verifier,
+            &vk_fixed_parameters,
+            &proof_config
+        );
 
         let queue_is_empty = queue.is_empty(cs);
         let can_pop = queue_is_empty.negated(cs);

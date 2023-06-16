@@ -52,7 +52,7 @@ pub struct NodeLayerRecursionConfig<
     pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
     pub leaf_layer_capacity: usize,
     pub node_layer_capacity: usize,
-    pub padding_proof: Proof<F, H, EXT>,
+    pub padding_proof: Option<Proof<F, H, EXT>>,
 }
 
 use boojum::cs::traits::circuit::*;
@@ -196,22 +196,25 @@ where
     assert_eq!(subqueues.len(), node_layer_capacity);
 
     for subqueue in subqueues.into_iter() {
-        // here we do the trick to protect ourselves from setup pending from witness, but
-        // nevertheless do not create new types for proofs with fixed number of inputs, etc
-        let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
-            padding_proof.clone()
-        } else {
-            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
-                // proving mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            } else {
-                // we are in the testing mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            }
-        };
-        assert!(Proof::is_same_geometry(&witness, &padding_proof));
+        let proof_witness = proof_witnesses
+            .pop_front()
+            .map(|el| Some(el))
+            .unwrap_or(padding_proof.clone());
 
-        let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
+        // sanity check
+        if let Some(proof_witness) = proof_witness.as_ref() {
+            if let Some(padding_proof) = padding_proof.as_ref() {
+                assert!(Proof::is_same_geometry(proof_witness, padding_proof));
+            }
+        }
+
+        let proof = AllocatedProof::allocate_from_witness(
+            cs,
+            proof_witness,
+            &verifier,
+            &vk_fixed_parameters,
+            &proof_config
+        );
 
         let chunk_is_empty = subqueue.tail.length.is_zero(cs);
         let chunk_is_meaningful = chunk_is_empty.negated(cs);

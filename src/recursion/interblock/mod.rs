@@ -35,7 +35,7 @@ pub struct InterblockRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: Field
     pub proof_config: ProofConfig,
     pub verification_key: VerificationKey<F, H>,
     pub capacity: usize,
-    pub padding_proof: Proof<F, H, EXT>,
+    pub padding_proof: Option<Proof<F, H, EXT>>,
 }
 
 pub trait InputAggregationFunction<F: SmallField> {
@@ -100,22 +100,25 @@ pub fn interblock_recursion_function<
     let vk = AllocatedVerificationKey::allocate_constant(cs, verification_key);
 
     for _ in 0..capacity {
-        // here we do the trick to protect ourselves from setup pending from witness, but
-        // nevertheless do not create new types for proofs with fixed number of inputs, etc
-        let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
-            padding_proof.clone()
-        } else {
-            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
-                // proving mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            } else {
-                // we are in the testing mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
+        let proof_witness = proof_witnesses
+            .pop_front()
+            .map(|el| Some(el))
+            .unwrap_or(padding_proof.clone());
+
+        // sanity check
+        if let Some(proof_witness) = proof_witness.as_ref() {
+            if let Some(padding_proof) = padding_proof.as_ref() {
+                assert!(Proof::is_same_geometry(proof_witness, padding_proof));
             }
-        };
-        assert!(Proof::is_same_geometry(&witness, &padding_proof));
-        
-        let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
+        }
+
+        let proof = AllocatedProof::allocate_from_witness(
+            cs,
+            proof_witness,
+            &verifier,
+            &fixed_parameters,
+            &proof_config
+        );
 
         // verify the proof
         let (is_valid, public_inputs) = verifier.verify::<H, TR, CTR, POW>(

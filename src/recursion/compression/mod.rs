@@ -32,7 +32,7 @@ use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 pub struct CompressionRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
     pub proof_config: ProofConfig,
     pub verification_key: VerificationKey<F, H>,
-    pub padding_proof: Proof<F, H, EXT>,
+    pub padding_proof: Option<Proof<F, H, EXT>>,
 }
 
 pub fn proof_compression_function<
@@ -82,22 +82,24 @@ pub fn proof_compression_function<
 
     let vk = AllocatedVerificationKey::allocate_constant(cs, verification_key);
 
-    // here we do the trick to protect ourselves from setup pending from witness, but
-    // nevertheless do not create new types for proofs with fixed number of inputs, etc
-    let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
-        padding_proof.clone()
-    } else {
-        if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
-            // proving mode
-            proof_witness.unwrap()
-        } else {
-            // we are in the testing mode
-            proof_witness.unwrap()
-        }
-    };
-    assert!(Proof::is_same_geometry(&witness, &padding_proof));
+    let proof_witness = proof_witness
+        .map(|el| Some(el))
+        .unwrap_or(padding_proof.clone());
 
-    let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
+    // sanity check
+    if let Some(proof_witness) = proof_witness.as_ref() {
+        if let Some(padding_proof) = padding_proof.as_ref() {
+            assert!(Proof::is_same_geometry(proof_witness, padding_proof));
+        }
+    }
+
+    let proof = AllocatedProof::allocate_from_witness(
+        cs,
+        proof_witness,
+        &verifier,
+        &fixed_parameters,
+        &proof_config
+    );
 
     // verify the proof
     let (is_valid, public_inputs) = verifier.verify::<H, TR, CTR, POW>(

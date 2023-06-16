@@ -78,7 +78,7 @@ pub const QUEUE_FINAL_STATE_COMMITMENT_LENGTH: usize = 4;
 pub struct SchedulerConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
     pub proof_config: ProofConfig,
     pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
-    pub padding_proof: Proof<F, H, EXT>,
+    pub padding_proof: Option<Proof<F, H, EXT>>,
     pub capacity: usize,
 }
 
@@ -854,26 +854,25 @@ pub fn scheduler_function<
         let expected_input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
             commit_variable_length_encodable_item(cs, &input, round_function);
 
-        // here we do the trick to protect ourselves from setup pending from witness, but
-        // nevertheless do not create new types for proofs with fixed number of inputs, etc
-        let proof_witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
-            config.padding_proof.clone()
-        } else {
-            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
-                // proving mode
-                proof_witnesses
+        let proof_witness = proof_witnesses
                 .pop_front()
-                .unwrap_or(config.padding_proof.clone())
-            } else {
-                // we are in the testing mode
-                proof_witnesses
-                .pop_front()
-                .unwrap_or(config.padding_proof.clone())
-            }
-        };
-        assert!(Proof::is_same_geometry(&proof_witness, &config.padding_proof));
+                .map(|el| Some(el))
+                .unwrap_or(config.padding_proof.clone());
 
-        let proof = AllocatedProof::allocate(cs, proof_witness);
+        // sanity check
+        if let Some(proof_witness) = proof_witness.as_ref() {
+            if let Some(padding_proof) = config.padding_proof.as_ref() {
+                assert!(Proof::is_same_geometry(proof_witness, padding_proof));
+            }
+        }
+
+        let proof = AllocatedProof::allocate_from_witness(
+            cs,
+            proof_witness,
+            &verifier,
+            &config.vk_fixed_parameters,
+            &config.proof_config
+        );
 
         let (is_valid, inputs) = verifier.verify::<H, TR, CTR, POW>(
             cs,
