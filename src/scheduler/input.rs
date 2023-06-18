@@ -83,28 +83,30 @@ pub struct SchedulerCircuitInstanceWitness<
     pub leaf_layer_parameters: [RecursionLeafParametersWitness<F>; NUM_BASE_LAYER_CIRCUITS],
 }
 
-impl<
-F: SmallField,
-H: RecursiveTreeHasher<F, Num<F>>,
-EXT: FieldExtension<2, BaseField = F>,
-> SchedulerCircuitInstanceWitness<F, H, EXT> {
+impl<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, BaseField = F>>
+    SchedulerCircuitInstanceWitness<F, H, EXT>
+{
     pub fn placeholder() -> Self {
         Self {
             prev_block_data: BlockPassthroughData::placeholder_witness(),
             block_meta_parameters: BlockMetaParameters::placeholder_witness(),
 
             vm_end_of_execution_observable_output: VmOutputData::placeholder_witness(),
-            decommits_sorter_observable_output: CodeDecommittmentsDeduplicatorOutputData::placeholder_witness(),
+            decommits_sorter_observable_output:
+                CodeDecommittmentsDeduplicatorOutputData::placeholder_witness(),
             code_decommitter_observable_output: CodeDecommitterOutputData::placeholder_witness(),
             log_demuxer_observable_output: LogDemuxerOutputData::placeholder_witness(),
             keccak256_observable_output: PrecompileFunctionOutputData::placeholder_witness(),
             sha256_observable_output: PrecompileFunctionOutputData::placeholder_witness(),
             ecrecover_observable_output: PrecompileFunctionOutputData::placeholder_witness(),
             storage_sorter_observable_output: StorageDeduplicatorOutputData::placeholder_witness(),
-            storage_application_observable_output: StorageApplicationOutputData::placeholder_witness(),
+            storage_application_observable_output:
+                StorageApplicationOutputData::placeholder_witness(),
             events_sorter_observable_output: EventsDeduplicatorOutputData::placeholder_witness(),
-            l1messages_sorter_observable_output: EventsDeduplicatorOutputData::placeholder_witness(),
-            l1messages_linear_hasher_observable_output: LinearHasherOutputData::placeholder_witness(),
+            l1messages_sorter_observable_output: EventsDeduplicatorOutputData::placeholder_witness(
+            ),
+            l1messages_linear_hasher_observable_output: LinearHasherOutputData::placeholder_witness(
+            ),
 
             storage_log_tail: [F::ZERO; QUEUE_STATE_WIDTH],
             per_circuit_closed_form_inputs: VecDeque::new(),
@@ -122,7 +124,9 @@ EXT: FieldExtension<2, BaseField = F>,
 
             proof_witnesses: VecDeque::new(),
             node_layer_vk_witness: VerificationKey::default(),
-            leaf_layer_parameters: std::array::from_fn(|_| RecursionLeafParameters::placeholder_witness()),
+            leaf_layer_parameters: std::array::from_fn(|_| {
+                RecursionLeafParameters::placeholder_witness()
+            }),
         }
     }
 }

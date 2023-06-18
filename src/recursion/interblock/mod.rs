@@ -5,44 +5,53 @@ pub use self::input::*;
 
 pub mod keccak_aggregator;
 
+use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::config::*;
+use boojum::cs::implementations::proof::Proof;
+use boojum::cs::implementations::prover::ProofConfig;
 use boojum::cs::implementations::verifier::VerificationKey;
+use boojum::cs::oracle::TreeHasher;
+use boojum::cs::traits::circuit::ErasedBuilderForRecursiveVerifier;
+use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::field::FieldExtension;
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
-use boojum::cs::implementations::prover::ProofConfig;
-use boojum::cs::oracle::TreeHasher;
-use boojum::field::FieldExtension;
-use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::recursion::recursive_tree_hasher::*;
-use boojum::gadgets::recursion::recursive_transcript::*;
-use boojum::gadgets::recursion::circuit_pow::RecursivePoWRunner;
-use boojum::cs::traits::circuit::ErasedBuilderForRecursiveVerifier;
-use boojum::config::*;
-use boojum::cs::implementations::proof::Proof;
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
+use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
+use boojum::gadgets::recursion::circuit_pow::RecursivePoWRunner;
+use boojum::gadgets::recursion::recursive_transcript::*;
+use boojum::gadgets::recursion::recursive_tree_hasher::*;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
-use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
 // performs recursion between "independent" units for FIXED verification key
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug)]
 #[serde(bound = "H::Output: serde::Serialize + serde::de::DeserializeOwned")]
-pub struct InterblockRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
+pub struct InterblockRecursionConfig<
+    F: SmallField,
+    H: TreeHasher<F>,
+    EXT: FieldExtension<2, BaseField = F>,
+> {
     pub proof_config: ProofConfig,
     pub verification_key: VerificationKey<F, H>,
     pub capacity: usize,
-    pub padding_proof: Option<Proof<F, H, EXT>>,
+    pub _marker: std::marker::PhantomData<(F, H, EXT)>,
 }
 
 pub trait InputAggregationFunction<F: SmallField> {
     type Params;
 
     fn new<CS: ConstraintSystem<F>>(cs: &mut CS, params: Self::Params) -> Self;
-    fn aggregate_inputs<CS: ConstraintSystem<F>>(&self, cs: &mut CS, inputs: &[Vec<Num<F>>], validity_flags: &[Boolean<F>]) -> Vec<Num<F>>;
+    fn aggregate_inputs<CS: ConstraintSystem<F>>(
+        &self,
+        cs: &mut CS,
+        inputs: &[Vec<Num<F>>],
+        validity_flags: &[Boolean<F>],
+    ) -> Vec<Num<F>>;
 }
 
 pub fn interblock_recursion_function<
@@ -79,14 +88,17 @@ pub fn interblock_recursion_function<
         proof_config,
         verification_key,
         capacity,
-        padding_proof,
+        ..
     } = config;
 
     // use this and deal with borrow checker
 
     let r = cs as *mut CS;
 
-    assert_eq!(verification_key.fixed_parameters.parameters, verifier_builder.geometry());
+    assert_eq!(
+        verification_key.fixed_parameters.parameters,
+        verifier_builder.geometry()
+    );
 
     let fixed_parameters = verification_key.fixed_parameters.clone();
 
@@ -100,24 +112,14 @@ pub fn interblock_recursion_function<
     let vk = AllocatedVerificationKey::allocate_constant(cs, verification_key);
 
     for _ in 0..capacity {
-        let proof_witness = proof_witnesses
-            .pop_front()
-            .map(|el| Some(el))
-            .unwrap_or(padding_proof.clone());
-
-        // sanity check
-        if let Some(proof_witness) = proof_witness.as_ref() {
-            if let Some(padding_proof) = padding_proof.as_ref() {
-                assert!(Proof::is_same_geometry(proof_witness, padding_proof));
-            }
-        }
+        let proof_witness = proof_witnesses.pop_front();
 
         let proof = AllocatedProof::allocate_from_witness(
             cs,
             proof_witness,
             &verifier,
             &fixed_parameters,
-            &proof_config
+            &proof_config,
         );
 
         // verify the proof
@@ -140,11 +142,7 @@ pub fn interblock_recursion_function<
     // now actually aggregate
 
     let aggregator = AGG::new(cs, aggregation_params);
-    let aggregated_input = aggregator.aggregate_inputs(
-        cs,
-        &inputs,
-        &validity_flags,
-    );
+    let aggregated_input = aggregator.aggregate_inputs(cs, &inputs, &validity_flags);
 
     assert_eq!(aggregated_input.len(), INPUT_OUTPUT_COMMITMENT_LENGTH);
 

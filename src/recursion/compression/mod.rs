@@ -3,36 +3,40 @@ use super::*;
 pub mod input;
 pub use self::input::*;
 
+use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
+use boojum::config::*;
+use boojum::cs::implementations::proof::Proof;
+use boojum::cs::implementations::prover::ProofConfig;
 use boojum::cs::implementations::verifier::VerificationKey;
+use boojum::cs::oracle::TreeHasher;
+use boojum::cs::traits::circuit::ErasedBuilderForRecursiveVerifier;
+use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::field::FieldExtension;
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::num::Num;
-use boojum::cs::implementations::prover::ProofConfig;
-use boojum::cs::oracle::TreeHasher;
-use boojum::field::FieldExtension;
-use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
-use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::gadgets::recursion::recursive_tree_hasher::*;
-use boojum::gadgets::recursion::recursive_transcript::*;
-use boojum::gadgets::recursion::circuit_pow::RecursivePoWRunner;
-use boojum::cs::traits::circuit::ErasedBuilderForRecursiveVerifier;
-use boojum::config::*;
-use boojum::cs::implementations::proof::Proof;
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
+use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
+use boojum::gadgets::recursion::circuit_pow::RecursivePoWRunner;
+use boojum::gadgets::recursion::recursive_transcript::*;
+use boojum::gadgets::recursion::recursive_tree_hasher::*;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
-use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
+use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 
 // We recursively verify SINGLE proofs over FIXED VK and output it's inputs
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug)]
 #[serde(bound = "H::Output: serde::Serialize + serde::de::DeserializeOwned")]
-pub struct CompressionRecursionConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
+pub struct CompressionRecursionConfig<
+    F: SmallField,
+    H: TreeHasher<F>,
+    EXT: FieldExtension<2, BaseField = F>,
+> {
     pub proof_config: ProofConfig,
     pub verification_key: VerificationKey<F, H>,
-    pub padding_proof: Option<Proof<F, H, EXT>>,
+    pub _marker: std::marker::PhantomData<(F, H, EXT)>,
 }
 
 pub fn proof_compression_function<
@@ -65,14 +69,17 @@ pub fn proof_compression_function<
     let CompressionRecursionConfig {
         proof_config,
         verification_key,
-        padding_proof,
+        ..
     } = config;
 
     // use this and deal with borrow checker
 
     let r = cs as *mut CS;
 
-    assert_eq!(verification_key.fixed_parameters.parameters, verifier_builder.geometry());
+    assert_eq!(
+        verification_key.fixed_parameters.parameters,
+        verifier_builder.geometry()
+    );
 
     let fixed_parameters = verification_key.fixed_parameters.clone();
 
@@ -82,23 +89,12 @@ pub fn proof_compression_function<
 
     let vk = AllocatedVerificationKey::allocate_constant(cs, verification_key);
 
-    let proof_witness = proof_witness
-        .map(|el| Some(el))
-        .unwrap_or(padding_proof.clone());
-
-    // sanity check
-    if let Some(proof_witness) = proof_witness.as_ref() {
-        if let Some(padding_proof) = padding_proof.as_ref() {
-            assert!(Proof::is_same_geometry(proof_witness, padding_proof));
-        }
-    }
-
     let proof = AllocatedProof::allocate_from_witness(
         cs,
         proof_witness,
         &verifier,
         &fixed_parameters,
-        &proof_config
+        &proof_config,
     );
 
     // verify the proof

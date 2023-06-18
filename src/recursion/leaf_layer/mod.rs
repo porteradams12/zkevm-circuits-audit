@@ -49,7 +49,7 @@ pub struct LeafLayerRecursionConfig<
     pub proof_config: ProofConfig,
     pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
     pub capacity: usize,
-    pub padding_proof: Option<Proof<F, H, EXT>>,
+    pub _marker: std::marker::PhantomData<(F, H, EXT)>,
 }
 
 // NOTE: does NOT allocate public inputs! we will deal with locations of public inputs being the same at the "outer" stage
@@ -119,7 +119,10 @@ where
     let vk_commitment_computed: [_; VK_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &vk, round_function);
 
-    for (a, b) in basic_circuit_vk_commitment.iter().zip(vk_commitment_computed.iter()) {
+    for (a, b) in basic_circuit_vk_commitment
+        .iter()
+        .zip(vk_commitment_computed.iter())
+    {
         Num::conditionally_enforce_equal(cs, is_meaningful, a, b);
     }
 
@@ -129,7 +132,7 @@ where
         proof_config,
         vk_fixed_parameters,
         capacity,
-        padding_proof,
+        ..
     } = config;
 
     // use this and deal with borrow checker
@@ -145,24 +148,14 @@ where
     let cs = unsafe { &mut *r };
 
     for _ in 0..capacity {
-        let proof_witness = proof_witnesses
-            .pop_front()
-            .map(|el| Some(el))
-            .unwrap_or(padding_proof.clone());
-
-        // sanity check
-        if let Some(proof_witness) = proof_witness.as_ref() {
-            if let Some(padding_proof) = padding_proof.as_ref() {
-                assert!(Proof::is_same_geometry(proof_witness, padding_proof));
-            }
-        }
+        let proof_witness = proof_witnesses.pop_front();
 
         let proof = AllocatedProof::allocate_from_witness(
             cs,
             proof_witness,
             &verifier,
             &vk_fixed_parameters,
-            &proof_config
+            &proof_config,
         );
 
         let queue_is_empty = queue.is_empty(cs);

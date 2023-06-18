@@ -58,8 +58,9 @@ impl BaseLayerCircuitType {
             a if a == Self::EventsRevertsFilter as u8 => Self::EventsRevertsFilter,
             a if a == Self::L1MessagesRevertsFilter as u8 => Self::L1MessagesRevertsFilter,
             a if a == Self::L1MessagesHasher as u8 => Self::L1MessagesHasher,
-            _ => {panic!("unknown circuit type {}", value)}
-
+            _ => {
+                panic!("unknown circuit type {}", value)
+            }
         }
     }
 }
@@ -225,12 +226,14 @@ pub(crate) fn compute_hasher_circuit_commitment<
     let input_data = LinearHasherInputData {
         queue_state: input_queue_state.clone(),
     };
-    let input_data_commitment = commit_variable_length_encodable_item(cs, &input_data, round_function);
+    let input_data_commitment =
+        commit_variable_length_encodable_item(cs, &input_data, round_function);
 
     let output_data = LinearHasherOutputData {
         keccak256_hash: *pubdata_hash,
     };
-    let output_data_commitment = commit_variable_length_encodable_item(cs, &output_data, round_function);
+    let output_data_commitment =
+        commit_variable_length_encodable_item(cs, &output_data, round_function);
 
     (input_data_commitment, output_data_commitment)
 }

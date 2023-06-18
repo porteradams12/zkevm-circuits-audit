@@ -17,7 +17,10 @@ use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
     queue::*,
-    traits::{allocatable::{CSAllocatableExt, CSAllocatable}, selectable::Selectable},
+    traits::{
+        allocatable::{CSAllocatable, CSAllocatableExt},
+        selectable::Selectable,
+    },
     u16::UInt16,
     u256::UInt256,
     u32::UInt32,
@@ -445,6 +448,7 @@ mod tests {
     use crate::base_structures::decommit_query;
 
     use super::*;
+    use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
     use boojum::cs::implementations::reference_cs::CSDevelopmentAssembly;
     use boojum::cs::traits::gate::GatePlacementStrategy;
@@ -453,13 +457,12 @@ mod tests {
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
     use boojum::gadgets::tables::*;
-    use boojum::gadgets::traits::allocatable::{CSPlaceholder, CSAllocatable};
+    use boojum::gadgets::traits::allocatable::{CSAllocatable, CSPlaceholder};
     use boojum::gadgets::u160::UInt160;
     use boojum::gadgets::u256::UInt256;
     use boojum::gadgets::u8::UInt8;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;
-    use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
     use ethereum_types::{Address, U256};
 
     type F = GoldilocksField;

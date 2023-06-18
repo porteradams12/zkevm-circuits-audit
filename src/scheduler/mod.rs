@@ -38,7 +38,6 @@ use crate::recursion::VK_COMMITMENT_LENGTH;
 use crate::scheduler::auxiliary::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
-use boojum::config::*;
 
 use crate::base_structures::precompile_input_outputs::*;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -79,8 +78,8 @@ pub const QUEUE_FINAL_STATE_COMMITMENT_LENGTH: usize = 4;
 pub struct SchedulerConfig<F: SmallField, H: TreeHasher<F>, EXT: FieldExtension<2, BaseField = F>> {
     pub proof_config: ProofConfig,
     pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
-    pub padding_proof: Option<Proof<F, H, EXT>>,
     pub capacity: usize,
+    pub _marker: std::marker::PhantomData<(F, H, EXT)>,
 }
 
 pub fn scheduler_function<
@@ -190,10 +189,8 @@ pub fn scheduler_function<
         witness.l1messages_sorter_observable_output.clone(),
     );
 
-    let l1messages_linear_hasher_observable_output = LinearHasherOutputData::allocate(
-        cs,
-        witness.l1messages_linear_hasher_observable_output,
-    );
+    let l1messages_linear_hasher_observable_output =
+        LinearHasherOutputData::allocate(cs, witness.l1messages_linear_hasher_observable_output);
 
     // auxilary intermediate states
     let rollup_storage_sorter_intermediate_queue_state = QueueTailState::allocate(
@@ -483,7 +480,7 @@ pub fn scheduler_function<
                 ),
                 (
                     BaseLayerCircuitType::L1MessagesHasher,
-                    l1_messages_hasher_input_com
+                    l1_messages_hasher_input_com,
                 ),
             ]
             .into_iter(),
@@ -539,7 +536,7 @@ pub fn scheduler_function<
                 ),
                 (
                     BaseLayerCircuitType::L1MessagesHasher,
-                    l1_messages_hasher_output_com
+                    l1_messages_hasher_output_com,
                 ),
             ]
             .into_iter(),
@@ -684,8 +681,11 @@ pub fn scheduler_function<
             let sample_circuit_commitment = input_commitments_as_map
                 .get(circuit_type)
                 .cloned()
-                .expect(&format!("circuit input commitment for type {:?}", circuit_type));
-                // .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
+                .expect(&format!(
+                    "circuit input commitment for type {:?}",
+                    circuit_type
+                ));
+            // .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
 
             let validate = if let Some(skip_flag) = skip_flag {
                 let not_skip = skip_flag.negated(cs); // this is memoized
@@ -705,7 +705,10 @@ pub fn scheduler_function<
 
             let validate_output = if let Some(skip_flag) = skip_flag {
                 let not_skip = skip_flag.negated(cs); // this is memoized
-                Boolean::multi_and(cs, &[closed_form_input.completion_flag, not_skip, *stage_flag])
+                Boolean::multi_and(
+                    cs,
+                    &[closed_form_input.completion_flag, not_skip, *stage_flag],
+                )
             } else {
                 Boolean::multi_and(cs, &[closed_form_input.completion_flag, *stage_flag])
             };
@@ -713,8 +716,11 @@ pub fn scheduler_function<
             let sample_circuit_commitment = output_commitments_as_map
                 .get(circuit_type)
                 .cloned()
-                .expect(&format!("circuit output commitment for type {:?}", circuit_type));
-                // .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
+                .expect(&format!(
+                    "circuit output commitment for type {:?}",
+                    circuit_type
+                ));
+            // .unwrap_or([zero_num; CLOSED_FORM_COMMITTMENT_LENGTH]);
 
             conditionally_enforce_circuit_commitment(
                 cs,
@@ -776,17 +782,17 @@ pub fn scheduler_function<
         // for the next stage we do shifted AND
         let mut tmp = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
         // note skip(1)
-        for (idx, start_next) in next_mask.iter().enumerate()
-        {
+        for (idx, start_next) in next_mask.iter().enumerate() {
             let finished_this_stage = *start_next;
             let not_finished = finished_this_stage.negated(cs);
-            let proceed_current = Boolean::multi_and(cs, &[execution_stage_bitmask[idx], not_finished]);
-            // update 
+            let proceed_current =
+                Boolean::multi_and(cs, &[execution_stage_bitmask[idx], not_finished]);
+            // update
             let start_as_next = tmp[idx];
             let do_this_stage = Boolean::multi_or(cs, &[start_as_next, proceed_current]);
             execution_stage_bitmask[idx] = do_this_stage;
             if idx + 1 < NUM_CIRCUIT_TYPES_TO_SCHEDULE {
-                tmp[idx+1] = finished_this_stage;
+                tmp[idx + 1] = finished_this_stage;
             }
         }
 
@@ -836,7 +842,7 @@ pub fn scheduler_function<
         .enumerate()
     {
         println!("Verifying idx = {}", _idx);
-        
+
         let should_skip = state.length.is_zero(cs);
         let should_verify = should_skip.negated(cs);
 
@@ -856,23 +862,14 @@ pub fn scheduler_function<
             commit_variable_length_encodable_item(cs, &input, round_function);
 
         let proof_witness = proof_witnesses
-                .pop_front()
-                .map(|el| Some(el))
-                .unwrap_or(config.padding_proof.clone());
-
-        // sanity check
-        if let Some(proof_witness) = proof_witness.as_ref() {
-            if let Some(padding_proof) = config.padding_proof.as_ref() {
-                assert!(Proof::is_same_geometry(proof_witness, padding_proof));
-            }
-        }
+            .pop_front();
 
         let proof = AllocatedProof::allocate_from_witness(
             cs,
             proof_witness,
             &verifier,
             &config.vk_fixed_parameters,
-            &config.proof_config
+            &config.proof_config,
         );
 
         let (is_valid, inputs) = verifier.verify::<H, TR, CTR, POW>(

@@ -18,6 +18,7 @@ pub mod demux_log_queue;
 pub mod ecrecover;
 pub mod fsm_input_output;
 pub mod keccak256_round_function;
+pub mod linear_hasher;
 pub mod log_sorter;
 pub mod main_vm;
 pub mod ram_permutation;
@@ -27,7 +28,6 @@ pub mod sha256_round_function;
 pub mod sort_decommittment_requests;
 pub mod storage_application;
 pub mod storage_validity_by_grand_product;
-pub mod linear_hasher;
 pub mod tables;
 pub mod utils;
 

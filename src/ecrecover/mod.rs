@@ -786,11 +786,11 @@ mod test {
     use boojum::cs::cs_builder::*;
     use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
     use boojum::cs::gates::*;
+    use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::gadgets::tables::*;
-    use boojum::cs::traits::gate::GatePlacementStrategy;
 
     #[test]
     fn test_signature_for_address_verification() {

@@ -1,5 +1,5 @@
-use boojum::{gadgets::u8::UInt8, cs::traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
+use boojum::{cs::traits::cs::ConstraintSystem, gadgets::u8::UInt8};
 
 use super::*;
 
