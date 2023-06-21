@@ -160,7 +160,7 @@ where
         limbs: limbs,
         non_zero_limbs: 16,
         tracker: OverflowTracker { max_moduluses },
-        form: RepresentationForm::Normalized,
+        form: RepresentationForm::Lazy,
         params: params.clone(),
         _marker: std::marker::PhantomData,
     };
@@ -206,7 +206,7 @@ fn convert_uint256_to_field_element<
         limbs: limbs,
         non_zero_limbs: 16,
         tracker: OverflowTracker { max_moduluses },
-        form: RepresentationForm::Normalized,
+        form: RepresentationForm::Lazy,
         params: params.clone(),
         _marker: std::marker::PhantomData,
     };
