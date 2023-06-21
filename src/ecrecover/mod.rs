@@ -243,11 +243,11 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     mut point: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>,
     mut scalar: Secp256ScalarNNField<F>,
+    base_field_params: &Arc<Secp256BaseNNFieldParams>,
+    scalar_field_params: &Arc<Secp256ScalarNNFieldParams>,
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
-    let scalar_params = Arc::new(secp256k1_scalar_field_params());
     let pow_2_128 = U256::from_dec_str("340282366920938463463374607431768211456").unwrap();
     let pow_2_128 = UInt512::allocated_constant(cs, (pow_2_128, U256::zero()));
-    let base_params = Arc::new(secp256k1_base_field_params());
 
     let beta = U256::from_str_radix(
         "7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee",
@@ -255,7 +255,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     )
     .unwrap();
     let v = UInt256::allocated_constant(cs, beta);
-    let mut beta = convert_uint256_to_field_element(cs, &v, &base_params);
+    let mut beta = convert_uint256_to_field_element(cs, &v, &base_field_params);
 
     let bigint_from_hex_str = |cs: &mut CS, s: &str| -> UInt512<F> {
         let v = U256::from_str_radix(s, 16).unwrap();
@@ -289,12 +289,12 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         let b1_times_k = b1_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
         let c2 = b1_times_k.0.to_high();
 
-        let mut a1 = convert_uint256_to_field_element(cs, &a1, &scalar_params);
-        let mut b1 = convert_uint256_to_field_element(cs, &b1, &scalar_params);
-        let mut a2 = convert_uint256_to_field_element(cs, &a2, &scalar_params);
+        let mut a1 = convert_uint256_to_field_element(cs, &a1, &scalar_field_params);
+        let mut b1 = convert_uint256_to_field_element(cs, &b1, &scalar_field_params);
+        let mut a2 = convert_uint256_to_field_element(cs, &a2, &scalar_field_params);
         let mut b2 = a1.clone();
-        let mut c1 = convert_uint256_to_field_element(cs, &c1, &scalar_params);
-        let mut c2 = convert_uint256_to_field_element(cs, &c2, &scalar_params);
+        let mut c1 = convert_uint256_to_field_element(cs, &c1, &scalar_field_params);
+        let mut c2 = convert_uint256_to_field_element(cs, &c2, &scalar_field_params);
 
         let mut c1_times_a1 = c1.mul(cs, &mut a1);
         let mut c2_times_a2 = c2.mul(cs, &mut a2);
@@ -445,7 +445,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     let naf1 = to_wnaf(cs, k1, k1_neg);
     let naf2 = to_wnaf(cs, k2, k2_neg);
     let mut acc =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_field_params);
     for i in (0..129).rev() {
         naf_add(cs, &t1, naf1[i], &mut acc);
         naf_add(cs, &t2, naf2[i], &mut acc);
@@ -698,7 +698,13 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     let mut recovered_point =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(cs, x, y);
     // now we do multiplication
-    let mut s_times_x = wnaf_scalar_mul(cs, recovered_point.clone(), s_by_r_inv.clone());
+    let mut s_times_x = wnaf_scalar_mul(
+        cs,
+        recovered_point.clone(),
+        s_by_r_inv.clone(),
+        &base_field_params,
+        &scalar_field_params,
+    );
     let (mut s_times_x_affine, _) =
         s_times_x.convert_to_affine_or_default(cs, Secp256Affine::one());
 
@@ -1280,321 +1286,6 @@ mod test {
         let recovered_address = recovered_address.witness_hook(cs)().unwrap();
         assert_eq!(&recovered_address[12..], &eth_address[..]);
 
-        dbg!(cs.next_available_row());
-
-        cs.pad_and_shrink();
-
-        let mut cs = owned_cs.into_assembly();
-        cs.print_gate_stats();
-        let worker = Worker::new();
-        assert!(cs.check_if_satisfied(&worker));
-    }
-
-    #[test]
-    fn test_wnaf() {
-        let geometry = CSGeometry {
-            num_columns_under_copy_permutation: 100,
-            num_witness_columns: 0,
-            num_constant_columns: 8,
-            max_allowed_constraint_degree: 4,
-        };
-        let max_variables = 1 << 26;
-        let max_trace_len = 1 << 20;
-
-        fn configure<
-            F: SmallField,
-            T: CsBuilderImpl<F, T>,
-            GC: GateConfigurationHolder<F>,
-            TB: StaticToolboxHolder,
-        >(
-            builder: CsBuilder<T, F, GC, TB>,
-        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
-            let builder = builder.allow_lookup(
-                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
-                    width: 3,
-                    num_repetitions: 8,
-                    share_table_id: true,
-                },
-            );
-            let builder = U8x4FMAGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ConstantsAllocatorGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ReductionGate::<F, 4>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
-            let builder = BooleanConstraintGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<32>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<16>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = SelectionGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ZeroCheckGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-                false,
-            );
-            let builder = DotProductGate::<4>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
-            let builder = NopGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-
-            builder
-        }
-
-        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry,
-            max_variables,
-            max_trace_len,
-        );
-        let builder = new_builder::<_, F>(builder_impl);
-
-        let builder = configure(builder);
-        let mut owned_cs = builder.build(());
-
-        // add tables
-        let table = create_xor8_table();
-        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
-
-        let table = create_and8_table();
-        owned_cs.add_lookup_table::<And8Table, 3>(table);
-
-        let table = create_div_two8_table();
-        owned_cs.add_lookup_table::<DivTwo8Table, 3>(table);
-
-        let table = create_byte_split_table::<F, 1>();
-        owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
-        let table = create_byte_split_table::<F, 2>();
-        owned_cs.add_lookup_table::<ByteSplitTable<2>, 3>(table);
-        let table = create_byte_split_table::<F, 3>();
-        owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
-        let table = create_byte_split_table::<F, 4>();
-        owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
-        let table = create_byte_split_table::<F, 7>();
-        owned_cs.add_lookup_table::<ByteSplitTable<7>, 3>(table);
-
-        let cs = &mut owned_cs;
-
-        let scalar_params = Arc::new(secp256k1_scalar_field_params());
-        let base_params = Arc::new(secp256k1_base_field_params());
-
-        let scalar = U256::from_str_radix(
-            "0xba970c512de6508041367fb69be09645a349114b310046a1dc08db8d1da17f86",
-            16,
-        )
-        .unwrap();
-        let scalar = UInt256::allocated_constant(cs, scalar);
-        let scalar = convert_uint256_to_field_element(cs, &scalar, &scalar_params);
-
-        let x = U256::from_str_radix(
-            "0x8c06f833d40cd2042ea492789a4d11271bcb10f9c9aaf16c49df53ea67f6cb9b",
-            16,
-        )
-        .unwrap();
-        let y = U256::from_str_radix(
-            "0x7489a93e12cba4b822fdd7ad07a6c5b415d811c59fca45d47a09fd20afb177be",
-            16,
-        )
-        .unwrap();
-        let x = UInt256::allocated_constant(cs, x);
-        let y = UInt256::allocated_constant(cs, y);
-        let x = convert_uint256_to_field_element(cs, &x, &base_params);
-        let y = convert_uint256_to_field_element(cs, &y, &base_params);
-        let point = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(
-            cs, x, y,
-        );
-
-        wnaf_scalar_mul(cs, point, scalar);
-        dbg!(cs.next_available_row());
-
-        cs.pad_and_shrink();
-
-        let mut cs = owned_cs.into_assembly();
-        cs.print_gate_stats();
-        let worker = Worker::new();
-        assert!(cs.check_if_satisfied(&worker));
-    }
-
-    #[test]
-    fn test_standard_mul() {
-        let geometry = CSGeometry {
-            num_columns_under_copy_permutation: 100,
-            num_witness_columns: 0,
-            num_constant_columns: 8,
-            max_allowed_constraint_degree: 4,
-        };
-        let max_variables = 1 << 26;
-        let max_trace_len = 1 << 20;
-
-        fn configure<
-            F: SmallField,
-            T: CsBuilderImpl<F, T>,
-            GC: GateConfigurationHolder<F>,
-            TB: StaticToolboxHolder,
-        >(
-            builder: CsBuilder<T, F, GC, TB>,
-        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
-            let builder = builder.allow_lookup(
-                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
-                    width: 3,
-                    num_repetitions: 8,
-                    share_table_id: true,
-                },
-            );
-            let builder = U8x4FMAGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ConstantsAllocatorGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ReductionGate::<F, 4>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
-            let builder = BooleanConstraintGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<32>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<16>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = SelectionGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ZeroCheckGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-                false,
-            );
-            let builder = DotProductGate::<4>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
-            let builder = NopGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-
-            builder
-        }
-
-        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry,
-            max_variables,
-            max_trace_len,
-        );
-        let builder = new_builder::<_, F>(builder_impl);
-
-        let builder = configure(builder);
-        let mut owned_cs = builder.build(());
-
-        // add tables
-        let table = create_xor8_table();
-        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
-
-        let table = create_and8_table();
-        owned_cs.add_lookup_table::<And8Table, 3>(table);
-
-        let table = create_div_two8_table();
-        owned_cs.add_lookup_table::<DivTwo8Table, 3>(table);
-
-        let table = create_byte_split_table::<F, 1>();
-        owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
-        let table = create_byte_split_table::<F, 2>();
-        owned_cs.add_lookup_table::<ByteSplitTable<2>, 3>(table);
-        let table = create_byte_split_table::<F, 3>();
-        owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
-        let table = create_byte_split_table::<F, 4>();
-        owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
-        let table = create_byte_split_table::<F, 7>();
-        owned_cs.add_lookup_table::<ByteSplitTable<7>, 3>(table);
-
-        let cs = &mut owned_cs;
-
-        let scalar_params = Arc::new(secp256k1_scalar_field_params());
-        let base_params = Arc::new(secp256k1_base_field_params());
-
-        let scalar = U256::from_str_radix(
-            "0xba970c512de6508041367fb69be09645a349114b310046a1dc08db8d1da17f86",
-            16,
-        )
-        .unwrap();
-        let scalar = UInt256::allocated_constant(cs, scalar);
-        let scalar = convert_uint256_to_field_element(cs, &scalar, &scalar_params);
-
-        let x = U256::from_str_radix(
-            "0x8c06f833d40cd2042ea492789a4d11271bcb10f9c9aaf16c49df53ea67f6cb9b",
-            16,
-        )
-        .unwrap();
-        let y = U256::from_str_radix(
-            "0x7489a93e12cba4b822fdd7ad07a6c5b415d811c59fca45d47a09fd20afb177be",
-            16,
-        )
-        .unwrap();
-        let x = UInt256::allocated_constant(cs, x);
-        let y = UInt256::allocated_constant(cs, y);
-        let x = convert_uint256_to_field_element(cs, &x, &base_params);
-        let y = convert_uint256_to_field_element(cs, &y, &base_params);
-        let point = SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(
-            cs, x, y,
-        );
-
-        let mut s_times_x =
-            SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_params);
-
-        let s_by_r_inv_bits: Vec<_> = scalar
-            .limbs
-            .iter()
-            .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
-            .flatten()
-            .collect();
-        for (cycle, x_bit) in s_by_r_inv_bits.into_iter().rev().enumerate() {
-            if cycle != 0 {
-                s_times_x = s_times_x.double(cs);
-            }
-            let q_plus_x = s_times_x.add_mixed(cs, &mut (point.x.clone(), point.y.clone()));
-            s_times_x = Selectable::conditionally_select(cs, x_bit, &q_plus_x, &s_times_x);
-        }
         dbg!(cs.next_available_row());
 
         cs.pad_and_shrink();
