@@ -44,6 +44,8 @@ use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 
 pub mod input;
 pub use self::input::*;
+mod naf_abs_div2_table;
+use naf_abs_div2_table::*;
 
 mod secp256k1;
 
@@ -422,13 +424,21 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         naf
     };
 
+    let naf_abs_div2_table_id = cs
+        .get_table_id_for_marker::<NafAbsDiv2Table>()
+        .expect("table must exist");
     let naf_add =
         |cs: &mut CS,
          table: &[(Secp256BaseNNField<F>, Secp256BaseNNField<F>)],
          naf: UInt8<F>,
          acc: &mut SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>| {
             let is_zero = naf.is_zero(cs);
-            let mut coords = &table[(naf.abs(cs).div2(cs)).witness_hook(cs)().unwrap() as usize];
+            let index = unsafe {
+                UInt8::from_variable_unchecked(
+                    cs.perform_lookup::<1, 2>(naf_abs_div2_table_id, &[naf.get_variable()])[0],
+                )
+            };
+            let mut coords = &table[index.witness_hook(cs)().unwrap() as usize];
             let mut p_1 =
                 SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(
                     cs,
@@ -1185,6 +1195,9 @@ mod test {
 
         let table = create_div_two8_table();
         owned_cs.add_lookup_table::<DivTwo8Table, 3>(table);
+
+        let table = create_naf_abs_div2_table();
+        owned_cs.add_lookup_table::<NafAbsDiv2Table, 3>(table);
 
         let table = create_fixed_base_mul_table::<F, 0>();
         owned_cs.add_lookup_table::<FixedBaseMulTable<0>, 3>(table);
