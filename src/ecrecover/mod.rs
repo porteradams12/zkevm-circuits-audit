@@ -393,7 +393,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         // Loop for max amount of bits in e to ensure homogenous circuit
         for _ in 0..129 {
             let is_odd = e.is_odd(cs);
-            let first_byte = e.inner[0].to_le_bytes(cs)[0];
+            let [mut first_byte, second_byte, third_byte, fourth_byte] = e.inner[0].to_le_bytes(cs);
             let naf_sign = mod_signed(cs, first_byte);
             let (_, naf_sign_is_positive) = naf_sign.overflowing_sub(cs, &overflow_checker);
             let neg_naf_sign = naf_sign.negate(cs);
@@ -403,13 +403,13 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
                 &naf_sign,
                 &neg_naf_sign,
             );
-            let naf_value_u32 =
-                unsafe { UInt32::from_variable_unchecked(naf_value.get_variable()) };
-            let (added, _) = e.inner[0].overflowing_add(cs, naf_value_u32);
-            let (subbed, _) = e.inner[0].overflowing_sub(cs, naf_value_u32);
+            let (added, _) = first_byte.overflowing_add(cs, &naf_value);
+            let (subbed, _) = first_byte.overflowing_sub(cs, &naf_value);
             let e_inner_value =
                 Selectable::conditionally_select(cs, naf_sign_is_positive, &subbed, &added);
-            e.inner[0] = Selectable::conditionally_select(cs, is_odd, &e_inner_value, &e.inner[0]);
+            first_byte = Selectable::conditionally_select(cs, is_odd, &e_inner_value, &first_byte);
+            e.inner[0] =
+                UInt32::from_le_bytes(cs, [first_byte, second_byte, third_byte, fourth_byte]);
             let next = Selectable::conditionally_select(cs, is_odd, &naf_sign, &zero);
 
             let next_neg = next.negate(cs);
