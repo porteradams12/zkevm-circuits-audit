@@ -332,10 +332,10 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     const GLV_WINDOW_SIZE: usize = 2;
 
     // The table size, used for w-ary NAF recoding.
-    const TABLE_SIZE: u32 = 1 << (GLV_WINDOW_SIZE + 1);
-    let table_size = UInt32::allocated_constant(cs, TABLE_SIZE);
-    let half_table_size = UInt32::allocated_constant(cs, 1 << GLV_WINDOW_SIZE);
-    let MASK_FOR_MOD_TABLE_SIZE = UInt32::allocated_constant(cs, (TABLE_SIZE as u32) - 1);
+    const TABLE_SIZE: u8 = 1 << (GLV_WINDOW_SIZE + 1);
+    let table_size = UInt8::allocated_constant(cs, TABLE_SIZE);
+    let half_table_size = UInt8::allocated_constant(cs, 1 << GLV_WINDOW_SIZE);
+    let mask_for_mod_table_size = UInt8::allocated_constant(cs, TABLE_SIZE - 1);
     // The GLV table length.
     const L: usize = 1 << (GLV_WINDOW_SIZE - 1);
 
@@ -363,27 +363,21 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     let and_table_id = cs
         .get_table_id_for_marker::<And8Table>()
         .expect("table must exist");
-    let mask_for_mod_table_size_bytes = MASK_FOR_MOD_TABLE_SIZE.to_le_bytes(cs);
 
-    let mod_signed = |cs: &mut CS, d: UInt32<F>| {
-        let d_bytes = d.to_le_bytes(cs);
-        let d_mod_window_size = d_bytes
-            .iter()
-            .zip(mask_for_mod_table_size_bytes)
-            .map(|(one, two)| unsafe {
-                UInt8::from_variable_unchecked(
-                    cs.perform_lookup::<2, 1>(
-                        and_table_id,
-                        &[one.get_variable(), two.get_variable()],
-                    )[0],
-                )
-            })
-            .collect::<Vec<_>>();
-        let mut d_mod_window_size_arr = [UInt8::zero(cs); 4];
-        d_mod_window_size_arr.copy_from_slice(&d_mod_window_size);
-        let d_mod_window_size = UInt32::from_le_bytes(cs, d_mod_window_size_arr);
-        let (d_mod_window_size_minus_table, _) = d_mod_window_size.overflowing_sub(cs, table_size);
-        let (_, overflow) = d_mod_window_size.overflowing_sub(cs, half_table_size);
+    let mod_signed = |cs: &mut CS, d_byte: UInt8<F>| {
+        let d_mod_window_size = unsafe {
+            UInt8::from_variable_unchecked(
+                cs.perform_lookup::<2, 1>(
+                    and_table_id,
+                    &[
+                        d_byte.get_variable(),
+                        mask_for_mod_table_size.get_variable(),
+                    ],
+                )[0],
+            )
+        };
+        let (d_mod_window_size_minus_table, _) = d_mod_window_size.overflowing_sub(cs, &table_size);
+        let (_, overflow) = d_mod_window_size.overflowing_sub(cs, &half_table_size);
         Selectable::conditionally_select(
             cs,
             overflow,
@@ -391,16 +385,17 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             &d_mod_window_size_minus_table,
         )
     };
-    let zero = UInt32::zero(cs);
-    let overflow_checker = UInt32::allocated_constant(cs, 2u32.pow(31));
-    let to_wnaf = |cs: &mut CS, e: Secp256ScalarNNField<F>, neg: Boolean<F>| -> Vec<UInt32<F>> {
+    let zero = UInt8::zero(cs);
+    let overflow_checker = UInt8::allocated_constant(cs, 2u8.pow(7));
+    let to_wnaf = |cs: &mut CS, e: Secp256ScalarNNField<F>, neg: Boolean<F>| -> Vec<UInt8<F>> {
         let mut naf = vec![];
         let mut e = convert_field_element_to_uint256(cs, e);
         // Loop for max amount of bits in e to ensure homogenous circuit
         for _ in 0..129 {
             let is_odd = e.is_odd(cs);
-            let naf_sign = mod_signed(cs, e.inner[0]);
-            let (_, naf_sign_is_positive) = naf_sign.overflowing_sub(cs, overflow_checker);
+            let first_byte = e.inner[0].to_le_bytes(cs)[0];
+            let naf_sign = mod_signed(cs, first_byte);
+            let (_, naf_sign_is_positive) = naf_sign.overflowing_sub(cs, &overflow_checker);
             let neg_naf_sign = naf_sign.negate(cs);
             let naf_value = Selectable::conditionally_select(
                 cs,
@@ -408,8 +403,10 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
                 &naf_sign,
                 &neg_naf_sign,
             );
-            let (added, _) = e.inner[0].overflowing_add(cs, naf_value);
-            let (subbed, _) = e.inner[0].overflowing_sub(cs, naf_value);
+            let naf_value_u32 =
+                unsafe { UInt32::from_variable_unchecked(naf_value.get_variable()) };
+            let (added, _) = e.inner[0].overflowing_add(cs, naf_value_u32);
+            let (subbed, _) = e.inner[0].overflowing_sub(cs, naf_value_u32);
             let e_inner_value =
                 Selectable::conditionally_select(cs, naf_sign_is_positive, &subbed, &added);
             e.inner[0] = Selectable::conditionally_select(cs, is_odd, &e_inner_value, &e.inner[0]);
@@ -428,7 +425,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     let naf_add =
         |cs: &mut CS,
          table: &[(Secp256BaseNNField<F>, Secp256BaseNNField<F>)],
-         naf: UInt32<F>,
+         naf: UInt8<F>,
          acc: &mut SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>| {
             let is_zero = naf.is_zero(cs);
             let mut coords = &table[(naf.abs(cs).div2(cs)).witness_hook(cs)().unwrap() as usize];
@@ -438,7 +435,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
                     coords.0.clone(),
                     coords.1.clone(),
                 );
-            let (_, naf_is_positive) = naf.overflowing_sub(cs, overflow_checker);
+            let (_, naf_is_positive) = naf.overflowing_sub(cs, &overflow_checker);
             let p_1_neg = p_1.negated(cs);
             p_1 = Selectable::conditionally_select(cs, naf_is_positive, &p_1, &p_1_neg);
             let acc_added = acc.add_mixed(cs, &mut (p_1.x, p_1.y));
@@ -589,7 +586,6 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     let mut may_be_recovered_y = t_powers[254].div_unchecked(cs, &mut acc_2);
     may_be_recovered_y.normalize(cs);
     let mut may_be_recovered_y_negated = may_be_recovered_y.negated(cs);
-    may_be_recovered_y_negated.normalize(cs);
 
     let [lowest_bit, ..] =
         Num::<F>::from_variable(may_be_recovered_y.limbs[0]).spread_into_bits::<_, 16>(cs);
@@ -1131,6 +1127,10 @@ mod test {
                 builder,
                 GatePlacementStrategy::UseGeneralPurposeColumns,
             );
+            let builder = UIntXAddGate::<8>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
             let builder = SelectionGate::configure_builder(
                 builder,
                 GatePlacementStrategy::UseGeneralPurposeColumns,
@@ -1167,14 +1167,14 @@ mod test {
         let table = create_xor8_table();
         owned_cs.add_lookup_table::<Xor8Table, 3>(table);
 
+        let table = create_and8_table();
+        owned_cs.add_lookup_table::<And8Table, 3>(table);
+
         let table = create_or8_table();
         owned_cs.add_lookup_table::<Or8Table, 3>(table);
 
         let table = create_div_two8_table();
         owned_cs.add_lookup_table::<DivTwo8Table, 3>(table);
-
-        let table = create_and8_table();
-        owned_cs.add_lookup_table::<And8Table, 3>(table);
 
         let table = create_fixed_base_mul_table::<F, 0>();
         owned_cs.add_lookup_table::<FixedBaseMulTable<0>, 3>(table);
@@ -1377,14 +1377,11 @@ mod test {
         let table = create_xor8_table();
         owned_cs.add_lookup_table::<Xor8Table, 3>(table);
 
-        let table = create_or8_table();
-        owned_cs.add_lookup_table::<Or8Table, 3>(table);
+        let table = create_and8_table();
+        owned_cs.add_lookup_table::<And8Table, 3>(table);
 
         let table = create_div_two8_table();
         owned_cs.add_lookup_table::<DivTwo8Table, 3>(table);
-
-        let table = create_and8_table();
-        owned_cs.add_lookup_table::<And8Table, 3>(table);
 
         let table = create_byte_split_table::<F, 1>();
         owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
@@ -1394,6 +1391,8 @@ mod test {
         owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
         let table = create_byte_split_table::<F, 4>();
         owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
+        let table = create_byte_split_table::<F, 7>();
+        owned_cs.add_lookup_table::<ByteSplitTable<7>, 3>(table);
 
         let cs = &mut owned_cs;
 
@@ -1528,14 +1527,11 @@ mod test {
         let table = create_xor8_table();
         owned_cs.add_lookup_table::<Xor8Table, 3>(table);
 
-        let table = create_or8_table();
-        owned_cs.add_lookup_table::<Or8Table, 3>(table);
+        let table = create_and8_table();
+        owned_cs.add_lookup_table::<And8Table, 3>(table);
 
         let table = create_div_two8_table();
         owned_cs.add_lookup_table::<DivTwo8Table, 3>(table);
-
-        let table = create_and8_table();
-        owned_cs.add_lookup_table::<And8Table, 3>(table);
 
         let table = create_byte_split_table::<F, 1>();
         owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
@@ -1545,6 +1541,8 @@ mod test {
         owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
         let table = create_byte_split_table::<F, 4>();
         owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
+        let table = create_byte_split_table::<F, 7>();
+        owned_cs.add_lookup_table::<ByteSplitTable<7>, 3>(table);
 
         let cs = &mut owned_cs;
 
