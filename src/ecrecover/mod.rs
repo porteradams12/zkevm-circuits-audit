@@ -283,11 +283,11 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
 
         let k = convert_field_element_to_uint256(cs, scalar.clone());
 
-        let b2_times_k = k.widening_mul::<_, 8, 6>(cs, &b2);
+        let b2_times_k = k.widening_mul(cs, &b2, 8, 6);
         let b2_times_k = b2_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
         let c1 = b2_times_k.0.to_high();
 
-        let b1_times_k = k.widening_mul::<_, 8, 6>(cs, &b1);
+        let b1_times_k = k.widening_mul(cs, &b1, 8, 6);
         let b1_times_k = b1_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
         let c2 = b1_times_k.0.to_high();
 
