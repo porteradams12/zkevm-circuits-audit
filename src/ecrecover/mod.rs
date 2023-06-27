@@ -421,6 +421,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
                     let byte = Selectable::conditionally_select(cs, neg, byte, &byte_neg);
                     naf.push(byte);
                 });
+                // Add carry bit
             }
 
             // Shift e and glue it back together.
@@ -445,19 +446,20 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
                         }
                         *b = unsafe { UInt8::from_variable_unchecked(shifted) };
                         carry = Some(new_carry);
-                    } else {
-                        // We can't merge the last byte since it's possible that it's more than 4
-                        // bits long, so we just add the carry to the end value.
-                        if let Some(c) = carry {
-                            let mut carry_array = [UInt32::zero(cs); 8];
-                            carry_array[0] = unsafe { UInt32::from_variable_unchecked(c) };
-                            let carry = UInt256 { inner: carry_array };
-                            e = UInt256::from_le_bytes(cs, bytes);
-                            (e, _) = e.overflowing_add(cs, &carry);
-                        }
                     }
                 });
+
             e = UInt256::from_le_bytes(cs, bytes);
+            // We can't merge the last byte since it's possible that it's more than 4
+            // bits long, so we just add the carry to the end value.
+            if let Some(c) = carry {
+                let z = UInt8::allocated_constant(cs, 0).get_variable();
+                let c = merge_byte_using_table::<_, _, 4>(cs, z, c);
+                let mut carry_array = [UInt32::zero(cs); 8];
+                carry_array[0] = unsafe { UInt32::from_variable_unchecked(c) };
+                let carry = UInt256 { inner: carry_array };
+                (e, _) = e.overflowing_add(cs, &carry);
+            }
         }
 
         naf

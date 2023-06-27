@@ -58,12 +58,12 @@ pub fn create_wnaf_decomp_table<F: SmallField>() -> LookupTable<F, 3> {
 
             let concat = {
                 let mut res = 0u32;
-                res &= v[0] as u32;
+                res |= v[0] as u32;
                 let shifted_v1 = (v[1] as u32) << 8;
-                res &= shifted_v1;
+                res |= shifted_v1;
                 // Add carry bit if we overflowed
                 if carry_bit {
-                    res &= 1 << 16 - 1;
+                    res |= 1 << 16;
                 }
                 res
             };
