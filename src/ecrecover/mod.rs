@@ -11,7 +11,9 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::crypto_bigint::{Zero, U1024};
 use boojum::cs::gates::ConstantAllocatableCS;
 use boojum::cs::traits::cs::ConstraintSystem;
+use boojum::cs::Variable;
 use boojum::field::SmallField;
+use boojum::gadgets::blake2s::mixing_function::merge_byte_using_table;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::curves::sw_projective::SWProjectivePoint;
 use boojum::gadgets::curves::zeroable_affine::ZeroableAffinePoint;
@@ -22,6 +24,7 @@ use boojum::gadgets::num::Num;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
 use boojum::gadgets::tables::And8Table;
+use boojum::gadgets::tables::ByteSplitTable;
 use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
@@ -46,6 +49,8 @@ pub mod input;
 pub use self::input::*;
 mod naf_abs_div2_table;
 use naf_abs_div2_table::*;
+mod decomp_table;
+use decomp_table::*;
 
 mod secp256k1;
 
@@ -389,36 +394,70 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     };
     let zero = UInt8::zero(cs);
     let overflow_checker = UInt8::allocated_constant(cs, 2u8.pow(7));
+    let decomp_id = cs
+        .get_table_id_for_marker::<WnafDecompTable>()
+        .expect("table should exist");
+    let byte_split_id = cs
+        .get_table_id_for_marker::<ByteSplitTable<4>>()
+        .expect("table should exist");
+    // This should be added in case we overflow during wnaf decomp.
+    let carry = UInt256::allocated_constant(cs, U256::from(1 << 16 - 1));
     let to_wnaf = |cs: &mut CS, e: Secp256ScalarNNField<F>, neg: Boolean<F>| -> Vec<UInt8<F>> {
         let mut naf = vec![];
         let mut e = convert_field_element_to_uint256(cs, e);
         // Loop for max amount of bits in e to ensure homogenous circuit
-        for _ in 0..129 {
-            let is_odd = e.is_odd(cs);
-            let [mut first_byte, second_byte, third_byte, fourth_byte] = e.inner[0].to_le_bytes(cs);
-            let naf_sign = mod_signed(cs, first_byte);
-            let (_, naf_sign_is_positive) = naf_sign.overflowing_sub(cs, &overflow_checker);
-            let neg_naf_sign = naf_sign.negate(cs);
-            let naf_value = Selectable::conditionally_select(
-                cs,
-                naf_sign_is_positive,
-                &naf_sign,
-                &neg_naf_sign,
-            );
-            let (added, _) = first_byte.overflowing_add(cs, &naf_value);
-            let (subbed, _) = first_byte.overflowing_sub(cs, &naf_value);
-            let e_inner_value =
-                Selectable::conditionally_select(cs, naf_sign_is_positive, &subbed, &added);
-            first_byte = Selectable::conditionally_select(cs, is_odd, &e_inner_value, &first_byte);
-            e.inner[0] =
-                UInt32::from_le_bytes(cs, [first_byte, second_byte, third_byte, fourth_byte]);
-            let next = Selectable::conditionally_select(cs, is_odd, &naf_sign, &zero);
+        for _ in 0..33 {
+            let mut bytes = e.to_le_bytes(cs);
+            // Since each lookup consumes 2 bits of information, and we need at least 3 bits for
+            // figuring out the NAF number, we can do two lookups before needing to concatenate the
+            // bigger number back together.
+            for _ in 0..2 {
+                let res = cs.perform_lookup::<1, 2>(decomp_id, &[bytes[0].get_variable()]);
+                let wnaf_and_carry_bits = unsafe { UInt32::from_variable_unchecked(res[0]) };
+                let wnaf_bytes = wnaf_and_carry_bits.to_le_bytes(cs);
+                bytes[0] = unsafe { UInt8::from_variable_unchecked(res[1]) };
+                wnaf_bytes[..2].iter().for_each(|byte| {
+                    let byte_neg = byte.negate(cs);
+                    let byte = Selectable::conditionally_select(cs, neg, byte, &byte_neg);
+                    naf.push(byte);
+                });
+            }
 
-            let next_neg = next.negate(cs);
-            let next = Selectable::conditionally_select(cs, neg, &next, &next_neg);
-            naf.push(next);
-
-            e = e.div2(cs);
+            // Shift e and glue it back together.
+            // Because a GLV decomposed scalar is at most 129 bits, we only care to shift
+            // the lower 17 bytes of the number.
+            // XXX: we can slide this window as we get further into the function to save some
+            // constraints too
+            let mut carry: Option<Variable> = None;
+            bytes
+                .clone()
+                .iter_mut()
+                .enumerate()
+                .rev()
+                .skip(15)
+                .for_each(|(i, b)| {
+                    if i != 0 {
+                        let res = cs.perform_lookup::<1, 2>(byte_split_id, &[b.get_variable()]);
+                        let mut shifted = res[1];
+                        let new_carry = res[0];
+                        if let Some(c) = carry {
+                            shifted = merge_byte_using_table::<_, _, 4>(cs, shifted, c);
+                        }
+                        *b = unsafe { UInt8::from_variable_unchecked(shifted) };
+                        carry = Some(new_carry);
+                    } else {
+                        // We can't merge the last byte since it's possible that it's more than 4
+                        // bits long, so we just add the carry to the end value.
+                        if let Some(c) = carry {
+                            let mut carry_array = [UInt32::zero(cs); 8];
+                            carry_array[0] = unsafe { UInt32::from_variable_unchecked(c) };
+                            let carry = UInt256 { inner: carry_array };
+                            e = UInt256::from_le_bytes(cs, bytes);
+                            (e, _) = e.overflowing_add(cs, &carry);
+                        }
+                    }
+                });
+            e = UInt256::from_le_bytes(cs, bytes);
         }
 
         naf
@@ -1190,14 +1229,11 @@ mod test {
         let table = create_and8_table();
         owned_cs.add_lookup_table::<And8Table, 3>(table);
 
-        let table = create_or8_table();
-        owned_cs.add_lookup_table::<Or8Table, 3>(table);
-
-        let table = create_div_two8_table();
-        owned_cs.add_lookup_table::<DivTwo8Table, 3>(table);
-
         let table = create_naf_abs_div2_table();
         owned_cs.add_lookup_table::<NafAbsDiv2Table, 3>(table);
+
+        let table = create_wnaf_decomp_table();
+        owned_cs.add_lookup_table::<WnafDecompTable, 3>(table);
 
         let table = create_fixed_base_mul_table::<F, 0>();
         owned_cs.add_lookup_table::<FixedBaseMulTable<0>, 3>(table);
@@ -1240,6 +1276,8 @@ mod test {
         owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
         let table = create_byte_split_table::<F, 4>();
         owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
+        let table = create_byte_split_table::<F, 7>();
+        owned_cs.add_lookup_table::<ByteSplitTable<7>, 3>(table);
 
         let cs = &mut owned_cs;
 
