@@ -1142,7 +1142,7 @@ mod test {
             max_allowed_constraint_degree: 4,
         };
         let max_variables = 1 << 26;
-        let max_trace_len = 1 << 21;
+        let max_trace_len = 1 << 20;
 
         fn configure<
             F: SmallField,
