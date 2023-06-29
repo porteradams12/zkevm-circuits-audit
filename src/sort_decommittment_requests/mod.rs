@@ -7,6 +7,7 @@ use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
 use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
@@ -15,7 +16,7 @@ use boojum::gadgets::{
     u32::UInt32,
 };
 
-use crate::base_structures::decommit_query::DecommitQueue;
+use crate::base_structures::decommit_query::{DecommitQueue, DECOMMIT_QUERY_PACKED_WIDTH};
 use crate::base_structures::vm_state::*;
 use crate::base_structures::{
     decommit_query::DecommitQuery, memory_query::MEMORY_QUERY_PACKED_WIDTH,
@@ -121,7 +122,7 @@ where
         CS,
         R,
         FULL_SPONGE_QUEUE_STATE_WIDTH,
-        { MEMORY_QUERY_PACKED_WIDTH + 1 },
+        { DECOMMIT_QUERY_PACKED_WIDTH + 1 },
         DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
     >(
         cs,
@@ -241,7 +242,7 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     result_queue: &mut DecommitQueue<F, R>,
     mut lhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut rhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
-    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1];
+    fs_challenges: [[Num<F>; DECOMMIT_QUERY_PACKED_WIDTH + 1];
         DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     previous_packed_key: &mut [UInt32<F>; PACKED_KEY_LENGTH],
     first_encountered_timestamp: &mut UInt32<F>,
@@ -289,8 +290,8 @@ where
 
         for ((challenges, lhs), rhs) in fs_challenges.iter().zip(lhs.iter_mut()).zip(rhs.iter_mut())
         {
-            let mut lhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
-            let mut rhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
+            let mut lhs_contribution = challenges[DECOMMIT_QUERY_PACKED_WIDTH];
+            let mut rhs_contribution = challenges[DECOMMIT_QUERY_PACKED_WIDTH];
 
             for ((original_el, sorted_el), challenge) in original_encoding
                 .iter()
