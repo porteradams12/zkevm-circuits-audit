@@ -17,9 +17,8 @@ const HALF_TABLE_SIZE: i8 = 1 << GLV_WINDOW_SIZE;
 const MASK_FOR_MOD_TABLE_SIZE: u8 = (TABLE_SIZE as u8) - 1;
 
 // Lookups for wNAF decomposition of scalars.
-// Takes in full bytes and spits ou
 pub fn create_wnaf_decomp_table<F: SmallField>() -> LookupTable<F, 3> {
-    let mut all_keys = Vec::with_capacity(1 << 8);
+    let mut all_keys = Vec::with_capacity(1 << 8 - 1);
     for a in 0..=u8::MAX {
         let key = smallvec::smallvec![F::from_u64_unchecked(a as u64)];
         all_keys.push(key);
@@ -39,14 +38,15 @@ pub fn create_wnaf_decomp_table<F: SmallField>() -> LookupTable<F, 3> {
                         naf -= TABLE_SIZE
                     };
 
+                    let naf_abs = naf.abs() as u8;
                     if naf < 0 {
                         if carry_bit {
-                            a += naf.abs() as u8;
+                            a += naf_abs;
                         } else {
-                            (a, carry_bit) = a.overflowing_add(naf.abs() as u8);
+                            (a, carry_bit) = a.overflowing_add(naf_abs);
                         }
                     } else {
-                        a -= (naf.abs()) as u8;
+                        a -= naf_abs;
                     }
                     v.push(naf);
                 } else {
@@ -58,8 +58,8 @@ pub fn create_wnaf_decomp_table<F: SmallField>() -> LookupTable<F, 3> {
 
             let concat = {
                 let mut res = 0u32;
-                res |= v[0] as u32;
-                let shifted_v1 = (v[1] as u32) << 8;
+                res |= (v[0] as u8) as u32;
+                let shifted_v1 = ((v[1] as u8) as u32) << 8;
                 res |= shifted_v1;
                 // Add carry bit if we overflowed
                 if carry_bit {

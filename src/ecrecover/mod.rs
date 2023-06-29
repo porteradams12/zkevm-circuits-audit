@@ -116,7 +116,8 @@ const TWO_POW_128: &'static str = "340282366920938463463374607431768211456";
 const BETA: &'static str = "7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee";
 // Secp256k1.p - 1 / 2
 // 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc2f - 0x1 / 0x2
-const MODULUS_MINUS_ONE_DIV_TWO = "7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0"
+const MODULUS_MINUS_ONE_DIV_TWO: &'static str =
+    "7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0";
 // Decomposition constants
 // Derived through algorithm 3.74 http://tomlr.free.fr/Math%E9matiques/Math%20Complete/Cryptography/Guide%20to%20Elliptic%20Curve%20Cryptography%20-%20D.%20Hankerson,%20A.%20Menezes,%20S.%20Vanstone.pdf
 // NOTE: B2 == A1
@@ -246,21 +247,87 @@ fn convert_field_element_to_uint256<
     mut elem: NonNativeFieldOverU16<F, P, N>,
 ) -> UInt256<F> {
     let mut limbs = [UInt32::<F>::zero(cs); 8];
+    let two_pow_16 = UInt32::allocated_constant(cs, 2u32.pow(16));
     unsafe {
         for (dst, src) in limbs.iter_mut().zip(elem.limbs.array_chunks_mut::<2>()) {
-            let low = UInt16::from_variable_unchecked(src[0]).to_le_bytes(cs);
-            let high = UInt16::from_variable_unchecked(src[1]).to_le_bytes(cs);
-            let mut bytes = [UInt8::<F>::zero(cs); 4];
-            [low, high]
-                .iter()
-                .flatten()
-                .enumerate()
-                .for_each(|(i, el)| bytes[i] = *el);
-            *dst = UInt32::from_le_bytes(cs, bytes);
+            let low = UInt32::from_variable_unchecked(src[0]);
+            let mut high = UInt32::from_variable_unchecked(src[1]);
+            high = high.non_widening_mul(cs, &two_pow_16);
+            *dst = low.add_no_overflow(cs, high);
         }
     }
 
     UInt256 { inner: limbs }
+}
+
+fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    e: Secp256ScalarNNField<F>,
+    neg: Boolean<F>,
+    decomp_id: u32,
+    byte_split_id: u32,
+) -> Vec<UInt8<F>> {
+    let mut naf = vec![];
+    let mut e = convert_field_element_to_uint256(cs, e);
+    // Loop for max amount of bits in e to ensure homogenous circuit
+    for _ in 0..33 {
+        let mut bytes = e.to_le_bytes(cs);
+        // Since each lookup consumes 2 bits of information, and we need at least 3 bits for
+        // figuring out the NAF number, we can do two lookups before needing to concatenate the
+        // bigger number back together.
+        for _ in 0..2 {
+            let res = cs.perform_lookup::<1, 2>(decomp_id, &[bytes[0].get_variable()]);
+            let wnaf_and_carry_bits = unsafe { UInt32::from_variable_unchecked(res[0]) };
+            let wnaf_bytes = wnaf_and_carry_bits.to_le_bytes(cs);
+            bytes[0] = unsafe { UInt8::from_variable_unchecked(res[1]) };
+            wnaf_bytes[..2].iter().for_each(|byte| {
+                let byte_neg = byte.negate(cs);
+                let byte = Selectable::conditionally_select(cs, neg, byte, &byte_neg);
+                naf.push(byte);
+            });
+            // Add carry bit
+            println!("{:?}", wnaf_bytes[2].witness_hook(cs)().unwrap());
+        }
+
+        // Shift e and glue it back together.
+        // Because a GLV decomposed scalar is at most 129 bits, we only care to shift
+        // the lower 17 bytes of the number.
+        // XXX: we can slide this window as we get further into the function to save some
+        // constraints too
+        let mut carry: Option<Variable> = None;
+        bytes
+            .clone()
+            .iter_mut()
+            .enumerate()
+            .rev()
+            .skip(15)
+            .for_each(|(i, b)| {
+                if i != 0 {
+                    let res = cs.perform_lookup::<1, 2>(byte_split_id, &[b.get_variable()]);
+                    let mut shifted = res[1];
+                    let new_carry = res[0];
+                    if let Some(c) = carry {
+                        shifted = merge_byte_using_table::<_, _, 4>(cs, shifted, c);
+                    }
+                    *b = unsafe { UInt8::from_variable_unchecked(shifted) };
+                    carry = Some(new_carry);
+                }
+            });
+
+        e = UInt256::from_le_bytes(cs, bytes);
+        // We can't merge the last byte since it's possible that it's more than 4
+        // bits long, so we just add the carry to the end value.
+        if let Some(c) = carry {
+            let z = UInt8::allocated_constant(cs, 0).get_variable();
+            let c = merge_byte_using_table::<_, _, 4>(cs, z, c);
+            let mut carry_array = [UInt32::zero(cs); 8];
+            carry_array[0] = unsafe { UInt32::from_variable_unchecked(c) };
+            let carry = UInt256 { inner: carry_array };
+            (e, _) = e.overflowing_add(cs, &carry);
+        }
+    }
+
+    naf
 }
 
 fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
@@ -270,6 +337,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     base_field_params: &Arc<Secp256BaseNNFieldParams>,
     scalar_field_params: &Arc<Secp256ScalarNNFieldParams>,
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
+    scalar.enforce_reduced(cs);
     let pow_2_128 = U256::from_dec_str(TWO_POW_128).unwrap();
     let pow_2_128 = UInt512::allocated_constant(cs, (pow_2_128, U256::zero()));
 
@@ -282,10 +350,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         UInt512::allocated_constant(cs, (v, U256::zero()))
     };
 
-    let mut modulus_minus_one_div_two = bigint_from_hex_str(
-        cs,
-        MODULUS_MINUS_ONE_DIV_TWO,
-    );
+    let mut modulus_minus_one_div_two = bigint_from_hex_str(cs, MODULUS_MINUS_ONE_DIV_TWO);
 
     // Scalar decomposition
     let (k1_neg, mut k1, k2_neg, mut k2) = {
@@ -415,68 +480,6 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         .expect("table should exist");
     // This should be added in case we overflow during wnaf decomp.
     let carry = UInt256::allocated_constant(cs, U256::from(1 << 16 - 1));
-    let to_wnaf = |cs: &mut CS, e: Secp256ScalarNNField<F>, neg: Boolean<F>| -> Vec<UInt8<F>> {
-        let mut naf = vec![];
-        let mut e = convert_field_element_to_uint256(cs, e);
-        // Loop for max amount of bits in e to ensure homogenous circuit
-        for _ in 0..33 {
-            let mut bytes = e.to_le_bytes(cs);
-            // Since each lookup consumes 2 bits of information, and we need at least 3 bits for
-            // figuring out the NAF number, we can do two lookups before needing to concatenate the
-            // bigger number back together.
-            for _ in 0..2 {
-                let res = cs.perform_lookup::<1, 2>(decomp_id, &[bytes[0].get_variable()]);
-                let wnaf_and_carry_bits = unsafe { UInt32::from_variable_unchecked(res[0]) };
-                let wnaf_bytes = wnaf_and_carry_bits.to_le_bytes(cs);
-                bytes[0] = unsafe { UInt8::from_variable_unchecked(res[1]) };
-                wnaf_bytes[..2].iter().for_each(|byte| {
-                    let byte_neg = byte.negate(cs);
-                    let byte = Selectable::conditionally_select(cs, neg, byte, &byte_neg);
-                    naf.push(byte);
-                });
-                // Add carry bit
-            }
-
-            // Shift e and glue it back together.
-            // Because a GLV decomposed scalar is at most 129 bits, we only care to shift
-            // the lower 17 bytes of the number.
-            // XXX: we can slide this window as we get further into the function to save some
-            // constraints too
-            let mut carry: Option<Variable> = None;
-            bytes
-                .clone()
-                .iter_mut()
-                .enumerate()
-                .rev()
-                .skip(15)
-                .for_each(|(i, b)| {
-                    if i != 0 {
-                        let res = cs.perform_lookup::<1, 2>(byte_split_id, &[b.get_variable()]);
-                        let mut shifted = res[1];
-                        let new_carry = res[0];
-                        if let Some(c) = carry {
-                            shifted = merge_byte_using_table::<_, _, 4>(cs, shifted, c);
-                        }
-                        *b = unsafe { UInt8::from_variable_unchecked(shifted) };
-                        carry = Some(new_carry);
-                    }
-                });
-
-            e = UInt256::from_le_bytes(cs, bytes);
-            // We can't merge the last byte since it's possible that it's more than 4
-            // bits long, so we just add the carry to the end value.
-            if let Some(c) = carry {
-                let z = UInt8::allocated_constant(cs, 0).get_variable();
-                let c = merge_byte_using_table::<_, _, 4>(cs, z, c);
-                let mut carry_array = [UInt32::zero(cs); 8];
-                carry_array[0] = unsafe { UInt32::from_variable_unchecked(c) };
-                let carry = UInt256 { inner: carry_array };
-                (e, _) = e.overflowing_add(cs, &carry);
-            }
-        }
-
-        naf
-    };
 
     let naf_abs_div2_table_id = cs
         .get_table_id_for_marker::<NafAbsDiv2Table>()
@@ -506,8 +509,8 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             *acc = Selectable::conditionally_select(cs, is_zero, &acc, &acc_added);
         };
 
-    let naf1 = to_wnaf(cs, k1, k1_neg);
-    let naf2 = to_wnaf(cs, k2, k2_neg);
+    let naf1 = to_wnaf(cs, k1, k1_neg, decomp_id, byte_split_id);
+    let naf2 = to_wnaf(cs, k2, k2_neg, decomp_id, byte_split_id);
     let mut acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_field_params);
     for i in (0..129).rev() {
@@ -523,9 +526,10 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
 
 fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
     cs: &mut CS,
-    message_hash_by_r_inv: Secp256ScalarNNField<F>,
+    mut message_hash_by_r_inv: Secp256ScalarNNField<F>,
     base_field_params: &Arc<Secp256BaseNNFieldParams>,
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
+    message_hash_by_r_inv.enforce_reduced(cs);
     let bytes = message_hash_by_r_inv
         .limbs
         .iter()
@@ -1291,8 +1295,6 @@ mod test {
         owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
         let table = create_byte_split_table::<F, 4>();
         owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
-        let table = create_byte_split_table::<F, 7>();
-        owned_cs.add_lookup_table::<ByteSplitTable<7>, 3>(table);
 
         let cs = &mut owned_cs;
 
