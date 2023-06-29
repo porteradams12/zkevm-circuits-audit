@@ -107,6 +107,23 @@ const X_POWERS_ARR_LEN: usize = 256;
 const VALID_Y_IN_EXTERNAL_FIELD: u64 = 4;
 const VALID_X_CUBED_IN_EXTERNAL_FIELD: u64 = 9;
 
+// GLV consts
+
+// 2**128
+const TWO_POW_128: &'static str = "340282366920938463463374607431768211456";
+// BETA s.t. for any curve point Q = (x,y):
+// lambda * Q = (beta*x mod p, y)
+const BETA: &'static str = "7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee";
+// Secp256k1.p - 1 / 2
+// 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc2f - 0x1 / 0x2
+const MODULUS_MINUS_ONE_DIV_TWO = "7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0"
+// Decomposition constants
+// Derived through algorithm 3.74 http://tomlr.free.fr/Math%E9matiques/Math%20Complete/Cryptography/Guide%20to%20Elliptic%20Curve%20Cryptography%20-%20D.%20Hankerson,%20A.%20Menezes,%20S.%20Vanstone.pdf
+// NOTE: B2 == A1
+const A1: &'static str = "0x3086d221a7d46bcde86c90e49284eb15";
+const B1: &'static str = "0xe4437ed6010e88286f547fa90abfe4c3";
+const A2: &'static str = "0x114ca50f7a8e2f3f657c1108d9d44cfd8";
+
 type Secp256BaseNNFieldParams = NonNativeFieldOverU16Params<Secp256Fq, 17>;
 type Secp256ScalarNNFieldParams = NonNativeFieldOverU16Params<Secp256Fr, 17>;
 
@@ -253,14 +270,10 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     base_field_params: &Arc<Secp256BaseNNFieldParams>,
     scalar_field_params: &Arc<Secp256ScalarNNFieldParams>,
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
-    let pow_2_128 = U256::from_dec_str("340282366920938463463374607431768211456").unwrap();
+    let pow_2_128 = U256::from_dec_str(TWO_POW_128).unwrap();
     let pow_2_128 = UInt512::allocated_constant(cs, (pow_2_128, U256::zero()));
 
-    let beta = U256::from_str_radix(
-        "7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee",
-        16,
-    )
-    .unwrap();
+    let beta = U256::from_str_radix(BETA, 16).unwrap();
     let v = UInt256::allocated_constant(cs, beta);
     let mut beta = convert_uint256_to_field_element(cs, &v, &base_field_params);
 
@@ -271,7 +284,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
 
     let mut modulus_minus_one_div_two = bigint_from_hex_str(
         cs,
-        "7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0",
+        MODULUS_MINUS_ONE_DIV_TWO,
     );
 
     // Scalar decomposition
@@ -281,9 +294,9 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             UInt256::allocated_constant(cs, v)
         };
 
-        let a1 = u256_from_hex_str(cs, "0x3086d221a7d46bcde86c90e49284eb15");
-        let b1 = u256_from_hex_str(cs, "0xe4437ed6010e88286f547fa90abfe4c3");
-        let a2 = u256_from_hex_str(cs, "0x114ca50f7a8e2f3f657c1108d9d44cfd8");
+        let a1 = u256_from_hex_str(cs, A1);
+        let b1 = u256_from_hex_str(cs, B1);
+        let a2 = u256_from_hex_str(cs, A2);
         let b2 = a1.clone();
 
         let k = convert_field_element_to_uint256(cs, scalar.clone());
