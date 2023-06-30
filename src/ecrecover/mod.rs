@@ -101,7 +101,7 @@ use self::secp256k1::PointAffine as Secp256Affine;
 
 const NUM_WORDS: usize = 17;
 const SECP_B_COEF: u64 = 7;
-const EXCEPTION_FLAGS_ARR_LEN: usize = 8;
+const EXCEPTION_FLAGS_ARR_LEN: usize = 9;
 const NUM_MEMORY_READS_PER_CYCLE: usize = 4;
 const X_POWERS_ARR_LEN: usize = 256;
 const VALID_Y_IN_EXTERNAL_FIELD: u64 = 4;
@@ -268,13 +268,17 @@ fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
     byte_split_id: u32,
 ) -> Vec<UInt8<F>> {
     let mut naf = vec![];
-    let mut e = convert_field_element_to_uint256(cs, e);
+    let mut bytes = e
+        .limbs
+        .iter()
+        .flat_map(|el| unsafe { UInt16::from_variable_unchecked(*el).to_le_bytes(cs) })
+        .collect::<Vec<UInt8<F>>>();
+
     // Loop for max amount of bits in e to ensure homogenous circuit
-    for _ in 0..33 {
-        let mut bytes = e.to_le_bytes(cs);
+    for i in 0..33 {
         // Since each lookup consumes 2 bits of information, and we need at least 3 bits for
-        // figuring out the NAF number, we can do two lookups before needing to concatenate the
-        // bigger number back together.
+        // figuring out the NAF number, we can do two lookups before needing to propagated the
+        // changes up the bytestring.
         for _ in 0..2 {
             let res = cs.perform_lookup::<1, 2>(decomp_id, &[bytes[0].get_variable()]);
             let wnaf_and_carry_bits = unsafe { UInt32::from_variable_unchecked(res[0]) };
@@ -286,43 +290,36 @@ fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
                 naf.push(byte);
             });
             // Add carry bit
+            // XXX
         }
 
-        // Shift e and glue it back together.
+        // Break up the first byte into a lower chunk and a (potential) carry bit.
+        let res = cs.perform_lookup::<1, 2>(byte_split_id, &[bytes[0].get_variable()]);
+        let mut low = res[0];
+        let carry_bit = unsafe { UInt8::from_variable_unchecked(res[1]) };
+        let mut of = Boolean::allocated_constant(cs, true);
+
+        // Shift e and propagate carry.
         // Because a GLV decomposed scalar is at most 129 bits, we only care to shift
-        // the lower 17 bytes of the number.
-        // XXX: we can slide this window as we get further into the function to save some
-        // constraints too
-        let mut carry: Option<Variable> = None;
-        bytes
-            .iter_mut()
-            .enumerate()
-            .rev()
-            .skip(15)
-            .for_each(|(i, b)| {
-                if i != 0 {
-                    let res = cs.perform_lookup::<1, 2>(byte_split_id, &[b.get_variable()]);
-                    let mut shifted = res[1];
-                    let new_carry = res[0];
-                    if let Some(c) = carry {
-                        shifted = merge_byte_using_table::<_, _, 4>(cs, shifted, c);
-                    }
-                    *b = unsafe { UInt8::from_variable_unchecked(shifted) };
-                    carry = Some(new_carry);
-                }
-            });
+        // the lower 17 bytes of the number initially, and as we progress, more zero bytes
+        // will appear, lowering the amount of iterations needed to shift our number.
+        let num_iter = 16 - (i / 2);
+        bytes.iter_mut().skip(1).take(num_iter).for_each(|b| {
+            // Propagate carry
+            let (added_b, new_of) = b.overflowing_add(cs, &carry_bit);
+            *b = Selectable::conditionally_select(cs, of, &added_b, b);
+            of = new_of;
 
-        e = UInt256::from_le_bytes(cs, bytes);
-        // We can't merge the last byte since it's possible that it's more than 4
-        // bits long, so we just add the carry to the end value.
-        if let Some(c) = carry {
-            let z = UInt8::allocated_constant(cs, 0).get_variable();
-            let c = merge_byte_using_table::<_, _, 4>(cs, z, c);
-            let mut carry_array = [UInt32::zero(cs); 8];
-            carry_array[0] = unsafe { UInt32::from_variable_unchecked(c) };
-            let carry = UInt256 { inner: carry_array };
-            (e, _) = e.overflowing_add(cs, &carry);
-        }
+            // Glue bytes
+            let res = cs.perform_lookup::<1, 2>(byte_split_id, &[b.get_variable()]);
+            *b = unsafe {
+                UInt8::from_variable_unchecked(merge_byte_using_table::<_, _, 4>(cs, low, res[0]))
+            };
+            low = res[1];
+        });
+
+        // Shift up by one to align.
+        bytes = bytes[1..].to_vec();
     }
 
     naf
@@ -741,9 +738,9 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     // unfortunately, if t is found to be a quadratic nonresidue, we can't simply let x to be zero,
     // because then t_new = 7 is again a quadratic nonresidue. So, in this case we let x to be 9, then
     // t = 16 is a quadratic residue
-    let x =
+    let mut x =
         Selectable::conditionally_select(cs, t_is_nonresidue, &valid_x_in_external_field, &x_fe);
-    let y = Selectable::conditionally_select(
+    let mut y = Selectable::conditionally_select(
         cs,
         t_is_nonresidue,
         &valid_y_in_external_field,
@@ -1334,6 +1331,219 @@ mod test {
             &base_params,
         );
 
+        for _ in 0..5 {
+            let (no_error, digest) = ecrecover_precompile_inner_routine(
+                cs,
+                &rec_id,
+                &r,
+                &s,
+                &digest,
+                valid_x_in_external_field.clone(),
+                valid_y_in_external_field.clone(),
+                valid_t_in_external_field.clone(),
+                &base_params,
+                &scalar_params,
+            );
+
+            assert!(no_error.witness_hook(&*cs)().unwrap() == true);
+            let recovered_address = digest.to_be_bytes(cs);
+            let recovered_address = recovered_address.witness_hook(cs)().unwrap();
+            assert_eq!(&recovered_address[12..], &eth_address[..]);
+        }
+
+        dbg!(cs.next_available_row());
+
+        cs.pad_and_shrink();
+
+        let mut cs = owned_cs.into_assembly();
+        cs.print_gate_stats();
+        let worker = Worker::new();
+        assert!(cs.check_if_satisfied(&worker));
+    }
+
+    #[test]
+    fn test_ecrecover_zero_element() {
+        let geometry = CSGeometry {
+            num_columns_under_copy_permutation: 100,
+            num_witness_columns: 0,
+            num_constant_columns: 8,
+            max_allowed_constraint_degree: 4,
+        };
+        let max_variables = 1 << 26;
+        let max_trace_len = 1 << 20;
+
+        fn configure<
+            F: SmallField,
+            T: CsBuilderImpl<F, T>,
+            GC: GateConfigurationHolder<F>,
+            TB: StaticToolboxHolder,
+        >(
+            builder: CsBuilder<T, F, GC, TB>,
+        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
+            let builder = builder.allow_lookup(
+                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                    width: 3,
+                    num_repetitions: 8,
+                    share_table_id: true,
+                },
+            );
+            let builder = U8x4FMAGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ConstantsAllocatorGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ReductionGate::<F, 4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
+            let builder = BooleanConstraintGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<32>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<16>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<8>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = SelectionGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ZeroCheckGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+                false,
+            );
+            let builder = DotProductGate::<4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
+            let builder = NopGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+
+            builder
+        }
+
+        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
+            geometry,
+            max_variables,
+            max_trace_len,
+        );
+        let builder = new_builder::<_, F>(builder_impl);
+
+        let builder = configure(builder);
+        let mut owned_cs = builder.build(());
+
+        // add tables
+        let table = create_xor8_table();
+        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+
+        let table = create_and8_table();
+        owned_cs.add_lookup_table::<And8Table, 3>(table);
+
+        let table = create_naf_abs_div2_table();
+        owned_cs.add_lookup_table::<NafAbsDiv2Table, 3>(table);
+
+        let table = create_wnaf_decomp_table();
+        owned_cs.add_lookup_table::<WnafDecompTable, 3>(table);
+
+        let table = create_fixed_base_mul_table::<F, 0>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<0>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 1>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<1>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 2>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<2>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 3>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<3>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 4>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<4>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 5>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<5>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 6>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<6>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 7>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<7>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 8>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<8>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 9>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<9>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 10>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<10>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 11>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<11>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 12>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<12>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 13>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<13>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 14>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<14>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 15>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<15>, 3>(table);
+
+        let table = create_byte_split_table::<F, 1>();
+        owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
+        let table = create_byte_split_table::<F, 2>();
+        owned_cs.add_lookup_table::<ByteSplitTable<2>, 3>(table);
+        let table = create_byte_split_table::<F, 3>();
+        owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
+        let table = create_byte_split_table::<F, 4>();
+        owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
+
+        let cs = &mut owned_cs;
+
+        let sk = crate::ff::from_hex::<Secp256Fr>("00").unwrap();
+        let eth_address = hex::decode("12890d2cce102216644c59dae5baed380d84830c").unwrap();
+        let (r, s, _pk, digest) = simulate_signature_for_sk(sk);
+
+        let scalar_params = secp256k1_scalar_field_params();
+        let base_params = secp256k1_base_field_params();
+
+        let digest_u256 = repr_into_u256(digest.into_repr());
+        let r_u256 = repr_into_u256(r.into_repr());
+        let s_u256 = repr_into_u256(s.into_repr());
+
+        let rec_id = UInt8::allocate_checked(cs, 0);
+        let r = UInt256::allocate(cs, r_u256);
+        let s = UInt256::allocate(cs, s_u256);
+        let digest = UInt256::allocate(cs, digest_u256);
+
+        let scalar_params = Arc::new(scalar_params);
+        let base_params = Arc::new(base_params);
+
+        let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("9").unwrap(),
+            &base_params,
+        );
+        let valid_t_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("16").unwrap(),
+            &base_params,
+        );
+        let valid_y_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("4").unwrap(),
+            &base_params,
+        );
+
         let (no_error, digest) = ecrecover_precompile_inner_routine(
             cs,
             &rec_id,
@@ -1347,18 +1557,211 @@ mod test {
             &scalar_params,
         );
 
-        assert!(no_error.witness_hook(&*cs)().unwrap() == true);
-        let recovered_address = digest.to_be_bytes(cs);
-        let recovered_address = recovered_address.witness_hook(cs)().unwrap();
-        assert_eq!(&recovered_address[12..], &eth_address[..]);
+        assert!(no_error.witness_hook(&*cs)().unwrap() == false);
+    }
 
-        dbg!(cs.next_available_row());
+    #[test]
+    fn test_ecrecover_zero_point() {
+        let geometry = CSGeometry {
+            num_columns_under_copy_permutation: 100,
+            num_witness_columns: 0,
+            num_constant_columns: 8,
+            max_allowed_constraint_degree: 4,
+        };
+        let max_variables = 1 << 26;
+        let max_trace_len = 1 << 20;
 
-        cs.pad_and_shrink();
+        fn configure<
+            F: SmallField,
+            T: CsBuilderImpl<F, T>,
+            GC: GateConfigurationHolder<F>,
+            TB: StaticToolboxHolder,
+        >(
+            builder: CsBuilder<T, F, GC, TB>,
+        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
+            let builder = builder.allow_lookup(
+                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                    width: 3,
+                    num_repetitions: 8,
+                    share_table_id: true,
+                },
+            );
+            let builder = U8x4FMAGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ConstantsAllocatorGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ReductionGate::<F, 4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
+            let builder = BooleanConstraintGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<32>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<16>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<8>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = SelectionGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ZeroCheckGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+                false,
+            );
+            let builder = DotProductGate::<4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
+            let builder = NopGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
 
-        let mut cs = owned_cs.into_assembly();
-        cs.print_gate_stats();
-        let worker = Worker::new();
-        assert!(cs.check_if_satisfied(&worker));
+            builder
+        }
+
+        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
+            geometry,
+            max_variables,
+            max_trace_len,
+        );
+        let builder = new_builder::<_, F>(builder_impl);
+
+        let builder = configure(builder);
+        let mut owned_cs = builder.build(());
+
+        // add tables
+        let table = create_xor8_table();
+        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+
+        let table = create_and8_table();
+        owned_cs.add_lookup_table::<And8Table, 3>(table);
+
+        let table = create_naf_abs_div2_table();
+        owned_cs.add_lookup_table::<NafAbsDiv2Table, 3>(table);
+
+        let table = create_wnaf_decomp_table();
+        owned_cs.add_lookup_table::<WnafDecompTable, 3>(table);
+
+        let table = create_fixed_base_mul_table::<F, 0>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<0>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 1>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<1>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 2>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<2>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 3>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<3>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 4>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<4>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 5>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<5>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 6>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<6>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 7>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<7>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 8>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<8>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 9>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<9>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 10>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<10>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 11>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<11>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 12>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<12>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 13>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<13>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 14>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<14>, 3>(table);
+        let table = create_fixed_base_mul_table::<F, 15>();
+        owned_cs.add_lookup_table::<FixedBaseMulTable<15>, 3>(table);
+
+        let table = create_byte_split_table::<F, 1>();
+        owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
+        let table = create_byte_split_table::<F, 2>();
+        owned_cs.add_lookup_table::<ByteSplitTable<2>, 3>(table);
+        let table = create_byte_split_table::<F, 3>();
+        owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
+        let table = create_byte_split_table::<F, 4>();
+        owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
+
+        let cs = &mut owned_cs;
+
+        let sk = crate::ff::from_hex::<Secp256Fr>(
+            "b5b1870957d373ef0eeffecc6e4812c0fd08f554b37b233526acc331bf1544f7",
+        )
+        .unwrap();
+        let eth_address = hex::decode("12890d2cce102216644c59dae5baed380d84830c").unwrap();
+        let (r, s, _pk, digest) = simulate_signature_for_sk(sk);
+
+        let scalar_params = secp256k1_scalar_field_params();
+        let base_params = secp256k1_base_field_params();
+
+        let scalar_params = Arc::new(scalar_params);
+        let base_params = Arc::new(base_params);
+
+        let r = Secp256Fq::from_str("0").unwrap();
+        let s = Secp256Fq::from_str("0").unwrap();
+
+        let digest_u256 = repr_into_u256(digest.into_repr());
+        let r_u256 = repr_into_u256(r.into_repr());
+        let s_u256 = repr_into_u256(s.into_repr());
+
+        let rec_id = UInt8::allocate_checked(cs, 0);
+        let r = UInt256::allocate(cs, r_u256);
+        let s = UInt256::allocate(cs, s_u256);
+        let digest = UInt256::allocate(cs, digest_u256);
+
+        let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("9").unwrap(),
+            &base_params,
+        );
+        let valid_t_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("16").unwrap(),
+            &base_params,
+        );
+        let valid_y_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("4").unwrap(),
+            &base_params,
+        );
+
+        let (no_error, digest) = ecrecover_precompile_inner_routine(
+            cs,
+            &rec_id,
+            &r,
+            &s,
+            &digest,
+            valid_x_in_external_field.clone(),
+            valid_y_in_external_field.clone(),
+            valid_t_in_external_field.clone(),
+            &base_params,
+            &scalar_params,
+        );
+
+        assert!(no_error.witness_hook(&*cs)().unwrap() == false);
     }
 }
