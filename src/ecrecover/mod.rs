@@ -286,7 +286,6 @@ fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
                 naf.push(byte);
             });
             // Add carry bit
-            println!("{:?}", wnaf_bytes[2].witness_hook(cs)().unwrap());
         }
 
         // Shift e and glue it back together.
@@ -296,7 +295,6 @@ fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
         // constraints too
         let mut carry: Option<Variable> = None;
         bytes
-            .clone()
             .iter_mut()
             .enumerate()
             .rev()
