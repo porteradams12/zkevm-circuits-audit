@@ -279,7 +279,8 @@ fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
         // Since each lookup consumes 2 bits of information, and we need at least 3 bits for
         // figuring out the NAF number, we can do two lookups before needing to propagated the
         // changes up the bytestring.
-        for _ in 0..2 {
+        let mut naf_overflow = None;
+        for j in 0..2 {
             let res = cs.perform_lookup::<1, 2>(decomp_id, &[bytes[0].get_variable()]);
             let wnaf_and_carry_bits = unsafe { UInt32::from_variable_unchecked(res[0]) };
             let wnaf_bytes = wnaf_and_carry_bits.to_le_bytes(cs);
@@ -289,8 +290,12 @@ fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
                 let byte = Selectable::conditionally_select(cs, neg, byte, &byte_neg);
                 naf.push(byte);
             });
-            // Add carry bit
-            // XXX
+            // Save carry bit.
+            // It only ever matters to save it on the first iteration as it is not possible
+            // to overflow for the second.
+            if j == 0 {
+                naf_overflow = Some(wnaf_bytes[2]);
+            }
         }
 
         // Break up the first byte into a lower chunk and a (potential) carry bit.
@@ -304,19 +309,33 @@ fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
         // the lower 17 bytes of the number initially, and as we progress, more zero bytes
         // will appear, lowering the amount of iterations needed to shift our number.
         let num_iter = 16 - (i / 2);
-        bytes.iter_mut().skip(1).take(num_iter).for_each(|b| {
-            // Propagate carry
-            let (added_b, new_of) = b.overflowing_add(cs, &carry_bit);
-            *b = Selectable::conditionally_select(cs, of, &added_b, b);
-            of = new_of;
+        bytes
+            .iter_mut()
+            .skip(1)
+            .take(num_iter)
+            .enumerate()
+            .for_each(|(i, b)| {
+                // Propagate carry
+                let (added_b, new_of) = b.overflowing_add(cs, &carry_bit);
+                *b = Selectable::conditionally_select(cs, of, &added_b, b);
+                of = new_of;
+                // If this is the first byte, we also add the NAF carry bit.
+                if i == 0 {
+                    let mut naf_of = Boolean::allocated_constant(cs, false);
+                    (*b, naf_of) = b.overflowing_add(cs, &naf_overflow.unwrap());
+                    // If this overflows, we should remember to add a carry bit to the next element.
+                    of = Selectable::conditionally_select(cs, naf_of, &naf_of, &of);
+                }
 
-            // Glue bytes
-            let res = cs.perform_lookup::<1, 2>(byte_split_id, &[b.get_variable()]);
-            *b = unsafe {
-                UInt8::from_variable_unchecked(merge_byte_using_table::<_, _, 4>(cs, low, res[0]))
-            };
-            low = res[1];
-        });
+                // Glue bytes
+                let res = cs.perform_lookup::<1, 2>(byte_split_id, &[b.get_variable()]);
+                *b = unsafe {
+                    UInt8::from_variable_unchecked(merge_byte_using_table::<_, _, 4>(
+                        cs, low, res[0],
+                    ))
+                };
+                low = res[1];
+            });
 
         // Shift up by one to align.
         bytes = bytes[1..].to_vec();
