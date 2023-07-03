@@ -116,6 +116,7 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
     let set_pubdata_ergs = Boolean::multi_and(cs, &[should_apply, is_set_pubdata_ergs]);
     let increment_tx_counter = Boolean::multi_and(cs, &[should_apply, is_inc_tx_num]);
 
+    // write in regards of dst0 register
     let read_only = Boolean::multi_or(
         cs,
         &[is_set_context_u128, is_set_pubdata_ergs, is_inc_tx_num],
@@ -126,7 +127,7 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
 
     let potentially_new_ergs_for_pubdata = common_opcode_state.src0_view.u32x8_view[0];
 
-    let one_u32 = UInt32::allocated_constant(cs, 1);
+    let one_u32 = UInt32::allocated_constant(cs, 1u32);
     let (incremented_tx_number, _of) = draft_vm_state
         .tx_number_in_block
         .overflowing_add(cs, one_u32);
@@ -138,8 +139,8 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
         common_opcode_state.src0_view.u32x8_view[3],
     ];
 
-    let zero_u32 = UInt32::allocated_constant(cs, 0);
-    let zero_u8 = UInt8::allocated_constant(cs, 0);
+    let zero_u32 = UInt32::zero(cs);
+    let zero_u8 = UInt8::zero(cs);
 
     let meta_highest_u32 = UInt32::from_le_bytes(
         cs,
@@ -213,7 +214,11 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
     result_128 = UInt32::parallel_select(
         cs,
         is_get_context_u128,
-        &draft_vm_state.context_composite_u128,
+        &draft_vm_state
+            .callstack
+            .current_context
+            .saved_context
+            .context_u128_value_composite,
         &result_128,
     );
 

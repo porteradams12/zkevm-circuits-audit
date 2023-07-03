@@ -72,6 +72,22 @@ pub const NUM_SCHEDULER_PUBLIC_INPUTS: usize = 4;
 pub const LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH: usize = 4;
 pub const QUEUE_FINAL_STATE_COMMITMENT_LENGTH: usize = 4;
 
+pub const SEQUENCE_OF_CIRCUIT_TYPES: [BaseLayerCircuitType; NUM_CIRCUIT_TYPES_TO_SCHEDULE] = [
+    BaseLayerCircuitType::VM,
+    BaseLayerCircuitType::DecommitmentsFilter,
+    BaseLayerCircuitType::Decommiter,
+    BaseLayerCircuitType::LogDemultiplexer,
+    BaseLayerCircuitType::KeccakPrecompile,
+    BaseLayerCircuitType::Sha256Precompile,
+    BaseLayerCircuitType::EcrecoverPrecompile,
+    BaseLayerCircuitType::RamValidation,
+    BaseLayerCircuitType::StorageFilter,
+    BaseLayerCircuitType::StorageApplicator,
+    BaseLayerCircuitType::EventsRevertsFilter,
+    BaseLayerCircuitType::L1MessagesRevertsFilter,
+    BaseLayerCircuitType::L1MessagesHasher,
+];
+
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug)]
 #[serde(bound = "H::Output: serde::Serialize + serde::de::DeserializeOwned")]
@@ -542,23 +558,8 @@ pub fn scheduler_function<
             .into_iter(),
         );
 
-    let sequence_of_circuit_types = [
-        BaseLayerCircuitType::VM,
-        BaseLayerCircuitType::DecommitmentsFilter,
-        BaseLayerCircuitType::Decommiter,
-        BaseLayerCircuitType::LogDemultiplexer,
-        BaseLayerCircuitType::KeccakPrecompile,
-        BaseLayerCircuitType::Sha256Precompile,
-        BaseLayerCircuitType::EcrecoverPrecompile,
-        BaseLayerCircuitType::RamValidation,
-        BaseLayerCircuitType::StorageFilter,
-        BaseLayerCircuitType::StorageApplicator,
-        BaseLayerCircuitType::EventsRevertsFilter,
-        BaseLayerCircuitType::L1MessagesRevertsFilter,
-        BaseLayerCircuitType::L1MessagesHasher,
-    ];
-
-    for pair in sequence_of_circuit_types.windows(2) {
+    // self-check
+    for pair in SEQUENCE_OF_CIRCUIT_TYPES.windows(2) {
         assert_eq!((pair[0] as u8) + 1, pair[1] as u8);
     }
 
@@ -632,6 +633,14 @@ pub fn scheduler_function<
             .length
             .is_zero(cs),
     );
+
+    // for (idx, el) in skip_flags.iter().enumerate() {
+    //     if let Some(el) = el {
+    //         let circuit_type = BaseLayerCircuitType::from_numeric_value((idx+1) as u8);
+    //         println!("Skip for {:?} = {:?}", circuit_type, el.witness_hook(cs)());
+    //     }
+    // }
+
     // In practice we do NOT skip it
     // skip_flags[(BaseLayerCircuitType::L1MessagesHasher as u8 as usize) - 1] = Some(
     //     l1messages_sorter_observable_output.final_queue_state.tail.length.is_zero(cs)
@@ -643,7 +652,7 @@ pub fn scheduler_function<
     execution_stage_bitmask[0] = boolean_true; // VM
 
     assert_eq!(
-        sequence_of_circuit_types.len(),
+        SEQUENCE_OF_CIRCUIT_TYPES.len(),
         execution_stage_bitmask.len()
     );
 
@@ -672,7 +681,7 @@ pub fn scheduler_function<
         let mut computed_applicability_flags = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
         let mut circuit_type_to_use = Num::zero(cs);
 
-        for (idx, ((circuit_type, stage_flag), skip_flag)) in sequence_of_circuit_types
+        for (idx, ((circuit_type, stage_flag), skip_flag)) in SEQUENCE_OF_CIRCUIT_TYPES
             .iter()
             .zip(execution_stage_bitmask.iter())
             .zip(skip_flags.iter())
@@ -749,9 +758,10 @@ pub fn scheduler_function<
 
         // now we can use a proper circuit type and manyally add it into single queue
         let mut tail_to_use = QueueTailState::empty(cs);
-        for (flag, state) in computed_applicability_flags
+        for (_idx, (flag, state)) in computed_applicability_flags
             .iter()
             .zip(recursive_queue_state_tails.iter())
+            .enumerate()
         {
             tail_to_use = conditionally_select_queue_tail(cs, *flag, &state, &tail_to_use);
         }
@@ -771,10 +781,20 @@ pub fn scheduler_function<
         let _ = tmp_queue.push(cs, query, push_to_any);
         let tail_to_use_for_update = tmp_queue.into_state().tail;
 
-        for (flag, state) in computed_applicability_flags
+        for (_idx, (flag, state)) in computed_applicability_flags
             .iter()
             .zip(recursive_queue_state_tails.iter_mut())
+            .enumerate()
         {
+            // if flag.witness_hook(cs)().unwrap_or(false) {
+            //     let circuit_type = BaseLayerCircuitType::from_numeric_value((_idx+1) as u8);
+            //     println!(
+            //         "Pushing for circuit type {:?}, old state = {:?}, new state = {:?}",
+            //         circuit_type,
+            //         state.witness_hook(cs)(),
+            //         tail_to_use_for_update.witness_hook(cs)(),
+            //     );
+            // }
             *state = conditionally_select_queue_tail(cs, *flag, &tail_to_use_for_update, &*state);
         }
 
@@ -836,12 +856,12 @@ pub fn scheduler_function<
 
     let cs = unsafe { &mut *r };
 
-    for (_idx, (circuit_type, state)) in sequence_of_circuit_types
+    for (_idx, (circuit_type, state)) in SEQUENCE_OF_CIRCUIT_TYPES
         .iter()
         .zip(recursive_queue_state_tails.into_iter())
         .enumerate()
     {
-        println!("Verifying idx = {}", _idx);
+        println!("Verifying circuit type {:?}", circuit_type);
 
         let should_skip = state.length.is_zero(cs);
         let should_verify = should_skip.negated(cs);
@@ -861,8 +881,7 @@ pub fn scheduler_function<
         let expected_input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
             commit_variable_length_encodable_item(cs, &input, round_function);
 
-        let proof_witness = proof_witnesses
-            .pop_front();
+        let proof_witness = proof_witnesses.pop_front();
 
         let proof = AllocatedProof::allocate_from_witness(
             cs,
