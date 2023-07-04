@@ -237,6 +237,7 @@ fn convert_uint256_to_field_element<
     element
 }
 
+// NOTE: caller must ensure that the field element is normalized, otherwise this will fail.
 fn convert_field_element_to_uint256<
     F: SmallField,
     CS: ConstraintSystem<F>,
