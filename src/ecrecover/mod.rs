@@ -248,13 +248,16 @@ fn convert_field_element_to_uint256<
     mut elem: NonNativeFieldOverU16<F, P, N>,
 ) -> UInt256<F> {
     let mut limbs = [UInt32::<F>::zero(cs); 8];
-    let two_pow_16 = UInt32::allocated_constant(cs, 2u32.pow(16));
+    let two_pow_16 = Num::allocated_constant(cs, F::from_u64_unchecked(2u32.pow(16) as u64));
     unsafe {
         for (dst, src) in limbs.iter_mut().zip(elem.limbs.array_chunks_mut::<2>()) {
-            let low = UInt32::from_variable_unchecked(src[0]);
-            let mut high = UInt32::from_variable_unchecked(src[1]);
-            high = high.non_widening_mul(cs, &two_pow_16);
-            *dst = low.add_no_overflow(cs, high);
+            let low = Num::from_variable(src[0]);
+            let mut high = Num::from_variable(src[1]);
+            *dst = unsafe {
+                UInt32::from_variable_unchecked(
+                    Num::fma(cs, &high, &two_pow_16, &F::ONE, &low, &F::ONE).get_variable(),
+                )
+            };
         }
     }
 
