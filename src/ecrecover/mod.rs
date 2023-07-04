@@ -113,7 +113,8 @@ const VALID_X_CUBED_IN_EXTERNAL_FIELD: u64 = 9;
 const TWO_POW_128: &'static str = "340282366920938463463374607431768211456";
 // BETA s.t. for any curve point Q = (x,y):
 // lambda * Q = (beta*x mod p, y)
-const BETA: &'static str = "7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee";
+const BETA: &'static str =
+    "55594575648329892869085402983802832744385952214688224221778511981742606582254";
 // Secp256k1.p - 1 / 2
 // 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc2f - 0x1 / 0x2
 const MODULUS_MINUS_ONE_DIV_TWO: &'static str =
@@ -359,9 +360,9 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     let pow_2_128 = U256::from_dec_str(TWO_POW_128).unwrap();
     let pow_2_128 = UInt512::allocated_constant(cs, (pow_2_128, U256::zero()));
 
-    let beta = U256::from_str_radix(BETA, 16).unwrap();
-    let v = UInt256::allocated_constant(cs, beta);
-    let mut beta = convert_uint256_to_field_element(cs, &v, &base_field_params);
+    use boojum::pairing::ff::PrimeField;
+    let beta = Secp256Fq::from_str(BETA).unwrap();
+    let mut beta = Secp256BaseNNField::allocated_constant(cs, beta, &base_field_params);
 
     let bigint_from_hex_str = |cs: &mut CS, s: &str| -> UInt512<F> {
         let v = U256::from_str_radix(s, 16).unwrap();
