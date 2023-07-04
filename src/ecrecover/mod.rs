@@ -447,6 +447,8 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     const L: usize = 1 << (GLV_WINDOW_SIZE - 1);
 
     let mut t1 = Vec::with_capacity(L);
+    // We use `convert_to_affine_or_default`, but we don't need to worry about returning 1, since
+    // we know that the point is not infinity.
     let (mut double, _) = point
         .double(cs)
         .convert_to_affine_or_default(cs, Secp256Affine::one());
