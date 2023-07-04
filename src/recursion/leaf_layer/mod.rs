@@ -49,7 +49,7 @@ pub struct LeafLayerRecursionConfig<
     pub proof_config: ProofConfig,
     pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
     pub capacity: usize,
-    pub padding_proof: Proof<F, H, EXT>,
+    pub _marker: std::marker::PhantomData<(F, H, EXT)>,
 }
 
 // NOTE: does NOT allocate public inputs! we will deal with locations of public inputs being the same at the "outer" stage
@@ -119,7 +119,10 @@ where
     let vk_commitment_computed: [_; VK_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &vk, round_function);
 
-    for (a, b) in basic_circuit_vk_commitment.iter().zip(vk_commitment_computed.iter()) {
+    for (a, b) in basic_circuit_vk_commitment
+        .iter()
+        .zip(vk_commitment_computed.iter())
+    {
         Num::conditionally_enforce_equal(cs, is_meaningful, a, b);
     }
 
@@ -129,7 +132,7 @@ where
         proof_config,
         vk_fixed_parameters,
         capacity,
-        padding_proof,
+        ..
     } = config;
 
     // use this and deal with borrow checker
@@ -145,22 +148,15 @@ where
     let cs = unsafe { &mut *r };
 
     for _ in 0..capacity {
-        // here we do the trick to protect ourselves from setup pending from witness, but
-        // nevertheless do not create new types for proofs with fixed number of inputs, etc
-        let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
-            padding_proof.clone()
-        } else {
-            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
-                // proving mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            } else {
-                // we are in the testing mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            }
-        };
-        assert!(Proof::is_same_geometry(&witness, &padding_proof));
+        let proof_witness = proof_witnesses.pop_front();
 
-        let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
+        let proof = AllocatedProof::allocate_from_witness(
+            cs,
+            proof_witness,
+            &verifier,
+            &vk_fixed_parameters,
+            &proof_config,
+        );
 
         let queue_is_empty = queue.is_empty(cs);
         let can_pop = queue_is_empty.negated(cs);

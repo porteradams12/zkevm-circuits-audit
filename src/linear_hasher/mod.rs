@@ -66,15 +66,12 @@ where
     // only 1 instance of the circuit here for now
     Boolean::enforce_equal(cs, &start_flag, &boolean_true);
 
-    let queue_state_from_input = structured_input
-        .observable_input
-        .queue_state;
+    let queue_state_from_input = structured_input.observable_input.queue_state;
 
     // it must be trivial
     queue_state_from_input.enforce_trivial_head(cs);
 
-    let mut queue =
-        StorageLogQueue::<F, R>::from_state(cs, queue_state_from_input);
+    let mut queue = StorageLogQueue::<F, R>::from_state(cs, queue_state_from_input);
     let queue_witness = CircuitQueueWitness::from_inner_witness(queue_witness);
     queue.witness = Arc::new(queue_witness);
 
@@ -134,7 +131,7 @@ where
                 cs,
                 continue_to_absorb,
                 &mut keccak_accumulator_state,
-                &buffer_for_round
+                &buffer_for_round,
             );
         }
 
@@ -142,7 +139,8 @@ where
 
         // in case if we do last round
         {
-            let absorb_as_last_round = Boolean::multi_and(cs, &[continue_to_absorb, is_last_serialization]);
+            let absorb_as_last_round =
+                Boolean::multi_and(cs, &[continue_to_absorb, is_last_serialization]);
             let mut last_round_buffer = [zero_u8; KECCAK_RATE_BYTES];
             let tail_len = buffer.len();
             last_round_buffer[..tail_len].copy_from_slice(&buffer);
@@ -162,7 +160,7 @@ where
                 cs,
                 absorb_as_last_round,
                 &mut keccak_accumulator_state,
-                &last_round_buffer
+                &last_round_buffer,
             );
         }
 
@@ -175,30 +173,23 @@ where
     Boolean::enforce_equal(cs, &completed, &boolean_true);
 
     structured_input.completion_flag = completed.clone();
-    
+
     let fsm_output = ();
     structured_input.hidden_fsm_output = fsm_output;
 
     // squeeze
     let mut keccak256_hash = [MaybeUninit::<UInt8<F>>::uninit(); keccak256::KECCAK256_DIGEST_SIZE];
     for (i, dst) in keccak256_hash.array_chunks_mut::<8>().enumerate() {
-        for (dst, src) in dst
-            .iter_mut()
-            .zip(keccak_accumulator_state[i][0].iter())
-        {
+        for (dst, src) in dst.iter_mut().zip(keccak_accumulator_state[i][0].iter()) {
             let tmp = unsafe { UInt8::from_variable_unchecked(*src) };
             dst.write(tmp);
         }
     }
 
-    let keccak256_hash = unsafe {keccak256_hash.map(|el| el.assume_init())};
+    let keccak256_hash = unsafe { keccak256_hash.map(|el| el.assume_init()) };
 
-    let keccak256_hash = <[UInt8<F>; 32]>::conditionally_select(
-        cs,
-        no_work,
-        &empty_hash,
-        &keccak256_hash
-    );    
+    let keccak256_hash =
+        <[UInt8<F>; 32]>::conditionally_select(cs, no_work, &empty_hash, &keccak256_hash);
 
     let mut observable_output = LinearHasherOutputData::placeholder(cs);
     observable_output.keccak256_hash = keccak256_hash;

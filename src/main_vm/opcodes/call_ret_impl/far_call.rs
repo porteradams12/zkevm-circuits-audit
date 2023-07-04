@@ -1082,6 +1082,15 @@ where
         pending_exception: exception,
     };
 
+    if crate::config::CIRCUIT_VERSOBE {
+        if (execute.witness_hook(&*cs))().unwrap_or(false) {
+            println!(
+                "New frame as a result of FAR CALL: {:?}",
+                full_data.new_context.witness_hook(cs)()
+            );
+        }
+    }
+
     full_data
 }
 

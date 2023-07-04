@@ -7,6 +7,7 @@ use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
 use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
@@ -15,7 +16,7 @@ use boojum::gadgets::{
     u32::UInt32,
 };
 
-use crate::base_structures::decommit_query::DecommitQueue;
+use crate::base_structures::decommit_query::{DecommitQueue, DECOMMIT_QUERY_PACKED_WIDTH};
 use crate::base_structures::vm_state::*;
 use crate::base_structures::{
     decommit_query::DecommitQuery, memory_query::MEMORY_QUERY_PACKED_WIDTH,
@@ -121,7 +122,7 @@ where
         CS,
         R,
         FULL_SPONGE_QUEUE_STATE_WIDTH,
-        { MEMORY_QUERY_PACKED_WIDTH + 1 },
+        { DECOMMIT_QUERY_PACKED_WIDTH + 1 },
         DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
     >(
         cs,
@@ -241,7 +242,7 @@ pub fn sort_and_deduplicate_code_decommittments_inner<
     result_queue: &mut DecommitQueue<F, R>,
     mut lhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut rhs: [Num<F>; DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
-    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1];
+    fs_challenges: [[Num<F>; DECOMMIT_QUERY_PACKED_WIDTH + 1];
         DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     previous_packed_key: &mut [UInt32<F>; PACKED_KEY_LENGTH],
     first_encountered_timestamp: &mut UInt32<F>,
@@ -289,8 +290,8 @@ where
 
         for ((challenges, lhs), rhs) in fs_challenges.iter().zip(lhs.iter_mut()).zip(rhs.iter_mut())
         {
-            let mut lhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
-            let mut rhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
+            let mut lhs_contribution = challenges[DECOMMIT_QUERY_PACKED_WIDTH];
+            let mut rhs_contribution = challenges[DECOMMIT_QUERY_PACKED_WIDTH];
 
             for ((original_el, sorted_el), challenge) in original_encoding
                 .iter()
@@ -417,22 +418,20 @@ fn concatenate_key<F: SmallField, CS: ConstraintSystem<F>>(
 }
 
 #[cfg(test)]
-mod tests { 
+mod tests {
     use super::*;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
-    use boojum::cs::implementations::reference_cs::{
-        CSDevelopmentAssembly
-    };
+    use boojum::cs::implementations::reference_cs::CSDevelopmentAssembly;
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::tables::*;
+    use boojum::gadgets::traits::allocatable::CSPlaceholder;
+    use boojum::gadgets::u256::UInt256;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;
     use ethereum_types::U256;
-    use boojum::gadgets::u256::UInt256;
-    use boojum::gadgets::traits::allocatable::CSPlaceholder;
     type F = GoldilocksField;
     type P = GoldilocksField;
 
@@ -447,8 +446,12 @@ mod tests {
 
         use boojum::cs::cs_builder::*;
 
-        fn configure<T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
-            builder: CsBuilder<T, F, GC, TB>
+        fn configure<
+            T: CsBuilderImpl<F, T>,
+            GC: GateConfigurationHolder<F>,
+            TB: StaticToolboxHolder,
+        >(
+            builder: CsBuilder<T, F, GC, TB>,
         ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
             let builder = builder.allow_lookup(
                 LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
@@ -457,17 +460,48 @@ mod tests {
                     share_table_id: true,
                 },
             );
-            let builder = ConstantsAllocatorGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ReductionGate::<F, 4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = BooleanConstraintGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<32>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<16>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = SelectionGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ZeroCheckGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns,false);
-            let builder = DotProductGate::<4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ConstantsAllocatorGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ReductionGate::<F, 4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = BooleanConstraintGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<32>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<16>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = SelectionGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ZeroCheckGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+                false,
+            );
+            let builder = DotProductGate::<4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
             let builder = MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = NopGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = NopGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
 
             builder
         }
@@ -475,11 +509,8 @@ mod tests {
         use boojum::config::DevCSConfig;
         use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
 
-        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry, 
-            1 << 26,
-            1 << 20
-        );
+        let builder_impl =
+            CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(geometry, 1 << 26, 1 << 20);
         use boojum::cs::cs_builder::new_builder;
         let builder = new_builder::<_, F>(builder_impl);
 
@@ -512,18 +543,25 @@ mod tests {
             DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS];
         let is_start = Boolean::allocated_constant(cs, true);
         let round_function = Poseidon2Goldilocks;
-        let fs_challenges = crate::utils::produce_fs_challenges::<F, _, Poseidon2Goldilocks, FULL_SPONGE_QUEUE_STATE_WIDTH, {MEMORY_QUERY_PACKED_WIDTH + 1}, DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS> (
-        cs,
-        original_queue.into_state().tail,
-        sorted_queue.into_state().tail,
-        &round_function,
+        let fs_challenges = crate::utils::produce_fs_challenges::<
+            F,
+            _,
+            Poseidon2Goldilocks,
+            FULL_SPONGE_QUEUE_STATE_WIDTH,
+            { MEMORY_QUERY_PACKED_WIDTH + 1 },
+            DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
+        >(
+            cs,
+            original_queue.into_state().tail,
+            sorted_queue.into_state().tail,
+            &round_function,
         );
         let limit = 16;
         let mut previous_packed_key = [UInt32::allocated_constant(cs, 0); PACKED_KEY_LENGTH];
         let mut first_encountered_timestamp = UInt32::allocated_constant(cs, 0);
         let mut previous_record = DecommitQuery::placeholder(cs);
         sort_and_deduplicate_code_decommittments_inner(
-            cs, 
+            cs,
             &mut original_queue,
             &mut sorted_queue,
             &mut result_queue,
@@ -534,7 +572,7 @@ mod tests {
             &mut first_encountered_timestamp,
             &mut previous_record,
             is_start,
-            limit
+            limit,
         );
 
         cs.pad_and_shrink();
@@ -542,8 +580,6 @@ mod tests {
         let mut owned_cs = owned_cs.into_assembly();
         owned_cs.print_gate_stats();
         assert!(owned_cs.check_if_satisfied(&worker));
-
-
     }
     fn witness_input_unsorted<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<DecommitQuery<F>> {
         let mut unsorted_querie = vec![];
@@ -551,7 +587,13 @@ mod tests {
         let bool_true = Boolean::allocated_constant(cs, true);
 
         let q = DecommitQuery::<F> {
-            code_hash:  UInt256::allocated_constant(cs,U256::from_dec_str("452334469539131717490596781220410444809589670111004622364436613658071035425").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452334469539131717490596781220410444809589670111004622364436613658071035425",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 8),
             is_first: bool_true,
             timestamp: UInt32::allocated_constant(cs, 1),
@@ -559,7 +601,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_true,
             timestamp: UInt32::allocated_constant(cs, 1205),
@@ -567,7 +615,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 1609),
@@ -575,7 +629,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 1969),
@@ -583,7 +643,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 2429),
@@ -591,7 +657,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 2901),
@@ -599,7 +671,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 3265),
@@ -607,7 +685,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 3597),
@@ -615,7 +699,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 4001),
@@ -623,7 +713,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 4389),
@@ -631,7 +727,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452319300877325313852488925888724764263521004047156906617735320131041551860").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452319300877325313852488925888724764263521004047156906617735320131041551860",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2048),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 4889),
@@ -639,7 +741,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_true,
             timestamp: UInt32::allocated_constant(cs, 5413),
@@ -647,7 +755,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314303070458905393772003110276921984481582690891142221610001680774704050").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314303070458905393772003110276921984481582690891142221610001680774704050",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2136),
             is_first: bool_true,
             timestamp: UInt32::allocated_constant(cs, 6181),
@@ -655,7 +769,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452315323292561252187007358802027294616051526905825659974295089200090160077").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452315323292561252187007358802027294616051526905825659974295089200090160077",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2144),
             is_first: bool_true,
             timestamp: UInt32::allocated_constant(cs, 7689),
@@ -663,7 +783,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 8333),
@@ -671,7 +797,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314563023454543640061243127807783650961769624362936951212864970460788229").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314563023454543640061243127807783650961769624362936951212864970460788229",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2160),
             is_first: bool_true,
             timestamp: UInt32::allocated_constant(cs, 9281),
@@ -679,7 +811,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 10337),
@@ -687,7 +825,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314303070458905393772003110276921984481582690891142221610001680774704050").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314303070458905393772003110276921984481582690891142221610001680774704050",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2136),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 11169),
@@ -695,7 +839,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452315323292561252187007358802027294616051526905825659974295089200090160077").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452315323292561252187007358802027294616051526905825659974295089200090160077",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2144),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 13521),
@@ -703,7 +853,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 14197),
@@ -711,7 +867,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314563023454543640061243127807783650961769624362936951212864970460788229").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314563023454543640061243127807783650961769624362936951212864970460788229",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2160),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 15209),
@@ -719,7 +881,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 16321),
@@ -727,7 +895,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314303070458905393772003110276921984481582690891142221610001680774704050").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314303070458905393772003110276921984481582690891142221610001680774704050",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2136),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 17217),
@@ -735,7 +909,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452315323292561252187007358802027294616051526905825659974295089200090160077").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452315323292561252187007358802027294616051526905825659974295089200090160077",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2144),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 19561),
@@ -743,7 +923,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 20269),
@@ -751,7 +937,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314563023454543640061243127807783650961769624362936951212864970460788229").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314563023454543640061243127807783650961769624362936951212864970460788229",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2160),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 21345),
@@ -759,7 +951,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 22457),
@@ -767,7 +965,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314303070458905393772003110276921984481582690891142221610001680774704050").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314303070458905393772003110276921984481582690891142221610001680774704050",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2136),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 23417),
@@ -775,7 +979,13 @@ mod tests {
         unsorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452315323292561252187007358802027294616051526905825659974295089200090160077").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452315323292561252187007358802027294616051526905825659974295089200090160077",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2144),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 26209),
@@ -783,7 +993,6 @@ mod tests {
         unsorted_querie.push(q);
 
         unsorted_querie
-
     }
     fn witness_input_sorted<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<DecommitQuery<F>> {
         let mut sorted_querie = vec![];
@@ -791,7 +1000,13 @@ mod tests {
         let bool_true = Boolean::allocated_constant(cs, true);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452313746998214869734508634865817576060841700842481516984674100922521850987").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452313746998214869734508634865817576060841700842481516984674100922521850987",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2368),
             is_first: bool_true,
             timestamp: UInt32::allocated_constant(cs, 40973),
@@ -799,31 +1014,55 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452313746998214869734508634865817576060841700842481516984674100922521850987").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452313746998214869734508634865817576060841700842481516984674100922521850987",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2368),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 41617),
         };
         sorted_querie.push(q);
-        
+
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452313746998214869734508634865817576060841700842481516984674100922521850987").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452313746998214869734508634865817576060841700842481516984674100922521850987",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2368),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 42369), 
+            timestamp: UInt32::allocated_constant(cs, 42369),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314299079945159748026115793412643474177571247148724523427478208200944620").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314299079945159748026115793412643474177571247148724523427478208200944620",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2680),
             is_first: bool_true,
-            timestamp: UInt32::allocated_constant(cs, 60885), 
+            timestamp: UInt32::allocated_constant(cs, 60885),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_true,
             timestamp: UInt32::allocated_constant(cs, 5413),
@@ -831,7 +1070,13 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 8333),
@@ -839,31 +1084,55 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 10337), 
+            timestamp: UInt32::allocated_constant(cs, 10337),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 14197), 
+            timestamp: UInt32::allocated_constant(cs, 14197),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 16321), 
+            timestamp: UInt32::allocated_constant(cs, 16321),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 20269),
@@ -871,15 +1140,27 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 22457), 
+            timestamp: UInt32::allocated_constant(cs, 22457),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 26949),
@@ -887,15 +1168,27 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 31393),
         };
         sorted_querie.push(q);
- 
+
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 38757),
@@ -903,31 +1196,55 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 53341),
         };
         sorted_querie.push(q);
- 
+
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 53865), 
+            timestamp: UInt32::allocated_constant(cs, 53865),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 54737), 
+            timestamp: UInt32::allocated_constant(cs, 54737),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 56061),
@@ -935,31 +1252,55 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 57493), 
+            timestamp: UInt32::allocated_constant(cs, 57493),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314302625333346664221779405237214670769280401891479637776384083169086090").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314302625333346664221779405237214670769280401891479637776384083169086090",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2128),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 59957), 
+            timestamp: UInt32::allocated_constant(cs, 59957),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314303070458905393772003110276921984481582690891142221610001680774704050").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314303070458905393772003110276921984481582690891142221610001680774704050",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2136),
             is_first: bool_true,
-            timestamp: UInt32::allocated_constant(cs, 6181), 
+            timestamp: UInt32::allocated_constant(cs, 6181),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314303070458905393772003110276921984481582690891142221610001680774704050").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314303070458905393772003110276921984481582690891142221610001680774704050",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2136),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 11169),
@@ -967,15 +1308,27 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314303070458905393772003110276921984481582690891142221610001680774704050").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314303070458905393772003110276921984481582690891142221610001680774704050",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2136),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 17217), 
+            timestamp: UInt32::allocated_constant(cs, 17217),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314303070458905393772003110276921984481582690891142221610001680774704050").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314303070458905393772003110276921984481582690891142221610001680774704050",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2136),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 23417),
@@ -983,15 +1336,27 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314303070458905393772003110276921984481582690891142221610001680774704050").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314303070458905393772003110276921984481582690891142221610001680774704050",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2136),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 37357), 
+            timestamp: UInt32::allocated_constant(cs, 37357),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314563023454543640061243127807783650961769624362936951212864970460788229").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314563023454543640061243127807783650961769624362936951212864970460788229",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2160),
             is_first: bool_true,
             timestamp: UInt32::allocated_constant(cs, 9281),
@@ -999,15 +1364,27 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314563023454543640061243127807783650961769624362936951212864970460788229").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314563023454543640061243127807783650961769624362936951212864970460788229",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2160),
             is_first: bool_false,
-            timestamp: UInt32::allocated_constant(cs, 15209), 
+            timestamp: UInt32::allocated_constant(cs, 15209),
         };
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314563023454543640061243127807783650961769624362936951212864970460788229").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314563023454543640061243127807783650961769624362936951212864970460788229",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2160),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 21345),
@@ -1015,18 +1392,19 @@ mod tests {
         sorted_querie.push(q);
 
         let q = DecommitQuery::<F> {
-            code_hash: UInt256::allocated_constant(cs,U256::from_dec_str("452314563023454543640061243127807783650961769624362936951212864970460788229").unwrap()),
+            code_hash: UInt256::allocated_constant(
+                cs,
+                U256::from_dec_str(
+                    "452314563023454543640061243127807783650961769624362936951212864970460788229",
+                )
+                .unwrap(),
+            ),
             page: UInt32::allocated_constant(cs, 2160),
             is_first: bool_false,
             timestamp: UInt32::allocated_constant(cs, 28089),
         };
         sorted_querie.push(q);
 
-
-
         sorted_querie
-
     }
 }
-
-

@@ -21,7 +21,6 @@ use cs_derive::*;
 use derivative::*;
 use std::collections::VecDeque;
 
-
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]

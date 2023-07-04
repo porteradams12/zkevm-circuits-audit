@@ -417,27 +417,24 @@ pub(crate) fn long_equals<F: SmallField, CS: ConstraintSystem<F>, const N: usize
     Boolean::multi_and(cs, &equals)
 }
 
-
 #[cfg(test)]
-mod tests { 
+mod tests {
     use super::*;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
-    use boojum::cs::implementations::reference_cs::{
-        CSDevelopmentAssembly,
-    };
+    use boojum::cs::gates::*;
+    use boojum::cs::implementations::reference_cs::CSDevelopmentAssembly;
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::tables::*;
-    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
-    use boojum::worker::Worker;
-    use ethereum_types::{Address, U256};
+    use boojum::gadgets::traits::allocatable::CSPlaceholder;
     use boojum::gadgets::u160::UInt160;
     use boojum::gadgets::u256::UInt256;
     use boojum::gadgets::u8::UInt8;
-    use boojum::gadgets::traits::allocatable::CSPlaceholder;
-    use boojum::cs::gates::*;
+    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::worker::Worker;
+    use ethereum_types::{Address, U256};
     type F = GoldilocksField;
     type P = GoldilocksField;
 
@@ -452,8 +449,12 @@ mod tests {
 
         use boojum::cs::cs_builder::*;
 
-        fn configure<T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
-            builder: CsBuilder<T, F, GC, TB>
+        fn configure<
+            T: CsBuilderImpl<F, T>,
+            GC: GateConfigurationHolder<F>,
+            TB: StaticToolboxHolder,
+        >(
+            builder: CsBuilder<T, F, GC, TB>,
         ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
             let builder = builder.allow_lookup(
                 LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
@@ -462,17 +463,48 @@ mod tests {
                     share_table_id: true,
                 },
             );
-            let builder = ConstantsAllocatorGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ReductionGate::<F, 4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = BooleanConstraintGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<32>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<16>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = SelectionGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ZeroCheckGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns,false);
-            let builder = DotProductGate::<4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ConstantsAllocatorGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ReductionGate::<F, 4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = BooleanConstraintGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<32>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<16>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = SelectionGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ZeroCheckGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+                false,
+            );
+            let builder = DotProductGate::<4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
             let builder = MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = NopGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = NopGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
 
             builder
         }
@@ -480,11 +512,8 @@ mod tests {
         use boojum::config::DevCSConfig;
         use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
 
-        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry, 
-            1 << 26,
-            1 << 20
-        );
+        let builder_impl =
+            CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(geometry, 1 << 26, 1 << 20);
         use boojum::cs::cs_builder::new_builder;
         let builder = new_builder::<_, F>(builder_impl);
 
@@ -520,15 +549,16 @@ mod tests {
             original_queue.into_state().tail,
             sorted_queue.into_state().tail,
             &round_function,
-            );
+        );
         let limit = 16;
         let mut previous_sorting_key = [UInt32::allocated_constant(cs, 0); RAM_SORTING_KEY_LENGTH];
         let mut previous_comparison_key = [UInt32::allocated_constant(cs, 0); RAM_FULL_KEY_LENGTH];
-        let mut previous_element_value =  UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap());
+        let mut previous_element_value =
+            UInt256::allocated_constant(cs, U256::from_dec_str("0").unwrap());
         let mut previous_is_ptr = Boolean::allocated_constant(cs, false);
         let mut num_nondeterministic_writes = UInt32::allocated_constant(cs, 1);
         partial_accumulate_inner(
-            cs, 
+            cs,
             &mut original_queue,
             &mut sorted_queue,
             &fs_challenges,
@@ -540,7 +570,7 @@ mod tests {
             &mut previous_element_value,
             &mut previous_is_ptr,
             &mut num_nondeterministic_writes,
-            limit
+            limit,
         );
 
         cs.pad_and_shrink();
@@ -561,13 +591,7 @@ mod tests {
             index: UInt32::allocated_constant(cs, 0),
             rw_flag: bool_false,
             is_ptr: bool_false,
-            value: UInt256::allocated_constant(
-                cs,
-                U256::from_dec_str(
-                    "1125899906842626",
-                )
-                .unwrap(),
-            ),
+            value: UInt256::allocated_constant(cs, U256::from_dec_str("1125899906842626").unwrap()),
         };
         unsorted_querie.push(q);
 
@@ -577,30 +601,18 @@ mod tests {
             index: UInt32::allocated_constant(cs, 0),
             rw_flag: bool_true,
             is_ptr: bool_false,
-            value: UInt256::allocated_constant(
-                cs,
-                U256::from_dec_str(
-                    "1125899906842626",
-                )
-                .unwrap(),
-            ),
+            value: UInt256::allocated_constant(cs, U256::from_dec_str("1125899906842626").unwrap()),
         };
 
         unsorted_querie.push(q);
-        
+
         let q = MemoryQuery::<F> {
             timestamp: UInt32::allocated_constant(cs, 0),
             memory_page: UInt32::allocated_constant(cs, BOOTLOADER_HEAP_PAGE),
             index: UInt32::allocated_constant(cs, 695),
             rw_flag: bool_true,
             is_ptr: bool_false,
-            value: UInt256::allocated_constant(
-                cs,
-                U256::from_dec_str(
-                    "12345678",
-                )
-                .unwrap(),
-            ),
+            value: UInt256::allocated_constant(cs, U256::from_dec_str("12345678").unwrap()),
         };
         unsorted_querie.push(q);
 
@@ -618,13 +630,7 @@ mod tests {
             index: UInt32::allocated_constant(cs, 695),
             rw_flag: bool_true,
             is_ptr: bool_false,
-            value: UInt256::allocated_constant(
-                cs,
-                U256::from_dec_str(
-                    "12345678",
-                )
-                .unwrap(),
-            ),
+            value: UInt256::allocated_constant(cs, U256::from_dec_str("12345678").unwrap()),
         };
         sorted_querie.push(q);
 
@@ -634,13 +640,7 @@ mod tests {
             index: UInt32::allocated_constant(cs, 0),
             rw_flag: bool_true,
             is_ptr: bool_false,
-            value: UInt256::allocated_constant(
-                cs,
-                U256::from_dec_str(
-                    "1125899906842626",
-                )
-                .unwrap(),
-            ),
+            value: UInt256::allocated_constant(cs, U256::from_dec_str("1125899906842626").unwrap()),
         };
         sorted_querie.push(q);
 
@@ -650,18 +650,10 @@ mod tests {
             index: UInt32::allocated_constant(cs, 0),
             rw_flag: bool_false,
             is_ptr: bool_false,
-            value: UInt256::allocated_constant(
-                cs,
-                U256::from_dec_str(
-                    "1125899906842626",
-                )
-                .unwrap(),
-            ),
+            value: UInt256::allocated_constant(cs, U256::from_dec_str("1125899906842626").unwrap()),
         };
         sorted_querie.push(q);
 
         sorted_querie
     }
-
-
 }

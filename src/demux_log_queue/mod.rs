@@ -2,23 +2,25 @@ use super::*;
 
 pub mod input;
 
-use crate::fsm_input_output::ClosedFormInputCompactForm;
 use crate::base_structures::{
     log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
     vm_state::*,
 };
+use crate::fsm_input_output::ClosedFormInputCompactForm;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
 use boojum::gadgets::queue::queue_optimizer::SpongeOptimizer;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::u32::UInt32;
+use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
     queue::*,
-    traits::{allocatable::CSAllocatableExt, selectable::Selectable, encodable::CircuitEncodableExt},
+    traits::{
+        allocatable::CSAllocatableExt, encodable::CircuitEncodableExt, selectable::Selectable,
+    },
     u160::*,
 };
 
@@ -311,45 +313,45 @@ pub fn demultiplex_storage_logs_inner<
             Boolean::multi_and(cs, &[is_precompile_aux_byte, is_ecrecover_address, execute]);
 
         // rollup_storage_queue.push_encoding_with_optimizer_without_changing_witness(
-        //     cs, 
-        //     popped.1, 
-        //     execute_rollup_storage, 
-        //     LogType::RollupStorage as usize, 
+        //     cs,
+        //     popped.1,
+        //     execute_rollup_storage,
+        //     LogType::RollupStorage as usize,
         //     &mut optimizer
         // );
         // events_queue.push_encoding_with_optimizer_without_changing_witness(
-        //     cs, 
-        //     popped.1, 
-        //     execute_event, 
-        //     LogType::Events as usize, 
+        //     cs,
+        //     popped.1,
+        //     execute_event,
+        //     LogType::Events as usize,
         //     &mut optimizer
         // );
         // l1_messages_queue.push_encoding_with_optimizer_without_changing_witness(
-        //     cs, 
-        //     popped.1, 
-        //     execute_l1_message, 
-        //     LogType::L1Messages as usize, 
+        //     cs,
+        //     popped.1,
+        //     execute_l1_message,
+        //     LogType::L1Messages as usize,
         //     &mut optimizer
         // );
         // keccak_calls_queue.push_encoding_with_optimizer_without_changing_witness(
-        //     cs, 
-        //     popped.1, 
-        //     execute_keccak_call, 
-        //     LogType::KeccakCalls as usize, 
+        //     cs,
+        //     popped.1,
+        //     execute_keccak_call,
+        //     LogType::KeccakCalls as usize,
         //     &mut optimizer
         // );
         // sha256_calls_queue.push_encoding_with_optimizer_without_changing_witness(
-        //     cs, 
-        //     popped.1, 
-        //     execute_sha256_call, 
-        //     LogType::Sha256Calls as usize, 
+        //     cs,
+        //     popped.1,
+        //     execute_sha256_call,
+        //     LogType::Sha256Calls as usize,
         //     &mut optimizer
         // );
         // ecdsa_calls_queue.push_encoding_with_optimizer_without_changing_witness(
-        //     cs, 
-        //     popped.1, 
-        //     execute_ecrecover_call, 
-        //     LogType::ECRecoverCalls as usize, 
+        //     cs,
+        //     popped.1,
+        //     execute_ecrecover_call,
+        //     LogType::ECRecoverCalls as usize,
         //     &mut optimizer
         // );
 
@@ -456,7 +458,7 @@ pub fn check_if_bitmask_and_if_empty<F: SmallField, CS: ConstraintSystem<F>, con
 }
 
 #[cfg(test)]
-mod tests { 
+mod tests {
     use super::*;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
     use boojum::cs::traits::gate::GatePlacementStrategy;
@@ -464,13 +466,13 @@ mod tests {
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::tables::*;
-    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
-    use boojum::worker::Worker;
-    use ethereum_types::{Address, U256};
     use boojum::gadgets::u160::UInt160;
     use boojum::gadgets::u256::UInt256;
     use boojum::gadgets::u32::UInt32;
     use boojum::gadgets::u8::UInt8;
+    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::worker::Worker;
+    use ethereum_types::{Address, U256};
     type F = GoldilocksField;
     type P = GoldilocksField;
 
@@ -485,8 +487,12 @@ mod tests {
 
         use boojum::cs::cs_builder::*;
 
-        fn configure<T: CsBuilderImpl<F, T>, GC: GateConfigurationHolder<F>, TB: StaticToolboxHolder>(
-            builder: CsBuilder<T, F, GC, TB>
+        fn configure<
+            T: CsBuilderImpl<F, T>,
+            GC: GateConfigurationHolder<F>,
+            TB: StaticToolboxHolder,
+        >(
+            builder: CsBuilder<T, F, GC, TB>,
         ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
             let builder = builder.allow_lookup(
                 LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
@@ -495,17 +501,48 @@ mod tests {
                     share_table_id: true,
                 },
             );
-            let builder = ConstantsAllocatorGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ReductionGate::<F, 4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = BooleanConstraintGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<32>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = UIntXAddGate::<16>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = SelectionGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = ZeroCheckGate::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns,false);
-            let builder = DotProductGate::<4>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = ConstantsAllocatorGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ReductionGate::<F, 4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = BooleanConstraintGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<32>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<16>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = SelectionGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ZeroCheckGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+                false,
+            );
+            let builder = DotProductGate::<4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
             let builder = MatrixMultiplicationGate::<F, 12, Poseidon2GoldilocksExternalMatrix>::configure_builder(builder,GatePlacementStrategy::UseGeneralPurposeColumns);
-            let builder = NopGate::configure_builder(builder, GatePlacementStrategy::UseGeneralPurposeColumns);
+            let builder = NopGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
 
             builder
         }
@@ -513,24 +550,19 @@ mod tests {
         use boojum::config::DevCSConfig;
         use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
 
-        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry, 
-            1 << 26,
-            1 << 20
-        );
+        let builder_impl =
+            CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(geometry, 1 << 26, 1 << 20);
         use boojum::cs::cs_builder::new_builder;
         let builder = new_builder::<_, F>(builder_impl);
 
         let builder = configure(builder);
         let mut owned_cs = builder.build(());
 
-
         // add tables
         let table = create_xor8_table();
         owned_cs.add_lookup_table::<Xor8Table, 3>(table);
 
         let cs = &mut owned_cs;
-
 
         // start test
         let execute = Boolean::allocated_constant(cs, true);
@@ -547,28 +579,22 @@ mod tests {
         let mut output_queue4 = StorageLogQueue::empty(cs);
         let mut output_queue5 = StorageLogQueue::empty(cs);
 
-        let output = [&mut output_queue,
-        &mut output_queue1,
-        &mut output_queue2,
-        &mut output_queue3,
-        &mut output_queue4,
-        &mut output_queue5
+        let output = [
+            &mut output_queue,
+            &mut output_queue1,
+            &mut output_queue2,
+            &mut output_queue3,
+            &mut output_queue4,
+            &mut output_queue5,
         ];
         let limit = 16;
-        demultiplex_storage_logs_inner(
-            cs, 
-            &mut storage_log_queue,
-            output,
-            limit
-        );
+        demultiplex_storage_logs_inner(cs, &mut storage_log_queue, output, limit);
 
         cs.pad_and_shrink();
         let worker = Worker::new();
         let mut owned_cs = owned_cs.into_assembly();
         owned_cs.print_gate_stats();
         assert!(owned_cs.check_if_satisfied(&worker));
-
-
     }
 
     fn witness_input_unsorted<CS: ConstraintSystem<F>>(cs: &mut CS) -> Vec<LogQuery<F>> {
@@ -620,7 +646,6 @@ mod tests {
             timestamp: UInt32::allocated_constant(cs, 1425),
         };
         unsorted_querie.push(q);
-
 
         let q = LogQuery::<F> {
             address: UInt160::allocated_constant(cs, Address::from_low_u64_le(32770)),
@@ -893,6 +918,5 @@ mod tests {
         unsorted_querie.push(q);
 
         unsorted_querie
-
     }
 }

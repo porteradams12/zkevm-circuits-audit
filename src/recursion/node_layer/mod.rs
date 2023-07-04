@@ -3,12 +3,12 @@ use crate::fsm_input_output::commit_variable_length_encodable_item;
 use boojum::cs::implementations::proof::Proof;
 use boojum::cs::implementations::prover::ProofConfig;
 
+use crate::base_structures::recursion_query::RecursionQueue;
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 use boojum::gadgets::recursion::recursive_transcript::RecursiveTranscript;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
-use crate::base_structures::recursion_query::RecursionQueue;
 
 use std::collections::VecDeque;
 
@@ -52,7 +52,7 @@ pub struct NodeLayerRecursionConfig<
     pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
     pub leaf_layer_capacity: usize,
     pub node_layer_capacity: usize,
-    pub padding_proof: Proof<F, H, EXT>,
+    pub _marker: std::marker::PhantomData<(F, H, EXT)>,
 }
 
 use boojum::cs::traits::circuit::*;
@@ -101,10 +101,7 @@ where
         queue_state,
     } = input;
 
-    assert_eq!(
-        config.vk_fixed_parameters,
-        vk_witness.fixed_parameters,
-    );
+    assert_eq!(config.vk_fixed_parameters, vk_witness.fixed_parameters,);
 
     let vk = AllocatedVerificationKey::<F, H>::allocate(cs, vk_witness);
     assert_eq!(
@@ -121,12 +118,8 @@ where
 
     for el in leaf_layer_parameters.iter() {
         let this_type = Num::equals(cs, &branch_circuit_type, &el.circuit_type);
-        leaf_params = RecursionLeafParameters::conditionally_select(
-            cs,
-            this_type,
-            el,
-            &leaf_params
-        );
+        leaf_params =
+            RecursionLeafParameters::conditionally_select(cs, this_type, el, &leaf_params);
     }
 
     // now we need to try to split the circuit
@@ -136,7 +129,7 @@ where
         vk_fixed_parameters,
         leaf_layer_capacity,
         node_layer_capacity,
-        padding_proof,
+        ..
     } = config;
 
     let max_length_if_leafs = leaf_layer_capacity * node_layer_capacity;
@@ -157,7 +150,9 @@ where
 
     // small trick to simplify setup. If we have nothing to verify, we do not care about VK
     // being one that we want
-    let is_meaningful = RecursionQueue::<F, R>::from_state(cs, queue_state).is_empty(cs).negated(cs);
+    let is_meaningful = RecursionQueue::<F, R>::from_state(cs, queue_state)
+        .is_empty(cs)
+        .negated(cs);
 
     for (a, b) in vk_commitment.iter().zip(vk_commitment_computed.iter()) {
         Num::conditionally_enforce_equal(cs, is_meaningful, a, b);
@@ -186,7 +181,7 @@ where
     for el in subqueues.iter() {
         // if we aggregate leafs, then we ensure length to be small enough.
         // It's not mandatory, but nevertheless
-        
+
         // check len <= leaf capacity
 
         let (_, uf) = leaf_layer_capacity.overflowing_sub(cs, el.tail.length);
@@ -196,22 +191,15 @@ where
     assert_eq!(subqueues.len(), node_layer_capacity);
 
     for subqueue in subqueues.into_iter() {
-        // here we do the trick to protect ourselves from setup pending from witness, but
-        // nevertheless do not create new types for proofs with fixed number of inputs, etc
-        let witness = if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS == false {
-            padding_proof.clone()
-        } else {
-            if <CS::Config as CSConfig>::SetupConfig::KEEP_SETUP == false {
-                // proving mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            } else {
-                // we are in the testing mode
-                proof_witnesses.pop_front().unwrap_or(padding_proof.clone())
-            }
-        };
-        assert!(Proof::is_same_geometry(&witness, &padding_proof));
+        let proof_witness = proof_witnesses.pop_front();
 
-        let proof = AllocatedProof::<F, H, EXT>::allocate(cs, witness);
+        let proof = AllocatedProof::allocate_from_witness(
+            cs,
+            proof_witness,
+            &verifier,
+            &vk_fixed_parameters,
+            &proof_config,
+        );
 
         let chunk_is_empty = subqueue.tail.length.is_zero(cs);
         let chunk_is_meaningful = chunk_is_empty.negated(cs);
@@ -248,8 +236,8 @@ where
             commit_variable_length_encodable_item(cs, &next_layer_input_if_leaf, round_function);
 
         let input_commitment = <[Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]>::conditionally_select(
-            cs, 
-            next_layer_aggregates_nodes, 
+            cs,
+            next_layer_aggregates_nodes,
             &input_commitment_if_node,
             &input_commitment_if_leaf,
         );
@@ -293,11 +281,13 @@ pub(crate) fn split_queue_state_into_n<F: SmallField, CS: ConstraintSystem<F>, c
     let mut result = Vec::with_capacity(split_into);
 
     for _ in 0..(split_into - 1) {
-        let witness = split_point_witnesses.pop_front().unwrap_or(QueueTailState::placeholder_witness());
+        let witness = split_point_witnesses
+            .pop_front()
+            .unwrap_or(QueueTailState::placeholder_witness());
         let current_tail = QueueTailState::allocate(cs, witness);
         let first = QueueState {
             head: current_head,
-            tail: current_tail
+            tail: current_tail,
         };
 
         current_head = current_tail.tail;
@@ -312,10 +302,10 @@ pub(crate) fn split_queue_state_into_n<F: SmallField, CS: ConstraintSystem<F>, c
     let last_len = queue_state.tail.length.sub_no_overflow(cs, total_len);
     let last = QueueState {
         head: current_head,
-        tail: QueueTailState { 
-            tail: queue_state.tail.tail, 
-            length: last_len, 
-        }
+        tail: QueueTailState {
+            tail: queue_state.tail.tail,
+            length: last_len,
+        },
     };
     last.enforce_consistency(cs);
     result.push(last);

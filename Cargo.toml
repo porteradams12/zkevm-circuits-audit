@@ -27,6 +27,8 @@ itertools = "0.10"
 rand_new = { package = "rand", version = "0.8" }
 hex = "*"
 
+[features]
+verbose_circuits = []
 
 [dev-dependencies]
 hex = "*"
