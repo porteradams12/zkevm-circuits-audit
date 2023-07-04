@@ -1168,14 +1168,20 @@ mod test {
     use boojum::cs::cs_builder::*;
     use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
     use boojum::cs::gates::*;
+    use boojum::cs::implementations::reference_cs::CSReferenceImplementation;
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::gadgets::tables::*;
 
-    #[test]
-    fn test_signature_for_address_verification() {
+    fn create_cs() -> CSReferenceImplementation<
+        F,
+        P,
+        DevCSConfig,
+        impl GateConfigurationHolder<F>,
+        impl StaticToolboxHolder,
+    > {
         let geometry = CSGeometry {
             num_columns_under_copy_permutation: 100,
             num_witness_columns: 0,
@@ -1320,6 +1326,12 @@ mod test {
         let table = create_byte_split_table::<F, 4>();
         owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
 
+        owned_cs
+    }
+
+    #[test]
+    fn test_signature_for_address_verification() {
+        let mut owned_cs = create_cs();
         let cs = &mut owned_cs;
 
         let sk = crate::ff::from_hex::<Secp256Fr>(
@@ -1392,150 +1404,7 @@ mod test {
 
     #[test]
     fn test_ecrecover_zero_element() {
-        let geometry = CSGeometry {
-            num_columns_under_copy_permutation: 100,
-            num_witness_columns: 0,
-            num_constant_columns: 8,
-            max_allowed_constraint_degree: 4,
-        };
-        let max_variables = 1 << 26;
-        let max_trace_len = 1 << 20;
-
-        fn configure<
-            F: SmallField,
-            T: CsBuilderImpl<F, T>,
-            GC: GateConfigurationHolder<F>,
-            TB: StaticToolboxHolder,
-        >(
-            builder: CsBuilder<T, F, GC, TB>,
-        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
-            let builder = builder.allow_lookup(
-                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
-                    width: 3,
-                    num_repetitions: 8,
-                    share_table_id: true,
-                },
-            );
-            let builder = U8x4FMAGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ConstantsAllocatorGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ReductionGate::<F, 4>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
-            let builder = BooleanConstraintGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<32>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<16>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<8>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = SelectionGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ZeroCheckGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-                false,
-            );
-            let builder = DotProductGate::<4>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
-            let builder = NopGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-
-            builder
-        }
-
-        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry,
-            max_variables,
-            max_trace_len,
-        );
-        let builder = new_builder::<_, F>(builder_impl);
-
-        let builder = configure(builder);
-        let mut owned_cs = builder.build(());
-
-        // add tables
-        let table = create_xor8_table();
-        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
-
-        let table = create_and8_table();
-        owned_cs.add_lookup_table::<And8Table, 3>(table);
-
-        let table = create_naf_abs_div2_table();
-        owned_cs.add_lookup_table::<NafAbsDiv2Table, 3>(table);
-
-        let table = create_wnaf_decomp_table();
-        owned_cs.add_lookup_table::<WnafDecompTable, 3>(table);
-
-        let table = create_fixed_base_mul_table::<F, 0>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<0>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 1>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<1>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 2>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<2>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 3>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<3>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 4>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<4>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 5>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<5>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 6>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<6>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 7>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<7>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 8>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<8>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 9>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<9>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 10>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<10>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 11>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<11>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 12>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<12>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 13>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<13>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 14>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<14>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 15>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<15>, 3>(table);
-
-        let table = create_byte_split_table::<F, 1>();
-        owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
-        let table = create_byte_split_table::<F, 2>();
-        owned_cs.add_lookup_table::<ByteSplitTable<2>, 3>(table);
-        let table = create_byte_split_table::<F, 3>();
-        owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
-        let table = create_byte_split_table::<F, 4>();
-        owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
-
+        let mut owned_cs = create_cs();
         let cs = &mut owned_cs;
 
         let sk = crate::ff::from_hex::<Secp256Fr>("00").unwrap();
@@ -1591,150 +1460,7 @@ mod test {
 
     #[test]
     fn test_ecrecover_zero_point() {
-        let geometry = CSGeometry {
-            num_columns_under_copy_permutation: 100,
-            num_witness_columns: 0,
-            num_constant_columns: 8,
-            max_allowed_constraint_degree: 4,
-        };
-        let max_variables = 1 << 26;
-        let max_trace_len = 1 << 20;
-
-        fn configure<
-            F: SmallField,
-            T: CsBuilderImpl<F, T>,
-            GC: GateConfigurationHolder<F>,
-            TB: StaticToolboxHolder,
-        >(
-            builder: CsBuilder<T, F, GC, TB>,
-        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
-            let builder = builder.allow_lookup(
-                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
-                    width: 3,
-                    num_repetitions: 8,
-                    share_table_id: true,
-                },
-            );
-            let builder = U8x4FMAGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ConstantsAllocatorGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ReductionGate::<F, 4>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
-            let builder = BooleanConstraintGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<32>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<16>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<8>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = SelectionGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = ZeroCheckGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-                false,
-            );
-            let builder = DotProductGate::<4>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
-            let builder = NopGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-
-            builder
-        }
-
-        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
-            geometry,
-            max_variables,
-            max_trace_len,
-        );
-        let builder = new_builder::<_, F>(builder_impl);
-
-        let builder = configure(builder);
-        let mut owned_cs = builder.build(());
-
-        // add tables
-        let table = create_xor8_table();
-        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
-
-        let table = create_and8_table();
-        owned_cs.add_lookup_table::<And8Table, 3>(table);
-
-        let table = create_naf_abs_div2_table();
-        owned_cs.add_lookup_table::<NafAbsDiv2Table, 3>(table);
-
-        let table = create_wnaf_decomp_table();
-        owned_cs.add_lookup_table::<WnafDecompTable, 3>(table);
-
-        let table = create_fixed_base_mul_table::<F, 0>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<0>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 1>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<1>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 2>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<2>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 3>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<3>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 4>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<4>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 5>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<5>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 6>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<6>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 7>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<7>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 8>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<8>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 9>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<9>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 10>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<10>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 11>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<11>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 12>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<12>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 13>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<13>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 14>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<14>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 15>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<15>, 3>(table);
-
-        let table = create_byte_split_table::<F, 1>();
-        owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
-        let table = create_byte_split_table::<F, 2>();
-        owned_cs.add_lookup_table::<ByteSplitTable<2>, 3>(table);
-        let table = create_byte_split_table::<F, 3>();
-        owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
-        let table = create_byte_split_table::<F, 4>();
-        owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
-
+        let mut owned_cs = create_cs();
         let cs = &mut owned_cs;
 
         let sk = crate::ff::from_hex::<Secp256Fr>(
