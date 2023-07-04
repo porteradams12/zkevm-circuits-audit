@@ -523,65 +523,87 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
     let bytes = message_hash_by_r_inv
         .limbs
         .iter()
+        .take(16)
         .flat_map(|el| unsafe { UInt16::from_variable_unchecked(*el).to_le_bytes(cs) })
         .collect::<Vec<UInt8<F>>>();
 
-    let ids = vec![
-        cs.get_table_id_for_marker::<FixedBaseMulTable<0>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<1>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<2>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<3>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<4>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<5>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<6>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<7>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<8>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<9>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<10>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<11>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<12>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<13>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<14>>()
-            .expect("table must exist"),
-        cs.get_table_id_for_marker::<FixedBaseMulTable<15>>()
-            .expect("table must exist"),
-    ];
     let mut acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
-    bytes[..32].iter().enumerate().rev().for_each(|(i, el)| {
-        let index = UInt8::allocated_constant(cs, i as u8).get_variable();
-        let chunks = ids
-            .iter()
-            .map(|id| unsafe {
-                UInt32::from_variable_unchecked(
-                    cs.perform_lookup::<2, 1>(*id, &[el.get_variable(), index])[0],
-                )
-            })
-            .collect::<Vec<UInt32<F>>>();
-        let mut x = [UInt32::zero(cs); 8];
-        x.copy_from_slice(&chunks[..8]);
-        let x = UInt256 { inner: x };
-        let x = convert_uint256_to_field_element(cs, &x, base_field_params);
-        let mut y = [UInt32::zero(cs); 8];
-        y.copy_from_slice(&chunks[8..]);
-        let y = UInt256 { inner: y };
-        let y = convert_uint256_to_field_element(cs, &y, base_field_params);
-        acc = acc.add_mixed(cs, &mut (x, y));
+    let mut full_table_ids = vec![];
+    seq_macro::seq!(C in 0..32 {
+        let ids = vec![
+            cs.get_table_id_for_marker::<FixedBaseMulTable<0, C>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<1, C>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<2, C>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<3, C>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<4, C>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<5, C>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<6, C>>()
+                .expect("table must exist"),
+            cs.get_table_id_for_marker::<FixedBaseMulTable<7, C>>()
+                .expect("table must exist"),
+        ];
+        full_table_ids.push(ids);
     });
+
+    full_table_ids
+        .into_iter()
+        .zip(bytes)
+        .rev()
+        .for_each(|(ids, byte)| {
+            let chunks = ids
+                .iter()
+                .flat_map(|id| cs.perform_lookup::<1, 2>(*id, &[byte.get_variable()]))
+                .collect::<Vec<Variable>>();
+
+            let (x, y): (Vec<Variable>, Vec<Variable>) = chunks
+                .chunks(2)
+                .flat_map(|v| {
+                    let x_v = unsafe { UInt32::from_variable_unchecked(v[0]) };
+                    let y_v = unsafe { UInt32::from_variable_unchecked(v[1]) };
+                    let x_v = x_v.to_le_bytes(cs);
+                    let y_v = y_v.to_le_bytes(cs);
+                    let x_1 = UInt16::from_le_bytes(cs, x_v[..2].try_into().unwrap());
+                    let x_2 = UInt16::from_le_bytes(cs, x_v[2..].try_into().unwrap());
+                    let y_1 = UInt16::from_le_bytes(cs, y_v[..2].try_into().unwrap());
+                    let y_2 = UInt16::from_le_bytes(cs, y_v[2..].try_into().unwrap());
+                    [
+                        (x_1.get_variable(), y_1.get_variable()),
+                        (x_2.get_variable(), y_2.get_variable()),
+                    ]
+                })
+                .collect::<Vec<(Variable, Variable)>>()
+                .into_iter()
+                .unzip();
+            let zero_var = cs.allocate_constant(F::ZERO);
+            let mut x_arr = [zero_var; 17];
+            x_arr[..16].copy_from_slice(&x[..16]);
+            let mut y_arr = [zero_var; 17];
+            y_arr[..16].copy_from_slice(&y[..16]);
+            let mut x = NonNativeFieldOverU16 {
+                limbs: x_arr,
+                non_zero_limbs: 16,
+                tracker: OverflowTracker { max_moduluses: 1 },
+                form: RepresentationForm::Normalized,
+                params: base_field_params.clone(),
+                _marker: std::marker::PhantomData,
+            };
+            let mut y = NonNativeFieldOverU16 {
+                limbs: y_arr,
+                non_zero_limbs: 16,
+                tracker: OverflowTracker { max_moduluses: 1 },
+                form: RepresentationForm::Normalized,
+                params: base_field_params.clone(),
+                _marker: std::marker::PhantomData,
+            };
+            acc = acc.add_mixed(cs, &mut (x, y));
+        });
     acc
 }
 
@@ -1248,38 +1270,24 @@ mod test {
         let table = create_wnaf_decomp_table();
         owned_cs.add_lookup_table::<WnafDecompTable, 3>(table);
 
-        let table = create_fixed_base_mul_table::<F, 0>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<0>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 1>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<1>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 2>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<2>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 3>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<3>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 4>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<4>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 5>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<5>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 6>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<6>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 7>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<7>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 8>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<8>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 9>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<9>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 10>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<10>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 11>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<11>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 12>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<12>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 13>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<13>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 14>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<14>, 3>(table);
-        let table = create_fixed_base_mul_table::<F, 15>();
-        owned_cs.add_lookup_table::<FixedBaseMulTable<15>, 3>(table);
+        seq_macro::seq!(C in 0..32 {
+            let table = create_fixed_base_mul_table::<F, 0, C>();
+            owned_cs.add_lookup_table::<FixedBaseMulTable<0, C>, 3>(table);
+            let table = create_fixed_base_mul_table::<F, 1, C>();
+            owned_cs.add_lookup_table::<FixedBaseMulTable<1, C>, 3>(table);
+            let table = create_fixed_base_mul_table::<F, 2, C>();
+            owned_cs.add_lookup_table::<FixedBaseMulTable<2, C>, 3>(table);
+            let table = create_fixed_base_mul_table::<F, 3, C>();
+            owned_cs.add_lookup_table::<FixedBaseMulTable<3, C>, 3>(table);
+            let table = create_fixed_base_mul_table::<F, 4, C>();
+            owned_cs.add_lookup_table::<FixedBaseMulTable<4, C>, 3>(table);
+            let table = create_fixed_base_mul_table::<F, 5, C>();
+            owned_cs.add_lookup_table::<FixedBaseMulTable<5, C>, 3>(table);
+            let table = create_fixed_base_mul_table::<F, 6, C>();
+            owned_cs.add_lookup_table::<FixedBaseMulTable<6, C>, 3>(table);
+            let table = create_fixed_base_mul_table::<F, 7, C>();
+            owned_cs.add_lookup_table::<FixedBaseMulTable<7, C>, 3>(table);
+        });
 
         let table = create_byte_split_table::<F, 1>();
         owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);

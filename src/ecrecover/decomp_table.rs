@@ -18,7 +18,7 @@ const MASK_FOR_MOD_TABLE_SIZE: u8 = (TABLE_SIZE as u8) - 1;
 
 // Lookups for wNAF decomposition of scalars.
 pub fn create_wnaf_decomp_table<F: SmallField>() -> LookupTable<F, 3> {
-    let mut all_keys = Vec::with_capacity(1 << 8 - 1);
+    let mut all_keys = Vec::with_capacity(1 << 8);
     for a in 0..=u8::MAX {
         let key = smallvec::smallvec![F::from_u64_unchecked(a as u64)];
         all_keys.push(key);
