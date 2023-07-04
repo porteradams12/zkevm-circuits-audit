@@ -705,7 +705,7 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
 
     let mut t = x_fe.square(cs);
     t = t.mul(cs, &mut x_fe);
-    t = t.lazy_add(cs, &mut curve_b_nn);
+    t = t.add(cs, &mut curve_b_nn);
 
     let t_is_zero = t.is_zero(cs);
     exception_flags.push(t_is_zero);
