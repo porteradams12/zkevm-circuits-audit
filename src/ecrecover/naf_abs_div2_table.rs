@@ -24,7 +24,8 @@ pub fn create_naf_abs_div2_table<F: SmallField>() -> LookupTable<F, 3> {
         1,
         |keys| {
             let a = keys[0].as_u64_reduced() as i8;
-            let v = a.abs() >> 1;
+            // we need unsigned abs, to handle i8::MIN
+            let v = a.unsigned_abs() >> 1;
 
             smallvec::smallvec![F::from_u64_unchecked(v as u64), F::from_u64_unchecked(0u64)]
         },

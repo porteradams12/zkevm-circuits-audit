@@ -248,6 +248,9 @@ fn convert_field_element_to_uint256<
     cs: &mut CS,
     mut elem: NonNativeFieldOverU16<F, P, N>,
 ) -> UInt256<F> {
+    assert_eq!(elem.form, RepresentationForm::Normalized);
+    assert_eq!(elem.tracker.max_moduluses, 1);
+
     let mut limbs = [UInt32::<F>::zero(cs); 8];
     let two_pow_16 = Num::allocated_constant(cs, F::from_u64_unchecked(2u32.pow(16) as u64));
     for (dst, src) in limbs.iter_mut().zip(elem.limbs.array_chunks_mut::<2>()) {
@@ -557,16 +560,17 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
         .zip(bytes)
         .rev()
         .for_each(|(ids, byte)| {
-            let chunks = ids
-                .iter()
-                .flat_map(|id| cs.perform_lookup::<1, 2>(*id, &[byte.get_variable()]))
-                .collect::<Vec<Variable>>();
+            // let chunks = ids
+            //     .iter()
+            //     .map(|id| cs.perform_lookup::<1, 2>(*id, &[byte.get_variable()]))
+            //     .collect::<Vec<[Variable; 2]>>();
 
-            let (x, y): (Vec<Variable>, Vec<Variable>) = chunks
-                .chunks(2)
-                .flat_map(|v| {
-                    let x_v = unsafe { UInt32::from_variable_unchecked(v[0]) };
-                    let y_v = unsafe { UInt32::from_variable_unchecked(v[1]) };
+            let (x, y): (Vec<Variable>, Vec<Variable>) = ids
+                .iter()
+                .flat_map(|id| {
+                    let [x_v, y_v] = cs.perform_lookup::<1, 2>(*id, &[byte.get_variable()]);
+                    let x_v = unsafe { UInt32::from_variable_unchecked(x_v) };
+                    let y_v = unsafe { UInt32::from_variable_unchecked(y_v) };
                     let x_v = x_v.to_le_bytes(cs);
                     let y_v = y_v.to_le_bytes(cs);
                     let x_1 = UInt16::from_le_bytes(cs, x_v[..2].try_into().unwrap());
@@ -586,7 +590,7 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
             x_arr[..16].copy_from_slice(&x[..16]);
             let mut y_arr = [zero_var; 17];
             y_arr[..16].copy_from_slice(&y[..16]);
-            let mut x = NonNativeFieldOverU16 {
+            let x = NonNativeFieldOverU16 {
                 limbs: x_arr,
                 non_zero_limbs: 16,
                 tracker: OverflowTracker { max_moduluses: 1 },
@@ -594,7 +598,7 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
                 params: base_field_params.clone(),
                 _marker: std::marker::PhantomData,
             };
-            let mut y = NonNativeFieldOverU16 {
+            let y = NonNativeFieldOverU16 {
                 limbs: y_arr,
                 non_zero_limbs: 16,
                 tracker: OverflowTracker { max_moduluses: 1 },
