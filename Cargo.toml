@@ -16,7 +16,7 @@ smallvec = { version = "*", features = [
 ] }
 arrayvec = "*"
 zkevm_opcode_defs = {git = "https://github.com/matter-labs/zkevm_opcode_defs.git", branch = "v1.3.2"}
-boojum = {git = "https://github.com/matter-labs/boojum.git", branch = "main", features = ["log_tracing"]}
+boojum = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
 # boojum = { path = "../boojum" }
 bincode = "*"
 ethereum-types = "0.12.*"
@@ -28,6 +28,8 @@ rand_new = { package = "rand", version = "0.8" }
 hex = "*"
 
 [features]
+default = []
+log_tracing = ["boojum/log_tracing"]
 verbose_circuits = []
 
 [dev-dependencies]
