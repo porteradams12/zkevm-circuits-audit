@@ -297,6 +297,6 @@ pub(crate) fn finalize_queue_state<
         state = R::compute_round_function_over_nums(cs, state);
     }
 
-    R::state_into_committment::<M>(&state.map(|el| el.get_variable()))
+    R::state_into_commitment::<M>(&state.map(|el| el.get_variable()))
         .map(|el| Num::from_variable(el))
 }
