@@ -28,6 +28,8 @@ rand_new = { package = "rand", version = "0.8" }
 hex = "*"
 
 [features]
+default = []
+log_tracing = ["boojum/log_tracing"]
 verbose_circuits = []
 
 [dev-dependencies]
