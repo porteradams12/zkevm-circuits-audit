@@ -101,6 +101,13 @@ where
     [(); EL::INTERNAL_STRUCT_LEN]:,
     [(); EL::INTERNAL_STRUCT_LEN + 1]:,
 {
+    pub fn print_debug_info(&self) {
+        if let Ok(read_lock) = self.witness_source.read() {
+            let inner = &*read_lock;
+            dbg!(inner.len());
+        }
+    }
+
     pub fn conditionally_allocate_with_default<
         CS: ConstraintSystem<F>,
         DEF: FnOnce() -> EL::Witness + 'static + Send + Sync,

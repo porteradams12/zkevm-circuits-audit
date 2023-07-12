@@ -130,10 +130,13 @@ where
 
     // we can have a degenerate case when queue is empty, but it's a first circuit in the queue,
     // so we taken default FSM state that has state.read_precompile_call = true;
-    let is_empty = precompile_calls_queue.is_empty(cs);
-    let not_empty = is_empty.negated(cs);
-    state.read_precompile_call = Boolean::multi_and(cs, &[state.read_precompile_call, not_empty]);
-    state.completed = Boolean::multi_or(cs, &[state.completed, is_empty]);
+    let input_queue_is_empty = precompile_calls_queue.is_empty(cs);
+    // we can only skip the full circuit if we are not in any form of progress
+    let can_finish_immediatelly = Boolean::multi_and(cs, &[state.read_precompile_call, input_queue_is_empty]);
+    state.read_precompile_call.mask_negated(cs, can_finish_immediatelly);
+    state.read_unaligned_words_for_round.mask_negated(cs, can_finish_immediatelly);
+    state.completed = Boolean::multi_or(cs, &[state.completed, can_finish_immediatelly]);
+
     // main work cycle
     for _cycle in 0..limit {
         // if we are in a proper state then get the ABI from the queue
