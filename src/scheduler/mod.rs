@@ -840,6 +840,11 @@ pub fn scheduler_function<
     let node_layer_vk_commitment: [_; VK_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &node_layer_vk, round_function);
 
+    if crate::config::CIRCUIT_VERSOBE {
+        dbg!(leaf_layer_parameters_commitment.witness_hook(cs)());
+        dbg!(node_layer_vk_commitment.witness_hook(cs)());
+    }
+
     let mut proof_witnesses = witness.proof_witnesses;
 
     // create verifier
