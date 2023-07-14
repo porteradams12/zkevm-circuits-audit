@@ -122,8 +122,14 @@ where
     let input_queue_is_empty = precompile_calls_queue.is_empty(cs);
     // we can only skip the full circuit if we are not in any form of progress
     let can_finish_immediatelly = Boolean::multi_and(cs, &[state.read_precompile_call, input_queue_is_empty]);
-    state.read_precompile_call.mask_negated(cs, can_finish_immediatelly);
-    state.read_words_for_round.mask_negated(cs, can_finish_immediatelly);
+
+    if crate::config::CIRCUIT_VERSOBE {
+        dbg!(can_finish_immediatelly.witness_hook(cs)());
+        dbg!(state.witness_hook(cs)());
+    }
+
+    state.read_precompile_call = state.read_precompile_call.mask_negated(cs, can_finish_immediatelly);
+    state.read_words_for_round = state.read_words_for_round.mask_negated(cs, can_finish_immediatelly);
     state.completed = Boolean::multi_or(cs, &[state.completed, can_finish_immediatelly]);
 
     if crate::config::CIRCUIT_VERSOBE {
