@@ -35,6 +35,8 @@ use boojum::gadgets::u160::UInt160;
 use boojum::gadgets::u8::UInt8;
 use std::sync::{Arc, RwLock};
 
+pub mod buffer;
+
 pub mod input;
 use self::input::*;
 
@@ -133,7 +135,7 @@ where
     let input_queue_is_empty = precompile_calls_queue.is_empty(cs);
     // we can only skip the full circuit if we are not in any form of progress
     let can_finish_immediatelly = Boolean::multi_and(cs, &[state.read_precompile_call, input_queue_is_empty]);
-    
+
     if crate::config::CIRCUIT_VERSOBE {
         dbg!(can_finish_immediatelly.witness_hook(cs)());
         dbg!(state.witness_hook(cs)());
