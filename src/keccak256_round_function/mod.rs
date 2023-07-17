@@ -35,6 +35,8 @@ use boojum::gadgets::u160::UInt160;
 use boojum::gadgets::u8::UInt8;
 use std::sync::{Arc, RwLock};
 
+pub mod buffer;
+
 pub mod input;
 use self::input::*;
 
