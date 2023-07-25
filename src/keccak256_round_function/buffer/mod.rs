@@ -96,6 +96,7 @@ impl<
             let markers = &use_byte_for_place_mask[idx..];
             let dsts = &mut self.bytes[1..];
             assert_eq!(markers.len(), dsts.len());
+
             for (dst, flag) in dsts.iter_mut().zip(markers.iter()) {
                 *dst = UInt8::conditionally_select(cs, *flag, &src, &*dst);
             }
