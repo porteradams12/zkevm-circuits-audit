@@ -45,10 +45,10 @@ use self::input::*;
 // #[DerivePrettyComparison("true")]
 pub struct Keccak256PrecompileCallParams<F: SmallField> {
     pub input_page: UInt32<F>,
-    pub input_offset: UInt32<F>,
+    pub input_memory_byte_offset: UInt32<F>,
+    pub input_memory_byte_length: UInt32<F>,
     pub output_page: UInt32<F>,
-    pub output_offset: UInt32<F>,
-    pub num_rounds: UInt32<F>,
+    pub output_word_offset: UInt32<F>,
 }
 
 impl<F: SmallField> CSPlaceholder<F> for Keccak256PrecompileCallParams<F> {
@@ -56,29 +56,31 @@ impl<F: SmallField> CSPlaceholder<F> for Keccak256PrecompileCallParams<F> {
         let zero_u32 = UInt32::zero(cs);
         Self {
             input_page: zero_u32,
-            input_offset: zero_u32,
+            input_memory_byte_offset: zero_u32,
+            input_memory_byte_length: zero_u32,
             output_page: zero_u32,
-            output_offset: zero_u32,
-            num_rounds: zero_u32,
+            output_word_offset: zero_u32,
         }
     }
 }
 
 impl<F: SmallField> Keccak256PrecompileCallParams<F> {
+    // from PrecompileCallInnerABI
     pub fn from_encoding<CS: ConstraintSystem<F>>(_cs: &mut CS, encoding: UInt256<F>) -> Self {
-        let input_offset = encoding.inner[0];
-        let output_offset = encoding.inner[2];
+        let input_memory_byte_offset = encoding.inner[0];
+        let input_memory_byte_length = encoding.inner[1];
+
+        let output_word_offset = encoding.inner[2];
+
         let input_page = encoding.inner[4];
         let output_page = encoding.inner[5];
 
-        let num_rounds = encoding.inner[6];
-
         let new = Self {
             input_page,
-            input_offset,
+            input_memory_byte_offset,
+            input_memory_byte_length,
             output_page,
-            output_offset,
-            num_rounds,
+            output_word_offset,
         };
 
         new
