@@ -19,7 +19,6 @@ zkevm_opcode_defs = {git = "https://github.com/matter-labs/zkevm_opcode_defs.git
 # boojum = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
 boojum = { path = "../boojum" }
 bincode = "*"
-ethereum-types = "0.12.*"
 # cs_derive = { git = "https://github.com/matter-labs/boojum.git", branch = "main" }
 cs_derive = { path = "../boojum/cs_derive" }
 serde_json = "*"

@@ -2,7 +2,7 @@ pub mod input;
 
 use input::*;
 
-use ethereum_types::U256;
+use crate::ethereum_types::U256;
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
