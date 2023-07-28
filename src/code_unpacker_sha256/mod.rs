@@ -463,7 +463,7 @@ mod tests {
     use boojum::gadgets::u8::UInt8;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;
-    use ethereum_types::{Address, U256};
+    use crate::ethereum_types::{Address, U256};
 
     type F = GoldilocksField;
     type P = GoldilocksField;

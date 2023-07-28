@@ -14,6 +14,16 @@ pub struct ByteBuffer<
     pub filled: UInt8<F>, // assume that it's enough
 }
 
+impl<F: SmallField, const BUFFER_SIZE: usize> CSPlaceholder<F> for ByteBuffer<F, BUFFER_SIZE> {
+    fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        let zero_u8 = UInt8::zero(cs);
+        Self {
+            bytes: [zero_u8; BUFFER_SIZE],
+            filled: zero_u8,
+        }
+    }
+}
+
 // we map a set of offset + current fill factor into "start from here" bit for 0-th byte of the buffer of length N
 pub type BufferMappingFunction<F, CS, const N: usize, const M: usize> = fn(&mut CS, UInt8<F>, UInt8<F>, [(); N]) -> [Boolean<F>; M];
 
@@ -23,7 +33,7 @@ impl<
 > ByteBuffer<F, BUFFER_SIZE> {
     pub fn can_fill_fixed_bytes<CS: ConstraintSystem<F>, const N: usize>(&self, cs: &mut CS) -> Boolean<F> {
         let max_filled = BUFFER_SIZE - N;
-        let max_filled = u8::try_from(max_filled).expect("must fit into u16");
+        let max_filled = u8::try_from(max_filled).expect("must fit into u8");
         let upper_bound = UInt8::allocate_constant(cs, max_filled);
         // we need to check that filled <= max_filled
         let (_, uf) = upper_bound.overflowing_sub(cs, &self.filled);
@@ -35,7 +45,7 @@ impl<
     pub fn can_fill_bytes<CS: ConstraintSystem<F>>(&self, cs: &mut CS, bytes_to_fill: UInt8<F>) -> Boolean<F> {
         let next_filled = self.filled.add_no_overflow(cs, bytes_to_fill);
         let max_filled = BUFFER_SIZE;
-        let max_filled = u8::try_from(max_filled).expect("must fit into u16");
+        let max_filled = u8::try_from(max_filled).expect("must fit into u8");
         let upper_bound = UInt8::allocate_constant(cs, max_filled);
         // we need to check that next_filled <= max_filled
         let (_, uf) = upper_bound.overflowing_sub(cs, &next_filled);
@@ -46,7 +56,7 @@ impl<
 
     pub fn can_consume_n_bytes<CS: ConstraintSystem<F>, const N: usize>(&self, cs: &mut CS) -> Boolean<F> {
         let bytes_to_consume = N;
-        let bytes_to_consume = u8::try_from(bytes_to_consume).expect("must fit into u16");
+        let bytes_to_consume = u8::try_from(bytes_to_consume).expect("must fit into u8");
         let bytes_to_consume = UInt8::allocate_constant(cs, bytes_to_consume);
         // we need to check that filled >= bytes_to_consume
         let (_, uf) = self.filled.overflowing_sub(cs, &bytes_to_consume);
