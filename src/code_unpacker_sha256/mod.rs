@@ -450,6 +450,7 @@ mod tests {
     use super::*;
     use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
     use crate::ethereum_types::{Address, U256};
+    use crate::ethereum_types::{Address, U256};
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
     use boojum::cs::implementations::reference_cs::CSDevelopmentAssembly;
     use boojum::cs::traits::gate::GatePlacementStrategy;
