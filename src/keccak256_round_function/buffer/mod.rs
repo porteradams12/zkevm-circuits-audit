@@ -97,14 +97,16 @@ impl<
         // on which bytes to use from the start and which not. We already shifted all meaningful bytes to the left above,
         // so we only need 1 bit to show "start here"
 
+        // dbg!(shifted_input.witness_hook(cs)());
+
         let use_byte_for_place_mask = mapping_function(cs, meaningful_bytes, self.filled, [(); N]);
         // TODO: transpose to use linear combination
         for (idx, src) in shifted_input.into_iter().enumerate() {
             // buffer above is shifted all the way to the left, so if byte number 0 can use any of 0..BUFFER_SIZE markers,
             // then for byte number 1 we can only use markers 1..BUFFER_SIZE markers, and so on, and byte number 1 can never go into
             // buffer position 0
-            let markers = &use_byte_for_place_mask[idx..];
-            let dsts = &mut self.bytes[1..];
+            let markers = &use_byte_for_place_mask[..(BUFFER_SIZE-idx)];
+            let dsts = &mut self.bytes[idx..];
             assert_eq!(markers.len(), dsts.len());
 
             for (dst, flag) in dsts.iter_mut().zip(markers.iter()) {

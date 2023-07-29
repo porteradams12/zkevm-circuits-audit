@@ -20,7 +20,8 @@ use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::serde_utils::BigArraySerde;
 
-pub const KECCAK_PRECOMPILE_BUFFER_SIZE: usize = 160;
+pub const MEMORY_EQURIES_PER_CYCLE: usize = 6;
+pub const KECCAK_PRECOMPILE_BUFFER_SIZE: usize = MEMORY_EQURIES_PER_CYCLE * 32;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
