@@ -340,8 +340,14 @@ where
             memory_queue.push(cs, read_query, should_read);
 
             // update state variables
-            state.precompile_call_params.input_memory_byte_length = state.precompile_call_params.input_memory_byte_length.sub_no_overflow(cs, meaningful_bytes_in_query);
-            state.precompile_call_params.input_memory_byte_offset = state.precompile_call_params.input_memory_byte_offset.add_no_overflow(cs, meaningful_bytes_in_query);
+            let may_be_new_input_memory_byte_offset = state.precompile_call_params.input_memory_byte_offset.add_no_overflow(cs, meaningful_bytes_in_query);
+            let may_be_new_input_memory_byte_length = state.precompile_call_params.input_memory_byte_length.sub_no_overflow(cs, meaningful_bytes_in_query);
+
+            state.precompile_call_params.input_memory_byte_offset = UInt32::conditionally_select(cs, should_read, &may_be_new_input_memory_byte_offset, &state.precompile_call_params.input_memory_byte_offset);
+            state.precompile_call_params.input_memory_byte_length = UInt32::conditionally_select(cs, should_read, &may_be_new_input_memory_byte_length, &state.precompile_call_params.input_memory_byte_length);
+
+            // update if we do not read
+            let bytes_to_fill = bytes_to_fill.mask(cs, should_read);
 
             // fill the buffer
             let be_bytes = read_query_value.to_be_bytes(cs);
