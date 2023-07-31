@@ -297,7 +297,7 @@ where
         };
 
         let mut bias_variable = should_read_in_general.get_variable();
-        for _ in 0..MEMORY_EQURIES_PER_CYCLE {
+        for _ in 0..MEMORY_QUERIES_PER_CYCLE {
             // we have a little more complex logic here, but it's homogenious
             // dbg!(state.witness_hook(cs)());
 
