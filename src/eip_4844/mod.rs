@@ -14,6 +14,7 @@ use boojum::cs::{Place, Variable};
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::keccak256;
+use boojum::gadgets::non_native_field::implementations::*;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
@@ -31,6 +32,20 @@ use super::*;
 
 pub mod input;
 use self::input::*;
+
+use boojum::pairing::bls12_381::fq::Fq as Bls12_381Fq;
+use boojum::pairing::bls12_381::fr::Fr as Bls12_381Fr;
+use boojum::pairing::bls12_381::G1Affine as Bls12_381G1Affine;
+use boojum::pairing::bls12_381::G2Affine as Bls12_381G2Affine;
+
+const NUM_WORDS_FR: usize = 17;
+const NUM_WORDS_FQ: usize = 25;
+
+type Bls12_381BaseNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fq, NUM_WORDS_FQ>;
+type Bls12_381ScalarNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fr, NUM_WORDS_FR>;
+
+type Bls12_381BaseNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fq, NUM_WORDS_FQ>;
+type Bls12_381ScalarNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR>;
 
 pub fn eip_4844_entry_point<
     F: SmallField,
