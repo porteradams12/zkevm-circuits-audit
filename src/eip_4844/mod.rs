@@ -9,6 +9,7 @@ use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::keccak256_round_function::keccak256_absorb_and_run_permutation;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::config::*;
+use boojum::crypto_bigint::{Zero, U1024};
 use boojum::cs::traits::cs::{ConstraintSystem, DstBuffer};
 use boojum::cs::{Place, Variable};
 use boojum::field::SmallField;
@@ -22,6 +23,7 @@ use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt, CSPl
 use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
@@ -46,6 +48,44 @@ type Bls12_381ScalarNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fr, NUM
 
 type Bls12_381BaseNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fq, NUM_WORDS_FQ>;
 type Bls12_381ScalarNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR>;
+
+fn convert_keccak_digest_to_field_element<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    P: boojum::pairing::ff::PrimeField,
+>(
+    cs: &mut CS,
+    input: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
+) -> NonNativeFieldOverU16<F, P, NUM_WORDS_FR> {
+    // compose the bytes into u16 words for the nonnative wrapper
+    let zero_var = cs.allocate_constant(F::ZERO);
+    let mut limbs = [zero_var; NUM_WORDS_FR];
+    for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()) {
+        *dst = UInt16::from_le_bytes(src);
+    }
+
+    let mut max_value = U1024::from_word(1u64);
+    max_value = max_value.shl_vartime(256);
+    max_value = max_value.saturating_sub(&U1024::from_word(1u64));
+
+    let params = Bls12_381ScalarNNFieldParams::create();
+    let (overflows, rem) = max_value.div_rem(&params.modulus_u1024);
+    let mut max_moduluses = overflows.as_words()[0] as u32;
+    if rem.is_zero().unwrap_u8() != 1 {
+        max_moduluses += 1;
+    }
+
+    let element = NonNativeFieldOverU16 {
+        limbs: limbs,
+        non_zero_limbs: 16,
+        tracker: OverflowTracker { max_moduluses },
+        form: RepresentationForm::Normalized,
+        params: params.clone(),
+        _marker: std::marker::PhantomData,
+    };
+
+    element
+}
 
 pub fn eip_4844_entry_point<
     F: SmallField,
@@ -89,6 +129,20 @@ where
     let mut queue = StorageLogQueue::<F, R>::from_state(cs, queue_state_from_input);
     let queue_witness = CircuitQueueWitness::from_inner_witness(queue_witness);
     queue.witness = Arc::new(queue_witness);
+
+    let hash = witness.hash_witness;
+    let kzg_commitment = witness.kzg_commitment_witness;
+    let input_bytes = hash
+        .iter()
+        .zip(kzg_commitment.x.to_le_bytes())
+        .zip(kzg_commitment.y.to_le_bytes())
+        .collect::<Vec<UInt8<F>>>();
+
+    // create a field element out of the hash of the input hash and the kzg commitment
+    let random_el =
+        convert_keccak_digest_to_field_element(boojum::gadgets::keccak256::keccak256(input_bytes));
+
+    ////////////////////////////////////////////////////////////////////////////////////////
 
     let keccak_accumulator_state =
         [[[zero_u8; keccak256::BYTES_PER_WORD]; keccak256::LANE_WIDTH]; keccak256::LANE_WIDTH];
