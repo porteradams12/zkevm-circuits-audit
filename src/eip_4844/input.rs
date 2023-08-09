@@ -27,13 +27,17 @@ use std::collections::VecDeque;
 #[DerivePrettyComparison("true")]
 pub struct EIP4844InputData<F: SmallField> {
     pub hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
-    pub kzg_commitment: Bls12_381G1Affine,
+    pub kzg_commitment_x: [UInt8<F>; NUM_WORDS_FQ],
+    pub kzg_commitment_y: [UInt8<F>; NUM_WORDS_FQ],
     pub queue_state: QueueState<F, QUEUE_STATE_WIDTH>,
 }
 
 impl<F: SmallField> CSPlaceholder<F> for EIP4844InputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
+            hash: [UInt8::<F>::placeholder(cs); keccak256::KECCAK256_DIGEST_SIZE],
+            kzg_commitment_x: [UInt8::<F>::placeholder(cs); NUM_WORDS_FQ],
+            kzg_commitment_y: [UInt8::<F>::placeholder(cs); NUM_WORDS_FQ],
             queue_state: QueueState::<F, QUEUE_STATE_WIDTH>::placeholder(cs),
         }
     }
@@ -43,14 +47,15 @@ impl<F: SmallField> CSPlaceholder<F> for EIP4844InputData<F> {
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
 pub struct EIP4844OutputData<F: SmallField> {
-    pub z: Bls12_381ScalarNNField<F>,
-    pub y: Bls12_381ScalarNNField<F>,
+    pub z: [UInt8<F>; NUM_WORDS_FR],
+    pub y: [UInt8<F>; NUM_WORDS_FR],
 }
 
 impl<F: SmallField> CSPlaceholder<F> for EIP4844OutputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            keccak256_hash: [UInt8::<F>::placeholder(cs); 32],
+            z: [UInt8::<F>::placeholder(cs); NUM_WORDS_FR],
+            y: [UInt8::<F>::placeholder(cs); NUM_WORDS_FR],
         }
     }
 }
@@ -76,7 +81,5 @@ pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
     // #[serde(bound(
     //     deserialize = "CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>: serde::de::DeserializeOwned"
     // ))]
-    pub hash_witness: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
-    pub kzg_commitment_witness: Bls12_381G1Affine,
     pub queue_witness: CircuitQueueRawWitness<F, LogQuery<F>, 4, LOG_QUERY_PACKED_WIDTH>,
 }

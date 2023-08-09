@@ -10,6 +10,7 @@ use crate::keccak256_round_function::keccak256_absorb_and_run_permutation;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::config::*;
 use boojum::crypto_bigint::{Zero, U1024};
+use boojum::cs::gates::ConstantAllocatableCS;
 use boojum::cs::traits::cs::{ConstraintSystem, DstBuffer};
 use boojum::cs::{Place, Variable};
 use boojum::field::SmallField;
@@ -49,19 +50,15 @@ type Bls12_381ScalarNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fr, NUM
 type Bls12_381BaseNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fq, NUM_WORDS_FQ>;
 type Bls12_381ScalarNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR>;
 
-fn convert_keccak_digest_to_field_element<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
-    P: boojum::pairing::ff::PrimeField,
->(
+fn convert_keccak_digest_to_field_element<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     input: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
-) -> NonNativeFieldOverU16<F, P, NUM_WORDS_FR> {
+) -> NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR> {
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
     let mut limbs = [zero_var; NUM_WORDS_FR];
     for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()) {
-        *dst = UInt16::from_le_bytes(src);
+        *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
 
     let mut max_value = U1024::from_word(1u64);
@@ -75,16 +72,14 @@ fn convert_keccak_digest_to_field_element<
         max_moduluses += 1;
     }
 
-    let element = NonNativeFieldOverU16 {
+    NonNativeFieldOverU16 {
         limbs: limbs,
         non_zero_limbs: 16,
         tracker: OverflowTracker { max_moduluses },
         form: RepresentationForm::Normalized,
-        params: params.clone(),
+        params: Arc::new(params.clone()),
         _marker: std::marker::PhantomData,
-    };
-
-    element
+    }
 }
 
 pub fn eip_4844_entry_point<
@@ -130,17 +125,18 @@ where
     let queue_witness = CircuitQueueWitness::from_inner_witness(queue_witness);
     queue.witness = Arc::new(queue_witness);
 
-    let hash = witness.hash_witness;
-    let kzg_commitment = witness.kzg_commitment_witness;
+    let hash = structured_input.observable_input.hash;
+    let kzg_x = structured_input.observable_input.kzg_commitment_x;
+    let kzg_y = structured_input.observable_input.kzg_commitment_y;
     let input_bytes = hash
-        .iter()
-        .zip(kzg_commitment.x.to_le_bytes())
-        .zip(kzg_commitment.y.to_le_bytes())
+        .into_iter()
+        .chain(kzg_x)
+        .chain(kzg_y)
         .collect::<Vec<UInt8<F>>>();
 
     // create a field element out of the hash of the input hash and the kzg commitment
-    let random_el =
-        convert_keccak_digest_to_field_element(boojum::gadgets::keccak256::keccak256(input_bytes));
+    let hash = boojum::gadgets::keccak256::keccak256(cs, &input_bytes);
+    let random_el = convert_keccak_digest_to_field_element(cs, hash);
 
     ////////////////////////////////////////////////////////////////////////////////////////
 
