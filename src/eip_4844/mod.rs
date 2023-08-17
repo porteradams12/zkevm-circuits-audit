@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::mem::MaybeUninit;
 
-use crate::base_structures::log_query::LogQuery;
 use crate::base_structures::state_diff_record::StateDiffRecord;
 use crate::demux_log_queue::StorageLogQueue;
 use crate::ethereum_types::U256;
@@ -18,6 +17,7 @@ use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::keccak256;
 use boojum::gadgets::non_native_field::implementations::*;
 use boojum::gadgets::num::Num;
+use boojum::gadgets::queue::CircuitQueue;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt, CSPlaceholder};
@@ -82,6 +82,38 @@ fn convert_keccak_digest_to_field_element<F: SmallField, CS: ConstraintSystem<F>
     }
 }
 
+fn convert_blob_chunk_to_field_element<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    input: [UInt8<F>; 4],
+) -> NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR> {
+    // compose the bytes into u16 words for the nonnative wrapper
+    let zero_var = cs.allocate_constant(F::ZERO);
+    let mut limbs = [zero_var; NUM_WORDS_FR];
+    for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()) {
+        *dst = UInt16::from_le_bytes(cs, *src).get_variable();
+    }
+
+    let mut max_value = U1024::from_word(1u64);
+    max_value = max_value.shl_vartime(256);
+    max_value = max_value.saturating_sub(&U1024::from_word(1u64));
+
+    let params = Bls12_381ScalarNNFieldParams::create();
+    let (overflows, rem) = max_value.div_rem(&params.modulus_u1024);
+    let mut max_moduluses = overflows.as_words()[0] as u32;
+    if rem.is_zero().unwrap_u8() != 1 {
+        max_moduluses += 1;
+    }
+
+    NonNativeFieldOverU16 {
+        limbs: limbs,
+        non_zero_limbs: 16,
+        tracker: OverflowTracker { max_moduluses },
+        form: RepresentationForm::Normalized,
+        params: Arc::new(params.clone()),
+        _marker: std::marker::PhantomData,
+    }
+}
+
 pub fn eip_4844_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
@@ -93,7 +125,6 @@ pub fn eip_4844_entry_point<
     params: usize,
 ) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
 where
-    [(); <LogQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]:,
 {
@@ -121,7 +152,8 @@ where
     // it must be trivial
     queue_state_from_input.enforce_trivial_head(cs);
 
-    let mut queue = StorageLogQueue::<F, R>::from_state(cs, queue_state_from_input);
+    let mut queue =
+        CircuitQueue::<F, BlobChunk<F>, 8, 12, 4, 4, 1, R>::from_state(cs, queue_state_from_input);
     let queue_witness = CircuitQueueWitness::from_inner_witness(queue_witness);
     queue.witness = Arc::new(queue_witness);
 
@@ -136,7 +168,7 @@ where
 
     // create a field element out of the hash of the input hash and the kzg commitment
     let hash = boojum::gadgets::keccak256::keccak256(cs, &input_bytes);
-    let z = convert_keccak_digest_to_field_element(cs, hash);
+    let mut z = convert_keccak_digest_to_field_element(cs, hash);
 
     // Recompute the hash and check equality, and form blob polynomial simultaneously.
     let keccak_accumulator_state =
@@ -171,12 +203,12 @@ where
         let should_pop = queue_is_empty.negated(cs);
 
         let (chunk, _) = queue.pop_front(cs, should_pop);
-        coeffs.push(chunk);
+        let as_bytes = chunk.el.to_le_bytes(cs);
+        coeffs.push(convert_blob_chunk_to_field_element(cs, as_bytes));
 
         let now_empty = queue.is_empty(cs);
         let is_last_serialization = Boolean::multi_and(cs, &[should_pop, now_empty]);
         use crate::base_structures::ByteSerializable;
-        let as_bytes = chunk.into_bytes(cs);
 
         assert!(buffer.len() < 136);
 
@@ -265,15 +297,16 @@ where
     // polynomial evaluations via horners rule
     // we essentially work backwards through the coefficients and multiply each with (X), then add to
     // the sum
-    let base = coeffs.last().unwrap() * z;
+    let last = *coeffs.last().unwrap();
+    let base = last.mul(cs, &mut z);
     let y = coeffs
-        .iter()
+        .into_iter()
         .enumerate()
         .rev()
         .fold(base, |acc, (i, coeff)| {
             acc += coeff;
             // on the last iteration, we do not multiply by x anymore
-            // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 .. + a_nx^2
+            // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
             // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
             // we essentially work backwards through this string of computation and on the last
             // step (a_0) there is no more multiplication with x, hence this conditional.
