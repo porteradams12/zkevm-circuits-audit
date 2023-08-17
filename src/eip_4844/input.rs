@@ -29,7 +29,7 @@ pub struct BlobChunk<F: SmallField> {
 }
 
 impl<F: SmallField> CircuitEncodable<F, 1> for BlobChunk<F> {
-    fn encode<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> [Variable; 1] {
+    fn encode<CS: ConstraintSystem<F>>(&self, _cs: &mut CS) -> [Variable; 1] {
         [self.el.get_variable()]
     }
 }

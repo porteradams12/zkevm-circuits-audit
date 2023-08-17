@@ -50,13 +50,19 @@ type Bls12_381ScalarNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fr, NUM
 type Bls12_381BaseNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fq, NUM_WORDS_FQ>;
 type Bls12_381ScalarNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR>;
 
-fn convert_keccak_digest_to_field_element<F: SmallField, CS: ConstraintSystem<F>>(
+fn convert_keccak_digest_to_field_element<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    P: boojum::pairing::ff::PrimeField,
+    const N: usize,
+>(
     cs: &mut CS,
     input: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
-) -> NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR> {
+    params: &Arc<NonNativeFieldOverU16Params<P, N>>,
+) -> NonNativeFieldOverU16<F, P, N> {
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
-    let mut limbs = [zero_var; NUM_WORDS_FR];
+    let mut limbs = [zero_var; N];
     for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()) {
         *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
@@ -65,7 +71,6 @@ fn convert_keccak_digest_to_field_element<F: SmallField, CS: ConstraintSystem<F>
     max_value = max_value.shl_vartime(256);
     max_value = max_value.saturating_sub(&U1024::from_word(1u64));
 
-    let params = Bls12_381ScalarNNFieldParams::create();
     let (overflows, rem) = max_value.div_rem(&params.modulus_u1024);
     let mut max_moduluses = overflows.as_words()[0] as u32;
     if rem.is_zero().unwrap_u8() != 1 {
@@ -77,18 +82,24 @@ fn convert_keccak_digest_to_field_element<F: SmallField, CS: ConstraintSystem<F>
         non_zero_limbs: 16,
         tracker: OverflowTracker { max_moduluses },
         form: RepresentationForm::Normalized,
-        params: Arc::new(params.clone()),
+        params: params.clone(),
         _marker: std::marker::PhantomData,
     }
 }
 
-fn convert_blob_chunk_to_field_element<F: SmallField, CS: ConstraintSystem<F>>(
+fn convert_blob_chunk_to_field_element<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    P: boojum::pairing::ff::PrimeField,
+    const N: usize,
+>(
     cs: &mut CS,
     input: [UInt8<F>; 4],
-) -> NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR> {
+    params: &Arc<NonNativeFieldOverU16Params<P, N>>,
+) -> NonNativeFieldOverU16<F, P, N> {
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
-    let mut limbs = [zero_var; NUM_WORDS_FR];
+    let mut limbs = [zero_var; N];
     for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()) {
         *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
@@ -97,7 +108,6 @@ fn convert_blob_chunk_to_field_element<F: SmallField, CS: ConstraintSystem<F>>(
     max_value = max_value.shl_vartime(256);
     max_value = max_value.saturating_sub(&U1024::from_word(1u64));
 
-    let params = Bls12_381ScalarNNFieldParams::create();
     let (overflows, rem) = max_value.div_rem(&params.modulus_u1024);
     let mut max_moduluses = overflows.as_words()[0] as u32;
     if rem.is_zero().unwrap_u8() != 1 {
@@ -109,7 +119,7 @@ fn convert_blob_chunk_to_field_element<F: SmallField, CS: ConstraintSystem<F>>(
         non_zero_limbs: 16,
         tracker: OverflowTracker { max_moduluses },
         form: RepresentationForm::Normalized,
-        params: Arc::new(params.clone()),
+        params: params.clone(),
         _marker: std::marker::PhantomData,
     }
 }
@@ -168,7 +178,8 @@ where
 
     // create a field element out of the hash of the input hash and the kzg commitment
     let hash = boojum::gadgets::keccak256::keccak256(cs, &input_bytes);
-    let mut z = convert_keccak_digest_to_field_element(cs, hash);
+    let params = Arc::new(Bls12_381ScalarNNFieldParams::create());
+    let mut z = convert_keccak_digest_to_field_element(cs, hash, &params);
 
     // Recompute the hash and check equality, and form blob polynomial simultaneously.
     let keccak_accumulator_state =
@@ -204,7 +215,7 @@ where
 
         let (chunk, _) = queue.pop_front(cs, should_pop);
         let as_bytes = chunk.el.to_le_bytes(cs);
-        coeffs.push(convert_blob_chunk_to_field_element(cs, as_bytes));
+        coeffs.push(convert_blob_chunk_to_field_element(cs, as_bytes, &params));
 
         let now_empty = queue.is_empty(cs);
         let is_last_serialization = Boolean::multi_and(cs, &[should_pop, now_empty]);
@@ -297,21 +308,21 @@ where
     // polynomial evaluations via horners rule
     // we essentially work backwards through the coefficients and multiply each with (X), then add to
     // the sum
-    let last = *coeffs.last().unwrap();
+    let mut last = coeffs.last().unwrap().clone();
     let base = last.mul(cs, &mut z);
     let y = coeffs
         .into_iter()
         .enumerate()
         .rev()
-        .fold(base, |acc, (i, coeff)| {
-            acc += coeff;
+        .fold(base, |mut acc, (i, mut coeff)| {
+            acc = acc.add(cs, &mut coeff);
             // on the last iteration, we do not multiply by x anymore
             // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
             // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
             // we essentially work backwards through this string of computation and on the last
             // step (a_0) there is no more multiplication with x, hence this conditional.
             if i != 0 {
-                acc *= z;
+                acc = acc.mul(cs, &mut z);
             }
             acc
         });
