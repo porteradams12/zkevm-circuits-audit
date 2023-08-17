@@ -171,6 +171,7 @@ where
         let should_pop = queue_is_empty.negated(cs);
 
         let (chunk, _) = queue.pop_front(cs, should_pop);
+        coeffs.push(chunk);
 
         let now_empty = queue.is_empty(cs);
         let is_last_serialization = Boolean::multi_and(cs, &[should_pop, now_empty]);
@@ -261,6 +262,27 @@ where
         Boolean::enforce_equal(cs, &is_equal, &boolean_true);
     }
 
+    // polynomial evaluations via horners rule
+    // we essentially work backwards through the coefficients and multiply each with (X), then add to
+    // the sum
+    let base = coeffs.last().unwrap() * z;
+    let y = coeffs
+        .iter()
+        .enumerate()
+        .rev()
+        .fold(base, |acc, (i, coeff)| {
+            acc += coeff;
+            // on the last iteration, we do not multiply by x anymore
+            // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 .. + a_nx^2
+            // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
+            // we essentially work backwards through this string of computation and on the last
+            // step (a_0) there is no more multiplication with x, hence this conditional.
+            if i != 0 {
+                acc *= z;
+            }
+            acc
+        });
+
     let mut observable_output = EIP4844OutputData::placeholder(cs);
     observable_output.z = unsafe {
         let mut arr = [UInt16::allocate_constant(cs, 0); NUM_WORDS_FR];
@@ -270,7 +292,14 @@ where
             .for_each(|(i, v)| arr[i] = UInt16::from_variable_unchecked(*v));
         arr
     };
-    observable_output.y = y.limbs;
+    observable_output.y = unsafe {
+        let mut arr = [UInt16::allocate_constant(cs, 0); NUM_WORDS_FR];
+        y.limbs
+            .iter()
+            .enumerate()
+            .for_each(|(i, v)| arr[i] = UInt16::from_variable_unchecked(*v));
+        arr
+    };
     structured_input.observable_output = observable_output;
 
     // self-check
