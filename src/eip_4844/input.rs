@@ -47,15 +47,15 @@ impl<F: SmallField> CSPlaceholder<F> for EIP4844InputData<F> {
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
 pub struct EIP4844OutputData<F: SmallField> {
-    pub z: [UInt8<F>; NUM_WORDS_FR],
-    pub y: [UInt8<F>; NUM_WORDS_FR],
+    pub z: [UInt16<F>; NUM_WORDS_FR],
+    pub y: [UInt16<F>; NUM_WORDS_FR],
 }
 
 impl<F: SmallField> CSPlaceholder<F> for EIP4844OutputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            z: [UInt8::<F>::placeholder(cs); NUM_WORDS_FR],
-            y: [UInt8::<F>::placeholder(cs); NUM_WORDS_FR],
+            z: [UInt16::<F>::allocate_constant(cs, 0); NUM_WORDS_FR],
+            y: [UInt16::<F>::allocate_constant(cs, 0); NUM_WORDS_FR],
         }
     }
 }

@@ -136,10 +136,9 @@ where
 
     // create a field element out of the hash of the input hash and the kzg commitment
     let hash = boojum::gadgets::keccak256::keccak256(cs, &input_bytes);
-    let random_el = convert_keccak_digest_to_field_element(cs, hash);
+    let z = convert_keccak_digest_to_field_element(cs, hash);
 
-    ////////////////////////////////////////////////////////////////////////////////////////
-
+    // Recompute the hash and check equality, and form blob polynomial simultaneously.
     let keccak_accumulator_state =
         [[[zero_u8; keccak256::BYTES_PER_WORD]; keccak256::LANE_WIDTH]; keccak256::LANE_WIDTH];
 
@@ -160,23 +159,23 @@ where
     };
 
     let mut buffer = vec![];
+    let mut coeffs = vec![]; // save polynomial coeffs in here
 
     let mut done = queue.is_empty(cs);
     let no_work = done;
 
     use crate::storage_application::keccak256_conditionally_absorb_and_run_permutation;
-    use boojum::gadgets::keccak256::KECCAK_RATE_BYTES;
 
     for _cycle in 0..limit {
         let queue_is_empty = queue.is_empty(cs);
         let should_pop = queue_is_empty.negated(cs);
 
-        let (storage_log, _) = queue.pop_front(cs, should_pop);
+        let (chunk, _) = queue.pop_front(cs, should_pop);
 
         let now_empty = queue.is_empty(cs);
         let is_last_serialization = Boolean::multi_and(cs, &[should_pop, now_empty]);
         use crate::base_structures::ByteSerializable;
-        let as_bytes = storage_log.into_bytes(cs);
+        let as_bytes = chunk.into_bytes(cs);
 
         assert!(buffer.len() < 136);
 
@@ -185,7 +184,7 @@ where
         let continue_to_absorb = done.negated(cs);
 
         if buffer.len() >= 136 {
-            let buffer_for_round: [UInt8<F>; KECCAK_RATE_BYTES] = buffer[..136].try_into().unwrap();
+            let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
             let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
             let carry_on = buffer[136..].to_vec();
 
@@ -206,16 +205,16 @@ where
         {
             let absorb_as_last_round =
                 Boolean::multi_and(cs, &[continue_to_absorb, is_last_serialization]);
-            let mut last_round_buffer = [zero_u8; KECCAK_RATE_BYTES];
+            let mut last_round_buffer = [zero_u8; 136];
             let tail_len = buffer.len();
             last_round_buffer[..tail_len].copy_from_slice(&buffer);
 
-            if tail_len == KECCAK_RATE_BYTES - 1 {
+            if tail_len == 136 - 1 {
                 // unreachable, but we set it for completeness
                 last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x81);
             } else {
                 last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
-                last_round_buffer[KECCAK_RATE_BYTES - 1] = UInt8::allocated_constant(cs, 0x80);
+                last_round_buffer[136 - 1] = UInt8::allocated_constant(cs, 0x80);
             }
 
             let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
@@ -256,8 +255,22 @@ where
     let keccak256_hash =
         <[UInt8<F>; 32]>::conditionally_select(cs, no_work, &empty_hash, &keccak256_hash);
 
+    // hash equality check
+    for (input_byte, hash_byte) in hash.iter().zip(keccak256_hash) {
+        let is_equal = UInt8::equals(cs, input_byte, &hash_byte);
+        Boolean::enforce_equal(cs, &is_equal, &boolean_true);
+    }
+
     let mut observable_output = EIP4844OutputData::placeholder(cs);
-    observable_output.keccak256_hash = keccak256_hash;
+    observable_output.z = unsafe {
+        let mut arr = [UInt16::allocate_constant(cs, 0); NUM_WORDS_FR];
+        z.limbs
+            .iter()
+            .enumerate()
+            .for_each(|(i, v)| arr[i] = UInt16::from_variable_unchecked(*v));
+        arr
+    };
+    observable_output.y = y.limbs;
     structured_input.observable_output = observable_output;
 
     // self-check
