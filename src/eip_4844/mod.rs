@@ -363,3 +363,128 @@ where
 
     input_commitment
 }
+
+#[cfg(test)]
+mod tests {
+    use boojum::cs::cs_builder::*;
+    use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
+    use boojum::cs::gates::*;
+    use boojum::cs::traits::gate::GatePlacementStrategy;
+    use boojum::cs::CSGeometry;
+    use boojum::cs::*;
+    use boojum::gadgets::tables::byte_split::ByteSplitTable;
+    use boojum::gadgets::tables::*;
+
+    #[test]
+    fn test_eip4844() {
+        let geometry = CSGeometry {
+            num_columns_under_copy_permutation: 100,
+            num_witness_columns: 0,
+            num_constant_columns: 8,
+            max_allowed_constraint_degree: 4,
+        };
+        let max_variables = 1 << 26;
+        let max_trace_len = 1 << 20;
+
+        fn configure<
+            F: SmallField,
+            T: CsBuilderImpl<F, T>,
+            GC: GateConfigurationHolder<F>,
+            TB: StaticToolboxHolder,
+        >(
+            builder: CsBuilder<T, F, GC, TB>,
+        ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
+            let builder = builder.allow_lookup(
+                LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
+                    width: 3,
+                    num_repetitions: 8,
+                    share_table_id: true,
+                },
+            );
+            let builder = ConstantsAllocatorGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = FmaGateInBaseFieldWithoutConstant::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ReductionGate::<F, 4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            // let owned_cs = ReductionGate::<F, 4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 8, share_constants: true });
+            let builder = BooleanConstraintGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<32>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = UIntXAddGate::<16>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = SelectionGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = ZeroCheckGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+                false,
+            );
+            let builder = DotProductGate::<4>::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            // let owned_cs = DotProductGate::<4>::configure_for_cs(owned_cs, GatePlacementStrategy::UseSpecializedColumns { num_repetitions: 1, share_constants: true });
+            let builder = NopGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+
+            builder
+        }
+
+        let builder_impl = CsReferenceImplementationBuilder::<F, P, DevCSConfig>::new(
+            geometry,
+            max_variables,
+            max_trace_len,
+        );
+        let builder = new_builder::<_, F>(builder_impl);
+
+        let builder = configure(builder);
+        let mut owned_cs = builder.build(());
+
+        // add tables
+        let table = create_xor8_table();
+        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+
+        let table = create_and8_table();
+        owned_cs.add_lookup_table::<And8Table, 3>(table);
+
+        let table = create_byte_split_table::<F, 1>();
+        owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
+        let table = create_byte_split_table::<F, 2>();
+        owned_cs.add_lookup_table::<ByteSplitTable<2>, 3>(table);
+        let table = create_byte_split_table::<F, 3>();
+        owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
+        let table = create_byte_split_table::<F, 4>();
+        owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
+
+        let cs = &mut owned_cs;
+
+        // do circuit call here
+
+        dbg!(cs.next_available_row());
+
+        cs.pad_and_shrink();
+
+        let mut cs = owned_cs.into_assembly();
+        cs.print_gate_stats();
+        let worker = Worker::new();
+        assert!(cs.check_if_satisfied(&worker));
+    }
+}
