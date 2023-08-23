@@ -50,6 +50,7 @@ type Bls12_381ScalarNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fr, NUM
 type Bls12_381BaseNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fq, NUM_WORDS_FQ>;
 type Bls12_381ScalarNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR>;
 
+// turns 128 bits into a Bls12 field element.
 fn convert_keccak_digest_to_field_element<
     F: SmallField,
     CS: ConstraintSystem<F>,
@@ -57,7 +58,7 @@ fn convert_keccak_digest_to_field_element<
     const N: usize,
 >(
     cs: &mut CS,
-    input: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
+    input: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE / 2],
     params: &Arc<NonNativeFieldOverU16Params<P, N>>,
 ) -> NonNativeFieldOverU16<F, P, N> {
     // compose the bytes into u16 words for the nonnative wrapper
@@ -178,8 +179,13 @@ where
 
     // create a field element out of the hash of the input hash and the kzg commitment
     let hash = boojum::gadgets::keccak256::keccak256(cs, &input_bytes);
+    // truncate hash to 128 bits
+    // NOTE: it is safe to draw a random scalar at max 128 bits because of the schwartz zippel
+    // lemma
+    let mut truncated_hash = [UInt8::zero(cs); 16];
+    truncated_hash.copy_from_slice(&hash[..16]);
     let params = Arc::new(Bls12_381ScalarNNFieldParams::create());
-    let mut z = convert_keccak_digest_to_field_element(cs, hash, &params);
+    let mut z = convert_keccak_digest_to_field_element(cs, truncated_hash, &params);
 
     // Recompute the hash and check equality, and form blob polynomial simultaneously.
     let keccak_accumulator_state =
@@ -366,14 +372,23 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use boojum::config::DevCSConfig;
     use boojum::cs::cs_builder::*;
     use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
     use boojum::cs::gates::*;
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
+    use boojum::field::goldilocks::GoldilocksField;
+    use boojum::field::SmallField;
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
+    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::gadgets::tables::*;
+    use boojum::worker::Worker;
+
+    type F = GoldilocksField;
+    type P = GoldilocksField;
 
     #[test]
     fn test_eip4844() {
@@ -476,7 +491,9 @@ mod tests {
 
         let cs = &mut owned_cs;
 
-        // do circuit call here
+        let round_function = Poseidon2Goldilocks;
+
+        eip_4844_entry_point(cs, , round_function, 10000);
 
         dbg!(cs.next_available_row());
 
