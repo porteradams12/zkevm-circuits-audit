@@ -549,7 +549,7 @@ mod tests {
             },
         };
 
-        eip_4844_entry_point(cs, witness, &round_function, 10000);
+        eip_4844_entry_point(cs, witness, &round_function, 2048);
 
         dbg!(cs.next_available_row());
 
