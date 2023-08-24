@@ -95,7 +95,7 @@ fn convert_blob_chunk_to_field_element<
     const N: usize,
 >(
     cs: &mut CS,
-    input: [UInt8<F>; 4],
+    input: &[UInt8<F>],
     params: &Arc<NonNativeFieldOverU16Params<P, N>>,
 ) -> NonNativeFieldOverU16<F, P, N> {
     // compose the bytes into u16 words for the nonnative wrapper
@@ -164,7 +164,7 @@ where
     queue_state_from_input.enforce_trivial_head(cs);
 
     let mut queue =
-        CircuitQueue::<F, BlobChunk<F>, 8, 12, 4, 4, 1, R>::from_state(cs, queue_state_from_input);
+        CircuitQueue::<F, BlobChunk<F>, 8, 12, 4, 4, 5, R>::from_state(cs, queue_state_from_input);
     let queue_witness = CircuitQueueWitness::from_inner_witness(queue_witness);
     queue.witness = Arc::new(queue_witness);
 
@@ -221,7 +221,11 @@ where
 
         let (chunk, _) = queue.pop_front(cs, should_pop);
         let as_bytes = chunk.el.to_le_bytes(cs);
-        coeffs.push(convert_blob_chunk_to_field_element(cs, as_bytes, &params));
+        coeffs.push(convert_blob_chunk_to_field_element(
+            cs,
+            &as_bytes[..31],
+            &params,
+        ));
 
         let now_empty = queue.is_empty(cs);
         let is_last_serialization = Boolean::multi_and(cs, &[should_pop, now_empty]);
@@ -381,11 +385,15 @@ mod tests {
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
+    use boojum::field::traits::field_like::PrimeFieldLike;
+    use boojum::field::Field;
     use boojum::field::SmallField;
+    use boojum::gadgets::queue::CircuitQueueRawWitness;
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
-    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::gadgets::tables::*;
+    use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;
+    use rand::Rng;
 
     type F = GoldilocksField;
     type P = GoldilocksField;
@@ -399,7 +407,7 @@ mod tests {
             max_allowed_constraint_degree: 4,
         };
         let max_variables = 1 << 26;
-        let max_trace_len = 1 << 20;
+        let max_trace_len = 1 << 22;
 
         fn configure<
             F: SmallField,
@@ -493,7 +501,55 @@ mod tests {
 
         let round_function = Poseidon2Goldilocks;
 
-        eip_4844_entry_point(cs, , round_function, 10000);
+        let blobs = vec![[0u8; 31]; 4096];
+        let mut rng = rand::thread_rng();
+        let blobs = blobs
+            .into_iter()
+            .map(|_| rng.gen())
+            .collect::<Vec<[u8; 31]>>();
+
+        let mut observable_input = EIP4844InputData::placeholder_witness();
+        observable_input.hash = {
+            use zkevm_opcode_defs::sha3::*;
+
+            let mut result = [0u8; 32];
+            let digest =
+                Keccak256::digest(blobs.clone().into_iter().flatten().collect::<Vec<u8>>());
+            result.copy_from_slice(digest.as_slice());
+            result
+        };
+        observable_input.kzg_commitment_x = [0u8; NUM_WORDS_FQ];
+        observable_input.kzg_commitment_y = [0u8; NUM_WORDS_FQ];
+
+        let observable_output = EIP4844OutputData::placeholder_witness();
+
+        let chunks = blobs
+            .into_iter()
+            .map(|el| {
+                (
+                    BlobChunkWitness {
+                        el: U256::from_little_endian(&el),
+                    },
+                    [F::ZERO, F::ZERO, F::ZERO, F::ZERO],
+                )
+            })
+            .collect::<Vec<(BlobChunkWitness<F>, [_; 4])>>();
+
+        let witness = EIP4844CircuitInstanceWitness {
+            closed_form_input: EIP4844InputOutputWitness {
+                start_flag: true,
+                completion_flag: true,
+                observable_input,
+                observable_output,
+                hidden_fsm_input: (),
+                hidden_fsm_output: (),
+            },
+            queue_witness: CircuitQueueRawWitness {
+                elements: chunks.into(),
+            },
+        };
+
+        eip_4844_entry_point(cs, witness, &round_function, 10000);
 
         dbg!(cs.next_available_row());
 

@@ -4,6 +4,7 @@ use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
 use boojum::gadgets::keccak256;
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
+use boojum::gadgets::u256::recompose_u256_as_u32x8;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
@@ -25,22 +26,183 @@ use std::collections::VecDeque;
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
 pub struct BlobChunk<F: SmallField> {
-    pub el: UInt32<F>,
+    pub el: UInt256<F>,
 }
 
-impl<F: SmallField> CircuitEncodable<F, 1> for BlobChunk<F> {
-    fn encode<CS: ConstraintSystem<F>>(&self, _cs: &mut CS) -> [Variable; 1] {
-        [self.el.get_variable()]
+impl<F: SmallField> CircuitEncodable<F, 5> for BlobChunk<F> {
+    fn encode<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> [Variable; 5] {
+        debug_assert!(F::CAPACITY_BITS >= 56);
+
+        let el_bytes = self.el.inner.map(|el| el.decompose_into_bytes(cs));
+        let v0 = Num::linear_combination(
+            cs,
+            &[
+                (el_bytes[0][0].get_variable(), F::ONE),
+                (
+                    el_bytes[0][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 8),
+                ),
+                (
+                    el_bytes[0][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 16),
+                ),
+                (
+                    el_bytes[0][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 24),
+                ),
+                (
+                    el_bytes[1][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    el_bytes[1][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    el_bytes[1][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
+            ],
+        )
+        .get_variable();
+
+        let v1 = Num::linear_combination(
+            cs,
+            &[
+                (el_bytes[1][3].get_variable(), F::ONE),
+                (
+                    el_bytes[2][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 8),
+                ),
+                (
+                    el_bytes[2][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 16),
+                ),
+                (
+                    el_bytes[2][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 24),
+                ),
+                (
+                    el_bytes[2][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    el_bytes[3][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    el_bytes[3][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
+            ],
+        )
+        .get_variable();
+
+        let v2 = Num::linear_combination(
+            cs,
+            &[
+                (el_bytes[3][2].get_variable(), F::ONE),
+                (
+                    el_bytes[3][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 8),
+                ),
+                (
+                    el_bytes[4][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 16),
+                ),
+                (
+                    el_bytes[4][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 24),
+                ),
+                (
+                    el_bytes[4][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    el_bytes[4][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    el_bytes[5][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
+            ],
+        )
+        .get_variable();
+
+        let v3 = Num::linear_combination(
+            cs,
+            &[
+                (el_bytes[5][1].get_variable(), F::ONE),
+                (
+                    el_bytes[5][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 8),
+                ),
+                (
+                    el_bytes[5][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 16),
+                ),
+                (
+                    el_bytes[6][0].get_variable(),
+                    F::from_u64_unchecked(1u64 << 24),
+                ),
+                (
+                    el_bytes[6][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 32),
+                ),
+                (
+                    el_bytes[6][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 40),
+                ),
+                (
+                    el_bytes[6][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 48),
+                ),
+            ],
+        )
+        .get_variable();
+
+        let v4 = Num::linear_combination(
+            cs,
+            &[
+                (el_bytes[7][0].get_variable(), F::ONE),
+                (
+                    el_bytes[7][1].get_variable(),
+                    F::from_u64_unchecked(1u64 << 8),
+                ),
+                (
+                    el_bytes[7][2].get_variable(),
+                    F::from_u64_unchecked(1u64 << 16),
+                ),
+                (
+                    el_bytes[7][3].get_variable(),
+                    F::from_u64_unchecked(1u64 << 24),
+                ),
+            ],
+        )
+        .get_variable();
+
+        [v0, v1, v2, v3, v4]
     }
 }
 
-impl<F: SmallField> CircuitEncodableExt<F, 1> for BlobChunk<F> {}
+impl<F: SmallField> CircuitEncodableExt<F, 5> for BlobChunk<F> {}
 
 impl<F: SmallField> CSAllocatableExt<F> for BlobChunk<F> {
-    const INTERNAL_STRUCT_LEN: usize = 1;
+    const INTERNAL_STRUCT_LEN: usize = 8;
 
     fn witness_from_set_of_values(values: [F; Self::INTERNAL_STRUCT_LEN]) -> Self::Witness {
-        let el: u32 = WitnessCastable::cast_from_source(values[0]);
+        let el: [u32; 8] = [
+            WitnessCastable::cast_from_source(values[0]),
+            WitnessCastable::cast_from_source(values[1]),
+            WitnessCastable::cast_from_source(values[2]),
+            WitnessCastable::cast_from_source(values[3]),
+            WitnessCastable::cast_from_source(values[4]),
+            WitnessCastable::cast_from_source(values[5]),
+            WitnessCastable::cast_from_source(values[6]),
+            WitnessCastable::cast_from_source(values[7]),
+        ];
+        let el = recompose_u256_as_u32x8(el);
 
         <BlobChunk<F> as CSAllocatable<F>>::Witness { el }
     }
@@ -48,7 +210,7 @@ impl<F: SmallField> CSAllocatableExt<F> for BlobChunk<F> {
     // we should be able to allocate without knowing values yet
     fn create_without_value<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            el: UInt32::allocate_without_value(cs),
+            el: UInt256::allocate_without_value(cs),
         }
     }
 
@@ -56,12 +218,21 @@ impl<F: SmallField> CSAllocatableExt<F> for BlobChunk<F> {
     where
         [(); Self::INTERNAL_STRUCT_LEN]:,
     {
-        [self.el.get_variable()]
+        [
+            self.el.inner[0].get_variable(),
+            self.el.inner[1].get_variable(),
+            self.el.inner[2].get_variable(),
+            self.el.inner[3].get_variable(),
+            self.el.inner[4].get_variable(),
+            self.el.inner[5].get_variable(),
+            self.el.inner[6].get_variable(),
+            self.el.inner[7].get_variable(),
+        ]
     }
 
     fn set_internal_variables_values(witness: Self::Witness, dst: &mut DstBuffer<'_, '_, F>) {
         // NOTE: must be same sequence as in `flatten_as_variables`
-        UInt32::set_internal_variables_values(witness.el, dst);
+        UInt256::set_internal_variables_values(witness.el, dst);
     }
 }
 
@@ -118,5 +289,5 @@ pub type EIP4844InputOutputWitness<F> = crate::fsm_input_output::ClosedFormInput
 #[serde(bound = "")]
 pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: EIP4844InputOutputWitness<F>,
-    pub queue_witness: CircuitQueueRawWitness<F, BlobChunk<F>, 4, 1>,
+    pub queue_witness: CircuitQueueRawWitness<F, BlobChunk<F>, 4, 5>,
 }
