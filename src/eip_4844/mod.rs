@@ -221,11 +221,7 @@ where
 
         let (chunk, _) = queue.pop_front(cs, should_pop);
         let as_bytes = chunk.el.to_le_bytes(cs);
-        coeffs.push(convert_blob_chunk_to_field_element(
-            cs,
-            &as_bytes[..31],
-            &params,
-        ));
+        coeffs.push(convert_blob_chunk_to_field_element(cs, &as_bytes, &params));
 
         let now_empty = queue.is_empty(cs);
         let is_last_serialization = Boolean::multi_and(cs, &[should_pop, now_empty]);
@@ -406,7 +402,7 @@ mod tests {
             num_constant_columns: 8,
             max_allowed_constraint_degree: 4,
         };
-        let max_variables = 1 << 26;
+        let max_variables = 1 << 28;
         let max_trace_len = 1 << 22;
 
         fn configure<
@@ -501,12 +497,12 @@ mod tests {
 
         let round_function = Poseidon2Goldilocks;
 
-        let blobs = vec![[0u8; 31]; 4096];
+        let blobs = vec![[0u8; 32]; 4096];
         let mut rng = rand::thread_rng();
         let blobs = blobs
             .into_iter()
             .map(|_| rng.gen())
-            .collect::<Vec<[u8; 31]>>();
+            .collect::<Vec<[u8; 32]>>();
 
         let mut observable_input = EIP4844InputData::placeholder_witness();
         observable_input.hash = {
@@ -520,6 +516,9 @@ mod tests {
         };
         observable_input.kzg_commitment_x = [0u8; NUM_WORDS_FQ];
         observable_input.kzg_commitment_y = [0u8; NUM_WORDS_FQ];
+        observable_input.queue_state.tail.length = 4096;
+        use boojum::field::U64Representable;
+        observable_input.queue_state.tail.tail = [F::from_u64_unchecked(1u64); 4];
 
         let observable_output = EIP4844OutputData::placeholder_witness();
 
@@ -549,7 +548,7 @@ mod tests {
             },
         };
 
-        eip_4844_entry_point(cs, witness, &round_function, 1024);
+        eip_4844_entry_point(cs, witness, &round_function, 4096);
 
         dbg!(cs.next_available_row());
 
