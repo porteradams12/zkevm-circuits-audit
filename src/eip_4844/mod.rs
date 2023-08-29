@@ -292,22 +292,26 @@ where
     // the sum
     let mut last = coeffs.last().unwrap().clone();
     let base = last.mul(cs, &mut z);
-    let y = coeffs
-        .into_iter()
-        .enumerate()
-        .rev()
-        .fold(base, |mut acc, (i, mut coeff)| {
-            acc = acc.add(cs, &mut coeff);
-            // on the last iteration, we do not multiply by x anymore
-            // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
-            // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
-            // we essentially work backwards through this string of computation and on the last
-            // step (a_0) there is no more multiplication with x, hence this conditional.
-            if i != 0 {
-                acc = acc.mul(cs, &mut z);
-            }
-            acc
-        });
+    let mut y =
+        coeffs
+            .into_iter()
+            .enumerate()
+            .rev()
+            .skip(1)
+            .fold(base, |mut acc, (i, mut coeff)| {
+                acc = acc.add(cs, &mut coeff);
+                // on the last iteration, we do not multiply by x anymore
+                // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
+                // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
+                // we essentially work backwards through this string of computation and on the last
+                // step (a_0) there is no more multiplication with x, hence this conditional.
+                if i != 0 {
+                    acc = acc.mul(cs, &mut z);
+                }
+                acc
+            });
+
+    y.normalize(cs);
 
     let mut observable_output = EIP4844OutputData::placeholder(cs);
     observable_output.z = unsafe {
@@ -398,6 +402,10 @@ mod tests {
                 },
             );
             let builder = ConstantsAllocatorGate::configure_builder(
+                builder,
+                GatePlacementStrategy::UseGeneralPurposeColumns,
+            );
+            let builder = PublicInputGate::configure_builder(
                 builder,
                 GatePlacementStrategy::UseGeneralPurposeColumns,
             );
@@ -578,17 +586,23 @@ mod tests {
         use boojum::pairing::bls12_381::FrRepr;
         // evaluate polynomial
         let z_fr = Bls12_381Fr::from_repr(FrRepr(z_arr)).unwrap();
-        let y = blob_arrs.clone().into_iter().enumerate().rev().fold(
-            Bls12_381Fr::zero(),
-            |mut acc, (i, coeff)| {
+        let mut base = Bls12_381Fr::from_repr(FrRepr(*blob_arrs.last().unwrap())).unwrap();
+        base.mul_assign(&z_fr);
+        let y = blob_arrs
+            .clone()
+            .into_iter()
+            .enumerate()
+            .rev()
+            .skip(1)
+            .fold(base, |mut acc, (i, coeff)| {
                 let coeff = Bls12_381Fr::from_repr(FrRepr(coeff)).unwrap();
                 acc.add_assign(&coeff);
                 if i != 0 {
                     acc.mul_assign(&z_fr);
                 }
                 acc
-            },
-        );
+            });
+
         let y_limbs = {
             let repr = y.into_repr();
             let mut bytes = vec![];
