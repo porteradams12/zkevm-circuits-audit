@@ -210,7 +210,7 @@ where
     let mut buffer = vec![];
     let mut coeffs = vec![]; // save polynomial coeffs in here
 
-    let mut done = queue.is_empty(cs);
+    let done = queue.is_empty(cs);
     let no_work = done;
 
     use crate::storage_application::keccak256_conditionally_absorb_and_run_permutation;
@@ -256,6 +256,7 @@ where
         &last_round_buffer,
     );
 
+    // XXX: currently fails as queue is not generated in line with standard protocol
     //queue.enforce_consistency(cs);
     let completed = queue.is_empty(cs);
 
@@ -363,8 +364,9 @@ mod tests {
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::gadgets::tables::*;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::pairing::ff::{Field as PairingField, PrimeField, SqrtField};
     use boojum::worker::Worker;
-    use rand::Rng;
+    use rand::{Rand, Rng};
 
     type F = GoldilocksField;
     type P = GoldilocksField;
@@ -476,13 +478,29 @@ mod tests {
         let mut rng = rand::thread_rng();
         let blobs = blobs
             .into_iter()
-            .map(|_| rng.gen())
+            .map(|_| {
+                let el = Bls12_381Fr::rand(&mut rng);
+                let repr = el.into_repr();
+                let mut bytes = vec![];
+                for limb in repr.0 {
+                    bytes.push((limb & 0xff) as u8);
+                    bytes.push((limb >> 8 & 0xff) as u8);
+                    bytes.push((limb >> 16 & 0xff) as u8);
+                    bytes.push((limb >> 24 & 0xff) as u8);
+                    bytes.push((limb >> 32 & 0xff) as u8);
+                    bytes.push((limb >> 40 & 0xff) as u8);
+                    bytes.push((limb >> 48 & 0xff) as u8);
+                    bytes.push((limb >> 56 & 0xff) as u8);
+                }
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(bytes.as_slice());
+                arr
+            })
             .collect::<Vec<[u8; 32]>>();
 
+        use zkevm_opcode_defs::sha3::*;
         let mut observable_input = EIP4844InputData::placeholder_witness();
         observable_input.hash = {
-            use zkevm_opcode_defs::sha3::*;
-
             let mut result = [0u8; 32];
             let digest =
                 Keccak256::digest(blobs.clone().into_iter().flatten().collect::<Vec<u8>>());
@@ -496,7 +514,95 @@ mod tests {
         // NOTE: this fails consistency check, need to figure out how to generate this properly
         observable_input.queue_state.tail.tail = [F::from_u64_unchecked(1u64); 4];
 
-        let observable_output = EIP4844OutputData::placeholder_witness();
+        let mut observable_output = EIP4844OutputData::placeholder_witness();
+        let z = Keccak256::digest(
+            observable_input
+                .hash
+                .into_iter()
+                .chain(observable_input.kzg_commitment_x.into_iter())
+                .chain(observable_input.kzg_commitment_y.into_iter())
+                .collect::<Vec<u8>>(),
+        );
+        observable_output.z = [0u16; NUM_WORDS_FR];
+        let z_u16 = z
+            .chunks(2)
+            .map(|els| {
+                let mut r = els[0] as u16;
+                r += (els[1] as u16) << 8;
+                r
+            })
+            .collect::<Vec<u16>>();
+        observable_output.z[..8].copy_from_slice(&z_u16[..8]);
+
+        let z_repr = z
+            .chunks(8)
+            .map(|els| {
+                let mut r = els[0] as u64;
+                r += (els[1] as u64) << 8;
+                r += (els[2] as u64) << 16;
+                r += (els[3] as u64) << 24;
+                r += (els[4] as u64) << 32;
+                r += (els[5] as u64) << 40;
+                r += (els[6] as u64) << 48;
+                r += (els[7] as u64) << 56;
+                r
+            })
+            .collect::<Vec<u64>>();
+        let mut z_arr = [0u64; 4];
+        z_arr[..2].copy_from_slice(&z_repr[..2]);
+
+        let blob_arrs = blobs
+            .clone()
+            .iter()
+            .map(|bytes| {
+                let limbs = bytes
+                    .chunks(8)
+                    .map(|els| {
+                        let mut r = els[0] as u64;
+                        r += (els[1] as u64) << 8;
+                        r += (els[2] as u64) << 16;
+                        r += (els[3] as u64) << 24;
+                        r += (els[4] as u64) << 32;
+                        r += (els[5] as u64) << 40;
+                        r += (els[6] as u64) << 48;
+                        r += (els[7] as u64) << 56;
+                        r
+                    })
+                    .collect::<Vec<u64>>();
+                let mut limb_arr = [0u64; 4];
+                limb_arr.copy_from_slice(&limbs);
+                limb_arr
+            })
+            .collect::<Vec<[u64; 4]>>();
+
+        use boojum::pairing::bls12_381::FrRepr;
+        // evaluate polynomial
+        let z_fr = Bls12_381Fr::from_repr(FrRepr(z_arr)).unwrap();
+        let y = blob_arrs.clone().into_iter().enumerate().rev().fold(
+            Bls12_381Fr::zero(),
+            |mut acc, (i, coeff)| {
+                let coeff = Bls12_381Fr::from_repr(FrRepr(coeff)).unwrap();
+                acc.add_assign(&coeff);
+                if i != 0 {
+                    acc.mul_assign(&z_fr);
+                }
+                acc
+            },
+        );
+        let y_limbs = {
+            let repr = y.into_repr();
+            let mut bytes = vec![];
+            for limb in repr.0 {
+                bytes.push((limb & 0xffff) as u16);
+                bytes.push((limb >> 16 & 0xffff) as u16);
+                bytes.push((limb >> 32 & 0xffff) as u16);
+                bytes.push((limb >> 48 & 0xffff) as u16);
+            }
+            let mut arr = [0u16; NUM_WORDS_FR];
+            arr[..16].copy_from_slice(bytes.as_slice());
+            arr
+        };
+        observable_output.y.copy_from_slice(&y_limbs);
 
         let chunks = blobs
             .into_iter()
