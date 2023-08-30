@@ -257,6 +257,7 @@ where
     );
 
     // XXX: currently fails as queue is not generated in line with standard protocol
+    // i have a suspicion this may be causing our crashes
     //queue.enforce_consistency(cs);
     let completed = queue.is_empty(cs);
 
