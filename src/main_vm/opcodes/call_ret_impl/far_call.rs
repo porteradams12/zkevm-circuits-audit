@@ -827,8 +827,7 @@ where
         Num::allocate_multiple_from_closure_and_dependencies(
             cs,
             move |inputs: &[F]| {
-                let call_timestamp = inputs[0].as_u64() as u32;
-
+                let call_timestamp = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
                 let execute = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[1]);
 
                 let mut guard = oracle.inner.write().expect("not poisoned");
@@ -990,8 +989,7 @@ where
         &[],
         move |inputs: &[F], _buffer: &mut DstBuffer<'_, '_, F>| {
             let execute = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
-
-            let current_depth = inputs[1].as_u64() as u32;
+            let current_depth = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[1]);
 
             let mut query =
                 [F::ZERO; <ExecutionContextRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN];

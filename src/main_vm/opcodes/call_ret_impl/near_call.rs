@@ -80,8 +80,7 @@ where
             cs,
             move |inputs: &[F]| {
                 let execute = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
-
-                let timestamp = inputs[1].as_u64() as u32;
+                let timestamp = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[1]);
 
                 let mut guard = oracle.inner.write().expect("not poisoned");
                 let witness = guard.get_rollback_queue_tail_witness_for_call(timestamp, execute);
@@ -148,8 +147,7 @@ where
         cs,
         move |inputs: &[F]| {
             let execute = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
-
-            let current_depth = inputs[1].as_u64() as u32;
+            let current_depth = <u32 as WitnessCastable<F, F>>::cast_from_source(inputs[1]);
 
             let mut context =
                 [F::ZERO; <ExecutionContextRecord<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN];
