@@ -61,7 +61,7 @@ pub(crate) fn apply_shifts<F: SmallField, CS: ConstraintSystem<F>>(
     let change_rot = is_ror;
     let shift_is_zero = shift.is_zero(cs);
     let cnst = Num::allocated_constant(cs, F::from_u64_unchecked(256));
-    // no underflow here 
+    // no underflow here
     let inverted_shift = cnst.sub(cs, &shift);
 
     let change_flag = {
@@ -71,8 +71,7 @@ pub(crate) fn apply_shifts<F: SmallField, CS: ConstraintSystem<F>>(
     let full_shift = Num::conditionally_select(cs, change_flag, &inverted_shift, &shift);
 
     // and only NOW it's indeed 8-bit, even if we had a subtraction of 256 - 0 above
-    let full_shift = 
-        unsafe { UInt8::from_variable_unchecked(full_shift.get_variable()) };
+    let full_shift = unsafe { UInt8::from_variable_unchecked(full_shift.get_variable()) };
 
     let full_shift_limbs = get_shift_constant(cs, full_shift);
 

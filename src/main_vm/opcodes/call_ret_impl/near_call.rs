@@ -6,6 +6,7 @@ use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
+use boojum::gadgets::traits::castable::WitnessCastable;
 
 #[derive(Derivative, CSAllocatable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
@@ -78,8 +79,7 @@ where
         Num::allocate_multiple_from_closure_and_dependencies(
             cs,
             move |inputs: &[F]| {
-                let execute = inputs[0].as_u64();
-                let execute = u64_as_bool(execute);
+                let execute = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
 
                 let timestamp = inputs[1].as_u64() as u32;
 
@@ -147,8 +147,7 @@ where
     let _: [Num<F>; 0] = Num::allocate_multiple_from_closure_and_dependencies(
         cs,
         move |inputs: &[F]| {
-            let execute = inputs[0].as_u64();
-            let execute = u64_as_bool(execute);
+            let execute = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
 
             let current_depth = inputs[1].as_u64() as u32;
 

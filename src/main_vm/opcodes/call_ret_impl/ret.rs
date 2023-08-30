@@ -141,8 +141,7 @@ where
                 move |inputs: &[F], buffer: &mut DstBuffer<'_, '_, F>| {
                     let callstack_depth = inputs[0].as_u64() as u32;
 
-                    let execute = inputs[1].as_u64();
-                    let execute = u64_as_bool(execute);
+                    let execute = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[1]);
 
                     let mut guard = oracle.inner.write().expect("not poisoned");
                     let (record_witness, previous_state) =
