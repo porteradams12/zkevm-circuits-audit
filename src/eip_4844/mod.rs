@@ -28,6 +28,7 @@ use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
+use boojum::pairing::ff::Field;
 use std::sync::{Arc, RwLock};
 use zkevm_opcode_defs::system_params::STORAGE_AUX_BYTE;
 
@@ -47,8 +48,8 @@ const NUM_WORDS_FQ: usize = 25;
 type Bls12_381BaseNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fq, NUM_WORDS_FQ>;
 type Bls12_381ScalarNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fr, NUM_WORDS_FR>;
 
-type Bls12_381BaseNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fq, NUM_WORDS_FQ>;
-type Bls12_381ScalarNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fr, NUM_WORDS_FR>;
+type Bls12_381BaseNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fq, 25>;
+type Bls12_381ScalarNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fr, 17>;
 
 // turns 128 bits into a Bls12 field element.
 fn convert_keccak_digest_to_field_element<
@@ -129,6 +130,7 @@ pub fn eip_4844_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+    const N: usize,
 >(
     cs: &mut CS,
     witness: EIP4844CircuitInstanceWitness<F>,
@@ -138,15 +140,13 @@ pub fn eip_4844_entry_point<
 where
     [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]:,
+    [(); N + 1]:,
 {
     let limit = params;
 
-    assert!(limit <= u32::MAX as usize);
+    assert!(limit <= 4096); // max blob length eip4844
 
-    let EIP4844CircuitInstanceWitness {
-        closed_form_input,
-        queue_witness,
-    } = witness;
+    let EIP4844CircuitInstanceWitness { closed_form_input } = witness;
 
     let mut structured_input =
         EIP4844InputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
@@ -158,19 +158,10 @@ where
     // only 1 instance of the circuit here for now
     Boolean::enforce_equal(cs, &start_flag, &boolean_true);
 
-    let queue_state_from_input = structured_input.observable_input.queue_state;
-
-    // it must be trivial
-    queue_state_from_input.enforce_trivial_head(cs);
-
-    let mut queue =
-        CircuitQueue::<F, BlobChunk<F>, 8, 12, 4, 4, 5, R>::from_state(cs, queue_state_from_input);
-    let queue_witness = CircuitQueueWitness::from_inner_witness(queue_witness);
-    queue.witness = Arc::new(queue_witness);
-
     let hash = structured_input.observable_input.hash;
     let kzg_x = structured_input.observable_input.kzg_commitment_x;
     let kzg_y = structured_input.observable_input.kzg_commitment_y;
+    let blob = structured_input.observable_input.blob;
     let input_bytes = hash
         .into_iter()
         .chain(kzg_x)
@@ -208,62 +199,69 @@ where
     };
 
     let mut buffer = vec![];
-    let mut coeffs = vec![]; // save polynomial coeffs in here
-
-    let done = queue.is_empty(cs);
-    let no_work = done;
 
     use crate::storage_application::keccak256_conditionally_absorb_and_run_permutation;
 
+    let no_work = Boolean::allocate_constant(cs, limit == 0);
+    let mut y = Bls12_381ScalarNNField::<F>::allocated_constant(cs, Bls12_381Fr::zero(), &params);
+
     // fill up the buffer. since eip4844 blobs are always same size we can do this
     // without needing to account for variable lengths
-    for _ in 0..4096 {
-        let (chunk, _) = queue.pop_front(cs, boolean_true);
-        let as_bytes = chunk.el.to_le_bytes(cs);
-        coeffs.push(convert_blob_chunk_to_field_element(cs, &as_bytes, &params));
-        buffer.extend(as_bytes);
-    }
+    if limit != 0 {
+        // XXX: fix structure
+        for cycle in 0..(limit - 1) {
+            // polynomial evaluations via horners rule
+            let el = blob[cycle];
+            let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
+            // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
+            // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
+            y = y.add(cs, &mut fe);
+            if cycle != 0 {
+                y = y.mul(cs, &mut z);
+            }
 
-    for _ in 0..963 {
-        let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
-        let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
-        let carry_on = buffer[136..].to_vec();
+            // hash
+            let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
+            let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
+            let carry_on = buffer[136..].to_vec();
 
-        buffer = carry_on;
+            buffer = carry_on;
 
-        // absorb if we are not done yet
+            // absorb if we are not done yet
+            keccak256_conditionally_absorb_and_run_permutation(
+                cs,
+                boolean_true,
+                &mut keccak_accumulator_state,
+                &buffer_for_round,
+            );
+        }
+
+        // last round
+        let el = blob[limit - 1];
+        let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
+        y = y.add(cs, &mut fe);
+        y = y.mul(cs, &mut z);
+
+        let mut last_round_buffer = [zero_u8; 136];
+        let tail_len = buffer.len();
+        last_round_buffer[..tail_len].copy_from_slice(&buffer);
+        last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
+        last_round_buffer[136 - 1] = UInt8::allocated_constant(cs, 0x80);
+
+        let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
+
+        // absorb if it's the last round
         keccak256_conditionally_absorb_and_run_permutation(
             cs,
             boolean_true,
             &mut keccak_accumulator_state,
-            &buffer_for_round,
+            &last_round_buffer,
         );
+
+        y.normalize(cs);
     }
 
-    let mut last_round_buffer = [zero_u8; 136];
-    let tail_len = buffer.len();
-    last_round_buffer[..tail_len].copy_from_slice(&buffer);
-    last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
-    last_round_buffer[136 - 1] = UInt8::allocated_constant(cs, 0x80);
-
-    let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
-
-    // absorb if it's the last round
-    keccak256_conditionally_absorb_and_run_permutation(
-        cs,
-        boolean_true,
-        &mut keccak_accumulator_state,
-        &last_round_buffer,
-    );
-
-    // XXX: currently fails as queue is not generated in line with standard protocol
-    // i have a suspicion this may be causing our crashes
-    //queue.enforce_consistency(cs);
-    let completed = queue.is_empty(cs);
-
-    Boolean::enforce_equal(cs, &completed, &boolean_true);
-
-    structured_input.completion_flag = completed.clone();
+    structured_input.completion_flag = boolean_true;
 
     let fsm_output = ();
     structured_input.hidden_fsm_output = fsm_output;
@@ -287,32 +285,6 @@ where
         let is_equal = UInt8::equals(cs, input_byte, &hash_byte);
         Boolean::enforce_equal(cs, &is_equal, &boolean_true);
     }
-
-    // polynomial evaluations via horners rule
-    // we essentially work backwards through the coefficients and multiply each with (X), then add to
-    // the sum
-    let mut last = coeffs.last().unwrap().clone();
-    let base = last.mul(cs, &mut z);
-    let mut y =
-        coeffs
-            .into_iter()
-            .enumerate()
-            .rev()
-            .skip(1)
-            .fold(base, |mut acc, (i, mut coeff)| {
-                acc = acc.add(cs, &mut coeff);
-                // on the last iteration, we do not multiply by x anymore
-                // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
-                // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
-                // we essentially work backwards through this string of computation and on the last
-                // step (a_0) there is no more multiplication with x, hence this conditional.
-                if i != 0 {
-                    acc = acc.mul(cs, &mut z);
-                }
-                acc
-            });
-
-    y.normalize(cs);
 
     let mut observable_output = EIP4844OutputData::placeholder(cs);
     observable_output.z = unsafe {
