@@ -215,10 +215,11 @@ where
             let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
             // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
             // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
+            // since the blob is considered to be a polynomial in lagrange form, we essentially
+            // 'work backwards' and start with the highest degree coefficients first. so we can
+            // add and multiply and at the last step we just add the coefficient.
             y = y.add(cs, &mut fe);
-            if cycle != 0 {
-                y = y.mul(cs, &mut z);
-            }
+            y = y.mul(cs, &mut z);
 
             // hash
             let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
@@ -239,8 +240,7 @@ where
         // last round
         let el = blob[limit - 1];
         let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
-        y = y.add(cs, &mut fe);
-        y = y.mul(cs, &mut z);
+        y = y.add(cs, &mut fe); // as previously mentioned, last step only needs addition.
 
         let mut last_round_buffer = [zero_u8; 136];
         let tail_len = buffer.len();
