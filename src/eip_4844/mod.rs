@@ -620,19 +620,17 @@ mod tests {
                 hidden_fsm_input: (),
                 hidden_fsm_output: (),
             },
-            blob: VecDeque::from(
-                blobs
-                    .into_iter()
-                    .map(|el| {
-                        let mut allocated = [UInt8::<F>::placeholder(cs); 31];
-                        allocated
-                            .iter_mut()
-                            .zip(el)
-                            .for_each(|(v, b)| *v = UInt8::allocate_constant(cs, b));
-                        BlobChunk { el: allocated }
-                    })
-                    .collect::<Vec<BlobChunk<F>>>(),
-            ),
+            blob: blobs
+                .into_iter()
+                .map(|el| {
+                    let mut allocated = [UInt8::<F>::placeholder(cs); 31];
+                    allocated
+                        .iter_mut()
+                        .zip(el)
+                        .for_each(|(v, b)| *v = UInt8::allocate_constant(cs, b));
+                    BlobChunk { el: allocated }
+                })
+                .collect::<Vec<BlobChunk<F>>>(),
         };
 
         eip_4844_entry_point::<_, _, _, 17>(cs, witness, &round_function, 4096);

@@ -333,5 +333,5 @@ pub type EIP4844InputOutputWitness<F> = crate::fsm_input_output::ClosedFormInput
 #[serde(bound = "")]
 pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: EIP4844InputOutputWitness<F>,
-    pub blob: VecDeque<BlobChunk<F>>,
+    pub blob: Vec<BlobChunk<F>>,
 }
