@@ -106,6 +106,10 @@ fn convert_blob_chunk_to_field_element<
         *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
 
+    // since array_chunks drops any remaining elements that don't fit in the size requirement,
+    // we need to manually set the last byte in limbs
+    limbs[15] = input[30].get_variable();
+
     let mut max_value = U1024::from_word(1u64);
     max_value = max_value.shl_vartime(256);
     max_value = max_value.saturating_sub(&U1024::from_word(1u64));
@@ -146,7 +150,10 @@ where
 
     assert!(limit <= 4096); // max blob length eip4844
 
-    let EIP4844CircuitInstanceWitness { closed_form_input } = witness;
+    let EIP4844CircuitInstanceWitness {
+        closed_form_input,
+        blob,
+    } = witness;
 
     let mut structured_input =
         EIP4844InputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
@@ -161,7 +168,6 @@ where
     let hash = structured_input.observable_input.hash;
     let kzg_x = structured_input.observable_input.kzg_commitment_x;
     let kzg_y = structured_input.observable_input.kzg_commitment_y;
-    let blob = structured_input.observable_input.blob;
     let input_bytes = hash
         .into_iter()
         .chain(kzg_x)
@@ -178,7 +184,9 @@ where
     let params = Arc::new(Bls12_381ScalarNNFieldParams::create());
     let mut z = convert_keccak_digest_to_field_element(cs, truncated_hash, &params);
 
+    //
     // Recompute the hash and check equality, and form blob polynomial simultaneously.
+    //
     let keccak_accumulator_state =
         [[[zero_u8; keccak256::BYTES_PER_WORD]; keccak256::LANE_WIDTH]; keccak256::LANE_WIDTH];
 
@@ -201,14 +209,14 @@ where
     let mut buffer = vec![];
 
     use crate::storage_application::keccak256_conditionally_absorb_and_run_permutation;
+    use boojum::gadgets::keccak256::KECCAK_RATE_BYTES;
 
-    let no_work = Boolean::allocate_constant(cs, limit == 0);
+    let no_work = Boolean::allocated_constant(cs, limit == 0);
     let mut y = Bls12_381ScalarNNField::<F>::allocated_constant(cs, Bls12_381Fr::zero(), &params);
 
     // fill up the buffer. since eip4844 blobs are always same size we can do this
     // without needing to account for variable lengths
     if limit != 0 {
-        // XXX: fix structure
         for cycle in 0..(limit - 1) {
             // polynomial evaluations via horners rule
             let el = blob[cycle];
@@ -221,7 +229,39 @@ where
             y = y.add(cs, &mut fe);
             y = y.mul(cs, &mut z);
 
+            assert!(buffer.len() < 136);
+
+            buffer.extend(el.el);
+
             // hash
+            if buffer.len() >= 136 {
+                let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
+                let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
+                let carry_on = buffer[136..].to_vec();
+
+                buffer = carry_on;
+
+                // absorb if we are not done yet
+                keccak256_conditionally_absorb_and_run_permutation(
+                    cs,
+                    boolean_true,
+                    &mut keccak_accumulator_state,
+                    &buffer_for_round,
+                );
+            }
+
+            assert!(buffer.len() < 136);
+        }
+
+        // last round
+        let el = blob[limit - 1];
+        let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
+        y = y.add(cs, &mut fe); // as previously mentioned, last step only needs addition.
+
+        buffer.extend(el.el);
+
+        // ensure circuit still matches up to hash if adding the new element puts us over 136 bytes
+        if buffer.len() >= 136 {
             let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
             let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
             let carry_on = buffer[136..].to_vec();
@@ -237,20 +277,20 @@ where
             );
         }
 
-        // last round
-        let el = blob[limit - 1];
-        let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
-        y = y.add(cs, &mut fe); // as previously mentioned, last step only needs addition.
-
         let mut last_round_buffer = [zero_u8; 136];
         let tail_len = buffer.len();
         last_round_buffer[..tail_len].copy_from_slice(&buffer);
-        last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
-        last_round_buffer[136 - 1] = UInt8::allocated_constant(cs, 0x80);
+
+        if tail_len == KECCAK_RATE_BYTES - 1 {
+            // unreachable, but we set it for completeness
+            last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x81);
+        } else {
+            last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
+            last_round_buffer[KECCAK_RATE_BYTES - 1] = UInt8::allocated_constant(cs, 0x80);
+        }
 
         let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
 
-        // absorb if it's the last round
         keccak256_conditionally_absorb_and_run_permutation(
             cs,
             boolean_true,
@@ -356,7 +396,7 @@ mod tests {
             num_constant_columns: 8,
             max_allowed_constraint_degree: 4,
         };
-        let max_variables = 1 << 28;
+        let max_variables = 1 << 26;
         let max_trace_len = 1 << 22;
 
         fn configure<
@@ -455,7 +495,7 @@ mod tests {
 
         let round_function = Poseidon2Goldilocks;
 
-        let blobs = vec![[0u8; 32]; 4096];
+        let blobs = vec![[0u8; 31]; 4096];
         let mut rng = rand::thread_rng();
         let blobs = blobs
             .into_iter()
@@ -473,11 +513,11 @@ mod tests {
                     bytes.push((limb >> 48 & 0xff) as u8);
                     bytes.push((limb >> 56 & 0xff) as u8);
                 }
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(bytes.as_slice());
+                let mut arr = [0u8; 31];
+                arr.copy_from_slice(&bytes.as_slice()[..31]);
                 arr
             })
-            .collect::<Vec<[u8; 32]>>();
+            .collect::<Vec<[u8; 31]>>();
 
         use zkevm_opcode_defs::sha3::*;
         let mut observable_input = EIP4844InputData::placeholder_witness();
@@ -490,10 +530,7 @@ mod tests {
         };
         observable_input.kzg_commitment_x = [0u8; NUM_WORDS_FQ];
         observable_input.kzg_commitment_y = [0u8; NUM_WORDS_FQ];
-        observable_input.queue_state.tail.length = 4096;
         use boojum::field::U64Representable;
-        // NOTE: this fails consistency check, need to figure out how to generate this properly
-        observable_input.queue_state.tail.tail = [F::from_u64_unchecked(1u64); 4];
 
         let mut observable_output = EIP4844OutputData::placeholder_witness();
         let z = Keccak256::digest(
@@ -518,15 +555,9 @@ mod tests {
         let z_repr = z
             .chunks(8)
             .map(|els| {
-                let mut r = els[0] as u64;
-                r += (els[1] as u64) << 8;
-                r += (els[2] as u64) << 16;
-                r += (els[3] as u64) << 24;
-                r += (els[4] as u64) << 32;
-                r += (els[5] as u64) << 40;
-                r += (els[6] as u64) << 48;
-                r += (els[7] as u64) << 56;
-                r
+                els.iter()
+                    .enumerate()
+                    .fold(0u64, |acc, (i, el)| acc + ((*el as u64) << (8 * i)))
             })
             .collect::<Vec<u64>>();
         let mut z_arr = [0u64; 4];
@@ -539,15 +570,9 @@ mod tests {
                 let limbs = bytes
                     .chunks(8)
                     .map(|els| {
-                        let mut r = els[0] as u64;
-                        r += (els[1] as u64) << 8;
-                        r += (els[2] as u64) << 16;
-                        r += (els[3] as u64) << 24;
-                        r += (els[4] as u64) << 32;
-                        r += (els[5] as u64) << 40;
-                        r += (els[6] as u64) << 48;
-                        r += (els[7] as u64) << 56;
-                        r
+                        els.iter()
+                            .enumerate()
+                            .fold(0u64, |acc, (i, el)| acc + ((*el as u64) << (8 * i)))
                     })
                     .collect::<Vec<u64>>();
                 let mut limb_arr = [0u64; 4];
@@ -559,22 +584,17 @@ mod tests {
         use boojum::pairing::bls12_381::FrRepr;
         // evaluate polynomial
         let z_fr = Bls12_381Fr::from_repr(FrRepr(z_arr)).unwrap();
-        let mut base = Bls12_381Fr::from_repr(FrRepr(*blob_arrs.last().unwrap())).unwrap();
-        base.mul_assign(&z_fr);
-        let y = blob_arrs
-            .clone()
-            .into_iter()
-            .enumerate()
-            .rev()
-            .skip(1)
-            .fold(base, |mut acc, (i, coeff)| {
+        let y = blob_arrs.clone().into_iter().enumerate().fold(
+            Bls12_381Fr::zero(),
+            |mut acc, (i, coeff)| {
                 let coeff = Bls12_381Fr::from_repr(FrRepr(coeff)).unwrap();
                 acc.add_assign(&coeff);
-                if i != 0 {
+                if i != blob_arrs.len() - 1 {
                     acc.mul_assign(&z_fr);
                 }
                 acc
-            });
+            },
+        );
 
         let y_limbs = {
             let repr = y.into_repr();
@@ -591,18 +611,6 @@ mod tests {
         };
         observable_output.y.copy_from_slice(&y_limbs);
 
-        let chunks = blobs
-            .into_iter()
-            .map(|el| {
-                (
-                    BlobChunkWitness {
-                        el: U256::from_little_endian(&el),
-                    },
-                    [F::ZERO, F::ZERO, F::ZERO, F::ZERO],
-                )
-            })
-            .collect::<Vec<(BlobChunkWitness<F>, [_; 4])>>();
-
         let witness = EIP4844CircuitInstanceWitness {
             closed_form_input: EIP4844InputOutputWitness {
                 start_flag: true,
@@ -612,12 +620,22 @@ mod tests {
                 hidden_fsm_input: (),
                 hidden_fsm_output: (),
             },
-            queue_witness: CircuitQueueRawWitness {
-                elements: chunks.into(),
-            },
+            blob: VecDeque::from(
+                blobs
+                    .into_iter()
+                    .map(|el| {
+                        let mut allocated = [UInt8::<F>::placeholder(cs); 31];
+                        allocated
+                            .iter_mut()
+                            .zip(el)
+                            .for_each(|(v, b)| *v = UInt8::allocate_constant(cs, b));
+                        BlobChunk { el: allocated }
+                    })
+                    .collect::<Vec<BlobChunk<F>>>(),
+            ),
         };
 
-        eip_4844_entry_point(cs, witness, &round_function, 4096);
+        eip_4844_entry_point::<_, _, _, 17>(cs, witness, &round_function, 4096);
 
         dbg!(cs.next_available_row());
 

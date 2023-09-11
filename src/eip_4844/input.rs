@@ -22,9 +22,18 @@ use cs_derive::*;
 use derivative::*;
 use std::collections::VecDeque;
 
-#[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
+#[derive(
+    Derivative,
+    CSAllocatable,
+    CSSelectable,
+    CSVarLengthEncodable,
+    WitnessHookable,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
+#[serde(bound = "")]
 pub struct BlobChunk<F: SmallField> {
     pub el: [UInt8<F>; 31],
 }
@@ -280,7 +289,6 @@ pub struct EIP4844InputData<F: SmallField> {
     pub hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
     pub kzg_commitment_x: [UInt8<F>; NUM_WORDS_FQ],
     pub kzg_commitment_y: [UInt8<F>; NUM_WORDS_FQ],
-    pub blob: [BlobChunk<F>; 4096],
 }
 
 impl<F: SmallField> CSPlaceholder<F> for EIP4844InputData<F> {
@@ -289,9 +297,6 @@ impl<F: SmallField> CSPlaceholder<F> for EIP4844InputData<F> {
             hash: [UInt8::<F>::placeholder(cs); keccak256::KECCAK256_DIGEST_SIZE],
             kzg_commitment_x: [UInt8::<F>::placeholder(cs); NUM_WORDS_FQ],
             kzg_commitment_y: [UInt8::<F>::placeholder(cs); NUM_WORDS_FQ],
-            blob: [BlobChunk::<F> {
-                el: [UInt8::<F>::placeholder(cs); 31],
-            }; 4096],
         }
     }
 }
@@ -328,4 +333,5 @@ pub type EIP4844InputOutputWitness<F> = crate::fsm_input_output::ClosedFormInput
 #[serde(bound = "")]
 pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
     pub closed_form_input: EIP4844InputOutputWitness<F>,
+    pub blob: VecDeque<BlobChunk<F>>,
 }
