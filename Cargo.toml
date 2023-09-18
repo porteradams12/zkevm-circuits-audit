@@ -1,6 +1,6 @@
 [package]
 name = "zkevm_circuits"
-version = "0.1.0"
+version = "1.4.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -20,8 +20,8 @@ boojum = {git = "https://github.com/matter-labs/boojum.git", branch = "main"}
 # boojum = { path = "../boojum" }
 bincode = "*"
 ethereum-types = "0.12.*"
-# cs_derive = { path = "../boojum/cs_derive" }
 cs_derive = { git = "https://github.com/matter-labs/boojum.git", branch = "main" }
+# cs_derive = { path = "../boojum/cs_derive" }
 serde_json = "*"
 itertools = "0.10"
 rand_new = { package = "rand", version = "0.8" }
@@ -29,6 +29,8 @@ hex = "*"
 seq-macro = "0.3"
 
 [features]
+default = []
+log_tracing = ["boojum/log_tracing"]
 verbose_circuits = []
 
 [dev-dependencies]
