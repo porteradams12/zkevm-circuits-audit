@@ -36,6 +36,7 @@ use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u512::UInt512;
 use boojum::gadgets::u8::UInt8;
+use boojum::pairing::ff::PrimeField;
 use boojum::pairing::GenericCurveAffine;
 use boojum::pairing::{CurveAffine, GenericCurveProjective};
 use boojum::sha3::digest::typenum::private::IsGreaterPrivate;
@@ -358,10 +359,10 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     scalar_field_params: &Arc<Secp256ScalarNNFieldParams>,
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
     scalar.enforce_reduced(cs);
+
     let pow_2_128 = U256::from_dec_str(TWO_POW_128).unwrap();
     let pow_2_128 = UInt512::allocated_constant(cs, (pow_2_128, U256::zero()));
 
-    use boojum::pairing::ff::PrimeField;
     let beta = Secp256Fq::from_str(BETA).unwrap();
     let mut beta = Secp256BaseNNField::allocated_constant(cs, beta, &base_field_params);
 
@@ -614,6 +615,7 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
 fn ecrecover_precompile_inner_routine<
     F: SmallField,
     CS: ConstraintSystem<F>,
+    P: PrimeField,
     const MESSAGE_HASH_CAN_BE_ZERO: bool,
 >(
     cs: &mut CS,
@@ -692,12 +694,11 @@ fn ecrecover_precompile_inner_routine<
 
     let (mut message_hash_fe, message_hash_is_zero) = if MESSAGE_HASH_CAN_BE_ZERO {
         (
-            convert_uint256_to_field_element(cs, &message_hash, &scalar_field_params),
+            convert_uint256_to_field_element(cs, &message_hash, scalar_field_params),
             Boolean::allocated_constant(cs, false),
         )
     } else {
-        // NB: although it is not strictly an exception we also assume that hash is never zero as field element
-        convert_uint256_to_field_element_masked(cs, &message_hash, &scalar_field_params)
+        convert_uint256_to_field_element_masked(cs, &message_hash, scalar_field_params)
     };
     exception_flags.push(message_hash_is_zero);
 
@@ -800,10 +801,10 @@ fn ecrecover_precompile_inner_routine<
         &scalar_field_params,
     );
 
-    let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv, &base_field_params);
+    //let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv, &base_field_params);
 
-    let (mut q_acc, _) = hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
-    let mut q_acc = s_times_x.add_mixed(cs, &mut q_acc);
+    //let (mut q_acc, _) = hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
+    let mut q_acc = s_times_x; //.add_mixed(cs, &mut q_acc);
 
     let ((q_x, q_y), is_infinity) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
     exception_flags.push(is_infinity);
@@ -838,6 +839,7 @@ pub fn ecrecover_function_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+    P: PrimeField,
     const MESSAGE_HASH_CAN_BE_ZERO: bool,
 >(
     cs: &mut CS,
@@ -997,7 +999,7 @@ where
         let rec_id = v_as_u256.inner[0].to_le_bytes(cs)[0];
 
         let (success, written_value) =
-            ecrecover_precompile_inner_routine::<_, _, MESSAGE_HASH_CAN_BE_ZERO>(
+            ecrecover_precompile_inner_routine::<_, _, P, MESSAGE_HASH_CAN_BE_ZERO>(
                 cs,
                 &rec_id,
                 &r_as_u256,
@@ -1154,21 +1156,6 @@ mod test {
         }
 
         (r, s, pk, digest)
-    }
-
-    fn create_ecmul_inputs() -> (Secp256Fr, Secp256Fr) {
-        let mut rng = deterministic_rng();
-        let k: Secp256Fr = rng.gen();
-        let r_point = Secp256Affine::one().mul(k.into_repr()).into_affine();
-
-        let r_x = r_point.into_xy_unchecked().0;
-        let r = transmute_representation::<_, <Secp256Fr as PrimeField>::Repr>(r_x.into_repr());
-        let r = Secp256Fr::from_repr(r).unwrap();
-
-        let mut s = r;
-        s.mul_assign(&k);
-
-        (r, s)
     }
 
     fn repr_into_u256<T: PrimeFieldRepr>(repr: T) -> U256 {
@@ -1376,7 +1363,7 @@ mod test {
         );
 
         for _ in 0..5 {
-            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, false>(
+            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, Secp256Fr, false>(
                 cs,
                 &rec_id,
                 &r,
@@ -1486,7 +1473,7 @@ mod test {
         }
 
         for (r, s, digest) in all_combinations.into_iter() {
-            let (no_error, _digest) = ecrecover_precompile_inner_routine::<_, _, false>(
+            let (no_error, _digest) = ecrecover_precompile_inner_routine::<_, _, Secp256Fr, false>(
                 cs,
                 &rec_id,
                 &r,
@@ -1509,7 +1496,7 @@ mod test {
     //
     // It works as follows: given a point x coordinate `r`, we set `s` to be `r * k` for some `k`.
     // This then works out in the secp256k1 recover equation to create the equation
-    // `res = (r, y) * r * k * inv(r, Q)` which is equal to `res = (r, y) * k`, effectively
+    // `res = (r, y) * r * k * inv(r, P)` which is equal to `res = (r, y) * k`, effectively
     // performing a scalar multiplication.
     //
     // https://ethresear.ch/t/you-can-kinda-abuse-ecrecover-to-do-ecmul-in-secp256k1-today/2384
@@ -1519,6 +1506,8 @@ mod test {
         let mut owned_cs = create_cs(1 << 20);
         let cs = &mut owned_cs;
 
+        // NOTE: This is essentially reducing a base field to a scalar field element. Due to the
+        // nature of the recovery equation turning into `(r, y) * r * k * inv(r, P)`
         let r = crate::ff::from_hex::<Secp256Fr>(
             "00000000000000009b37e91445e92b1423354825aa33d841d83cacfdd895d316ae88dabc31736996",
         )
@@ -1562,7 +1551,7 @@ mod test {
         );
 
         for _ in 0..5 {
-            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, true>(
+            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, Secp256Fq, true>(
                 cs,
                 &rec_id,
                 &r,
