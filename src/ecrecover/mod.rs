@@ -1506,18 +1506,30 @@ mod test {
     // As discussed on ethresearch forums, a caller may 'abuse' ecrecover in order to compute a
     // secp256k1 ecmul in the EVM. This test compares the result of an ecrecover scalar mul with
     // the output of a previously tested ecmul in the EVM.
+    //
+    // It works as follows: given a point x coordinate `r`, we set `s` to be `r * k` for some `k`.
+    // This then works out in the secp256k1 recover equation to create the equation
+    // `res = (r, y) * r * k * inv(r, Q)` which is equal to `res = (r, y) * k`, effectively
+    // performing a scalar multiplication.
+    //
     // https://ethresear.ch/t/you-can-kinda-abuse-ecrecover-to-do-ecmul-in-secp256k1-today/2384
     #[test]
     fn test_ecrecover_scalar_mul_trick() {
+        use rand::Rand;
         let mut owned_cs = create_cs(1 << 20);
         let cs = &mut owned_cs;
 
-        let _sk = crate::ff::from_hex::<Secp256Fr>(
-            "b5b1870957d373ef0eeffecc6e4812c0fd08f554b37b233526acc331bf1544f7",
+        let r = crate::ff::from_hex::<Secp256Fr>(
+            "00000000000000009b37e91445e92b1423354825aa33d841d83cacfdd895d316ae88dabc31736996",
         )
         .unwrap();
-        let _eth_address = hex::decode("12890d2cce102216644c59dae5baed380d84830c").unwrap();
-        let (r, s) = create_ecmul_inputs();
+        let k = crate::ff::from_hex::<Secp256Fr>(
+            "0000000000000000005aa98b08426f9dea29001fc925f3f35a10c9927082fe4d026cc485d1ebb430",
+        )
+        .unwrap();
+        let mut s = r.clone();
+        s.mul_assign(&k);
+        let evm_tested_digest = hex::decode("eDc01060fdD6592f54A63EAE6C89436675C4d70D").unwrap();
 
         let scalar_params = secp256k1_scalar_field_params();
         let base_params = secp256k1_base_field_params();
@@ -1550,7 +1562,7 @@ mod test {
         );
 
         for _ in 0..5 {
-            let (no_error, _digest) = ecrecover_precompile_inner_routine::<_, _, true>(
+            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, true>(
                 cs,
                 &rec_id,
                 &r,
@@ -1565,9 +1577,9 @@ mod test {
 
             // Zero digest shouldn't give us an error
             assert!(no_error.witness_hook(&*cs)().unwrap() == true);
-            //let recovered_address = digest.to_be_bytes(cs);
-            //let recovered_address = recovered_address.witness_hook(cs)().unwrap();
-            //assert_eq!(&recovered_address[12..], &eth_address[..]);
+            let recovered_address = digest.to_be_bytes(cs);
+            let recovered_address = recovered_address.witness_hook(cs)().unwrap();
+            assert_eq!(&recovered_address[12..], &evm_tested_digest[..]);
         }
 
         dbg!(cs.next_available_row());
