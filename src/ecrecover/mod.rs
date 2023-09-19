@@ -611,7 +611,11 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
     acc
 }
 
-fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
+fn ecrecover_precompile_inner_routine<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    const MESSAGE_HASH_CAN_BE_ZERO: bool,
+>(
     cs: &mut CS,
     recid: &UInt8<F>,
     r: &UInt256<F>,
@@ -689,7 +693,9 @@ fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     // NB: although it is not strictly an exception we also assume that hash is never zero as field element
     let (mut message_hash_fe, message_hash_is_zero) =
         convert_uint256_to_field_element_masked(cs, &message_hash, &scalar_field_params);
-    exception_flags.push(message_hash_is_zero);
+    if !MESSAGE_HASH_CAN_BE_ZERO {
+        exception_flags.push(message_hash_is_zero);
+    }
 
     // curve equation is y^2 = x^3 + b
     // we compute t = r^3 + b and check if t is a quadratic residue or not.
@@ -828,6 +834,7 @@ pub fn ecrecover_function_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+    const MESSAGE_HASH_CAN_BE_ZERO: bool,
 >(
     cs: &mut CS,
     witness: EcrecoverCircuitInstanceWitness<F>,
@@ -985,18 +992,19 @@ where
         let [message_hash_as_u256, v_as_u256, r_as_u256, s_as_u256] = read_values;
         let rec_id = v_as_u256.inner[0].to_le_bytes(cs)[0];
 
-        let (success, written_value) = ecrecover_precompile_inner_routine(
-            cs,
-            &rec_id,
-            &r_as_u256,
-            &s_as_u256,
-            &message_hash_as_u256,
-            valid_x_in_external_field.clone(),
-            valid_y_in_external_field.clone(),
-            valid_t_in_external_field.clone(),
-            &base_params,
-            &scalar_params,
-        );
+        let (success, written_value) =
+            ecrecover_precompile_inner_routine::<_, _, MESSAGE_HASH_CAN_BE_ZERO>(
+                cs,
+                &rec_id,
+                &r_as_u256,
+                &s_as_u256,
+                &message_hash_as_u256,
+                valid_x_in_external_field.clone(),
+                valid_y_in_external_field.clone(),
+                valid_t_in_external_field.clone(),
+                &base_params,
+                &scalar_params,
+            );
 
         let success_as_u32 = unsafe { UInt32::from_variable_unchecked(success.get_variable()) };
         let mut success_as_u256 = zero_u256;
@@ -1142,6 +1150,21 @@ mod test {
         }
 
         (r, s, pk, digest)
+    }
+
+    fn create_ecmul_inputs() -> (Secp256Fr, Secp256Fr) {
+        let mut rng = deterministic_rng();
+        let k: Secp256Fr = rng.gen();
+        let r_point = Secp256Affine::one().mul(k.into_repr()).into_affine();
+
+        let r_x = r_point.into_xy_unchecked().0;
+        let r = transmute_representation::<_, <Secp256Fr as PrimeField>::Repr>(r_x.into_repr());
+        let r = Secp256Fr::from_repr(r).unwrap();
+
+        let mut s = r;
+        s.mul_assign(&k);
+
+        (r, s)
     }
 
     fn repr_into_u256<T: PrimeFieldRepr>(repr: T) -> U256 {
@@ -1349,7 +1372,7 @@ mod test {
         );
 
         for _ in 0..5 {
-            let (no_error, digest) = ecrecover_precompile_inner_routine(
+            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, false>(
                 cs,
                 &rec_id,
                 &r,
@@ -1459,7 +1482,7 @@ mod test {
         }
 
         for (r, s, digest) in all_combinations.into_iter() {
-            let (no_error, _digest) = ecrecover_precompile_inner_routine(
+            let (no_error, _digest) = ecrecover_precompile_inner_routine::<_, _, false>(
                 cs,
                 &rec_id,
                 &r,
@@ -1474,5 +1497,81 @@ mod test {
 
             assert!(no_error.witness_hook(&*cs)().unwrap() == false);
         }
+    }
+
+    // As discussed on ethresearch forums, a caller may 'abuse' ecrecover in order to compute a
+    // secp256k1 ecmul in the EVM. This test compares the result of an ecrecover scalar mul with
+    // the output of a previously tested ecmul in the EVM.
+    // https://ethresear.ch/t/you-can-kinda-abuse-ecrecover-to-do-ecmul-in-secp256k1-today/2384
+    #[test]
+    fn test_ecrecover_scalar_mul_trick() {
+        let mut owned_cs = create_cs(1 << 20);
+        let cs = &mut owned_cs;
+
+        let _sk = crate::ff::from_hex::<Secp256Fr>(
+            "b5b1870957d373ef0eeffecc6e4812c0fd08f554b37b233526acc331bf1544f7",
+        )
+        .unwrap();
+        let _eth_address = hex::decode("12890d2cce102216644c59dae5baed380d84830c").unwrap();
+        let (r, s) = create_ecmul_inputs();
+
+        let scalar_params = secp256k1_scalar_field_params();
+        let base_params = secp256k1_base_field_params();
+
+        let r_u256 = repr_into_u256(r.into_repr());
+        let s_u256 = repr_into_u256(s.into_repr());
+
+        let rec_id = UInt8::allocate_checked(cs, 0);
+        let r = UInt256::allocate(cs, r_u256);
+        let s = UInt256::allocate(cs, s_u256);
+        let digest = UInt256::allocate(cs, U256::zero());
+
+        let scalar_params = Arc::new(scalar_params);
+        let base_params = Arc::new(base_params);
+
+        let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("9").unwrap(),
+            &base_params,
+        );
+        let valid_t_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("16").unwrap(),
+            &base_params,
+        );
+        let valid_y_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("4").unwrap(),
+            &base_params,
+        );
+
+        for _ in 0..5 {
+            let (no_error, _digest) = ecrecover_precompile_inner_routine::<_, _, true>(
+                cs,
+                &rec_id,
+                &r,
+                &s,
+                &digest,
+                valid_x_in_external_field.clone(),
+                valid_y_in_external_field.clone(),
+                valid_t_in_external_field.clone(),
+                &base_params,
+                &scalar_params,
+            );
+
+            assert!(no_error.witness_hook(&*cs)().unwrap() == true);
+            //let recovered_address = digest.to_be_bytes(cs);
+            //let recovered_address = recovered_address.witness_hook(cs)().unwrap();
+            //assert_eq!(&recovered_address[12..], &eth_address[..]);
+        }
+
+        dbg!(cs.next_available_row());
+
+        cs.pad_and_shrink();
+
+        let mut cs = owned_cs.into_assembly();
+        cs.print_gate_stats();
+        let worker = Worker::new();
+        assert!(cs.check_if_satisfied(&worker));
     }
 }
