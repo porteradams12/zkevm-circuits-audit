@@ -524,6 +524,7 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
     base_field_params: &Arc<Secp256BaseNNFieldParams>,
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
     message_hash_by_r_inv.enforce_reduced(cs);
+    let is_zero = message_hash_by_r_inv.is_zero(cs);
     let bytes = message_hash_by_r_inv
         .limbs
         .iter()
@@ -531,6 +532,8 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
         .flat_map(|el| unsafe { UInt16::from_variable_unchecked(*el).to_le_bytes(cs) })
         .collect::<Vec<UInt8<F>>>();
 
+    let zero_point =
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
     let mut acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
     let mut full_table_ids = vec![];
@@ -609,13 +612,13 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
             };
             acc = acc.add_mixed(cs, &mut (x, y));
         });
+    acc = Selectable::conditionally_select(cs, is_zero, &zero_point, &acc);
     acc
 }
 
 fn ecrecover_precompile_inner_routine<
     F: SmallField,
     CS: ConstraintSystem<F>,
-    P: PrimeField,
     const MESSAGE_HASH_CAN_BE_ZERO: bool,
 >(
     cs: &mut CS,
@@ -801,10 +804,12 @@ fn ecrecover_precompile_inner_routine<
         &scalar_field_params,
     );
 
-    //let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv, &base_field_params);
+    let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv, &base_field_params);
 
-    //let (mut q_acc, _) = hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
-    let mut q_acc = s_times_x; //.add_mixed(cs, &mut q_acc);
+    let (mut q_acc, is_infinity) =
+        hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
+    let q_acc_added = s_times_x.add_mixed(cs, &mut q_acc);
+    let mut q_acc = Selectable::conditionally_select(cs, is_infinity, &s_times_x, &q_acc_added);
 
     let ((q_x, q_y), is_infinity) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
     exception_flags.push(is_infinity);
@@ -839,7 +844,6 @@ pub fn ecrecover_function_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-    P: PrimeField,
     const MESSAGE_HASH_CAN_BE_ZERO: bool,
 >(
     cs: &mut CS,
@@ -999,7 +1003,7 @@ where
         let rec_id = v_as_u256.inner[0].to_le_bytes(cs)[0];
 
         let (success, written_value) =
-            ecrecover_precompile_inner_routine::<_, _, P, MESSAGE_HASH_CAN_BE_ZERO>(
+            ecrecover_precompile_inner_routine::<_, _, MESSAGE_HASH_CAN_BE_ZERO>(
                 cs,
                 &rec_id,
                 &r_as_u256,
@@ -1363,7 +1367,7 @@ mod test {
         );
 
         for _ in 0..5 {
-            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, Secp256Fr, false>(
+            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, false>(
                 cs,
                 &rec_id,
                 &r,
@@ -1473,7 +1477,7 @@ mod test {
         }
 
         for (r, s, digest) in all_combinations.into_iter() {
-            let (no_error, _digest) = ecrecover_precompile_inner_routine::<_, _, Secp256Fr, false>(
+            let (no_error, _digest) = ecrecover_precompile_inner_routine::<_, _, false>(
                 cs,
                 &rec_id,
                 &r,
@@ -1507,7 +1511,8 @@ mod test {
         let cs = &mut owned_cs;
 
         // NOTE: This is essentially reducing a base field to a scalar field element. Due to the
-        // nature of the recovery equation turning into `(r, y) * r * k * inv(r, P)`
+        // nature of the recovery equation turning into `(r, y) * r * k * inv(r, P)`, reducing r to
+        // a scalar value would yield the same result regardless.
         let r = crate::ff::from_hex::<Secp256Fr>(
             "00000000000000009b37e91445e92b1423354825aa33d841d83cacfdd895d316ae88dabc31736996",
         )
@@ -1551,7 +1556,7 @@ mod test {
         );
 
         for _ in 0..5 {
-            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, Secp256Fq, true>(
+            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, true>(
                 cs,
                 &rec_id,
                 &r,
