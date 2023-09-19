@@ -690,12 +690,16 @@ fn ecrecover_precompile_inner_routine<
         convert_uint256_to_field_element_masked(cs, &s, &scalar_field_params);
     exception_flags.push(s_is_zero);
 
-    // NB: although it is not strictly an exception we also assume that hash is never zero as field element
-    let (mut message_hash_fe, message_hash_is_zero) =
-        convert_uint256_to_field_element_masked(cs, &message_hash, &scalar_field_params);
-    if !MESSAGE_HASH_CAN_BE_ZERO {
-        exception_flags.push(message_hash_is_zero);
-    }
+    let (mut message_hash_fe, message_hash_is_zero) = if MESSAGE_HASH_CAN_BE_ZERO {
+        (
+            convert_uint256_to_field_element(cs, &message_hash, &scalar_field_params),
+            Boolean::allocated_constant(cs, false),
+        )
+    } else {
+        // NB: although it is not strictly an exception we also assume that hash is never zero as field element
+        convert_uint256_to_field_element_masked(cs, &message_hash, &scalar_field_params)
+    };
+    exception_flags.push(message_hash_is_zero);
 
     // curve equation is y^2 = x^3 + b
     // we compute t = r^3 + b and check if t is a quadratic residue or not.
@@ -1559,6 +1563,7 @@ mod test {
                 &scalar_params,
             );
 
+            // Zero digest shouldn't give us an error
             assert!(no_error.witness_hook(&*cs)().unwrap() == true);
             //let recovered_address = digest.to_be_bytes(cs);
             //let recovered_address = recovered_address.witness_hook(cs)().unwrap();
