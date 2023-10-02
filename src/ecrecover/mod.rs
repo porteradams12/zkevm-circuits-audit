@@ -56,6 +56,7 @@ use decomp_table::*;
 mod secp256k1;
 
 pub const MEMORY_QUERIES_PER_CALL: usize = 4;
+pub const ALLOW_ZERO_MESSAGE: bool = false;
 
 #[derive(Derivative, CSSelectable)]
 #[derivative(Clone, Debug)]
@@ -67,15 +68,6 @@ pub struct EcrecoverPrecompileCallParams<F: SmallField> {
 }
 
 impl<F: SmallField> EcrecoverPrecompileCallParams<F> {
-    // pub fn empty() -> Self {
-    //     Self {
-    //         input_page: UInt32::<E>::zero(),
-    //         input_offset: UInt32::<E>::zero(),
-    //         output_page: UInt32::<E>::zero(),
-    //         output_offset: UInt32::<E>::zero(),
-    //     }
-    // }
-
     pub fn from_encoding<CS: ConstraintSystem<F>>(_cs: &mut CS, encoding: UInt256<F>) -> Self {
         let input_offset = encoding.inner[0];
         let output_offset = encoding.inner[2];
@@ -844,7 +836,6 @@ pub fn ecrecover_function_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-    const MESSAGE_HASH_CAN_BE_ZERO: bool,
 >(
     cs: &mut CS,
     witness: EcrecoverCircuitInstanceWitness<F>,
@@ -1002,19 +993,18 @@ where
         let [message_hash_as_u256, v_as_u256, r_as_u256, s_as_u256] = read_values;
         let rec_id = v_as_u256.inner[0].to_le_bytes(cs)[0];
 
-        let (success, written_value) =
-            ecrecover_precompile_inner_routine::<_, _, MESSAGE_HASH_CAN_BE_ZERO>(
-                cs,
-                &rec_id,
-                &r_as_u256,
-                &s_as_u256,
-                &message_hash_as_u256,
-                valid_x_in_external_field.clone(),
-                valid_y_in_external_field.clone(),
-                valid_t_in_external_field.clone(),
-                &base_params,
-                &scalar_params,
-            );
+        let (success, written_value) = ecrecover_precompile_inner_routine::<_, _, ALLOW_ZERO_MESSAGE>(
+            cs,
+            &rec_id,
+            &r_as_u256,
+            &s_as_u256,
+            &message_hash_as_u256,
+            valid_x_in_external_field.clone(),
+            valid_y_in_external_field.clone(),
+            valid_t_in_external_field.clone(),
+            &base_params,
+            &scalar_params,
+        );
 
         let success_as_u32 = unsafe { UInt32::from_variable_unchecked(success.get_variable()) };
         let mut success_as_u256 = zero_u256;
