@@ -215,10 +215,12 @@ where
 
     structured_input.hidden_fsm_output.final_result_queue_state = final_sorted_queue.into_state();
 
+    // self-check
+    structured_input.hook_compare_witness(cs, &closed_form_input);
+
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
 
-    // dbg!(compact_form.create_witness());
     let input_commitment = commit_variable_length_encodable_item(cs, &compact_form, round_function);
     for el in input_commitment.iter() {
         let gate = PublicInputGate::new(el.get_variable());
