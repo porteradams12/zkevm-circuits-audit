@@ -451,6 +451,93 @@ pub fn create_prestate<
     let src0 = VMRegister::conditionally_select(cs, swap_operands, &selected_src1, &selected_src0);
     let src1 = VMRegister::conditionally_select(cs, swap_operands, &selected_src0, &selected_src1);
 
+    // Potentially erase fat pointer data is opcode shouldn't take pointers and we're not in kernel
+    // mode
+    let should_erase_src0 = {
+        use zkevm_opcode_defs::*;
+        let is_ret0 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::Ret(RetOpcode::Ok));
+        let is_ret1 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::Ret(RetOpcode::Revert));
+        let is_ret2 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::Ret(RetOpcode::Panic));
+        let is_ptr0 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::Ptr(PtrOpcode::Add));
+        let is_ptr1 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::Ptr(PtrOpcode::Pack));
+        let is_ptr2 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::Ptr(PtrOpcode::Shrink));
+        let is_ptr3 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::Ptr(PtrOpcode::Sub));
+        let is_uma0 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::UMA(UMAOpcode::AuxHeapRead));
+        let is_uma1 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::UMA(UMAOpcode::AuxHeapWrite));
+        let is_uma2 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::UMA(UMAOpcode::FatPointerRead));
+        let is_uma3 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::UMA(UMAOpcode::HeapRead));
+        let is_far_call0 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::FarCall(FarCallOpcode::Delegate));
+        let is_far_call1 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::FarCall(FarCallOpcode::Mimic));
+        let is_far_call2 = decoded_opcode
+            .properties_bits
+            .boolean_for_opcode(Opcode::FarCall(FarCallOpcode::Normal));
+
+        Boolean::multi_and(
+            cs,
+            &[
+                is_ret0,
+                is_ret1,
+                is_ret2,
+                is_ptr0,
+                is_ptr1,
+                is_ptr2,
+                is_ptr3,
+                is_uma0,
+                is_uma1,
+                is_uma2,
+                is_uma3,
+                is_far_call0,
+                is_far_call1,
+                is_far_call2,
+            ],
+        )
+    };
+    // We always erase fat pointer data from src1 if it exists
+    let should_erase_src1 = Boolean::allocated_constant(cs, true);
+
+    let mut erased_src0 = src0.clone();
+    let mut erased_src1 = src1.clone();
+
+    erased_src0.value.inner[1] = UInt32::zero(cs);
+    erased_src0.value.inner[2] = UInt32::zero(cs);
+    erased_src1.value.inner[1] = UInt32::zero(cs);
+    erased_src1.value.inner[2] = UInt32::zero(cs);
+
+    let erased_src0 = VMRegister::conditionally_select(cs, should_erase_src0, &erased_src0, &src0);
+    let erased_src1 = VMRegister::conditionally_select(cs, should_erase_src1, &erased_src1, &src1);
+
+    let erased_src0 = VMRegister::conditionally_select(cs, src0.is_pointer, &erased_src0, &src0);
+    let erased_src1 = VMRegister::conditionally_select(cs, src1.is_pointer, &erased_src1, &src1);
+
+    let src0 = VMRegister::conditionally_select(cs, is_kernel_mode, &src0, &erased_src0);
+    let src1 = VMRegister::conditionally_select(cs, is_kernel_mode, &src1, &erased_src1);
+
     let src0_view = RegisterInputView::from_input_value(cs, &src0);
     let src1_view = RegisterInputView::from_input_value(cs, &src1);
 
