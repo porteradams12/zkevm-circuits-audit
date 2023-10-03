@@ -1,7 +1,6 @@
 use super::TimestampedStorageLogRecord;
 use crate::base_structures::log_query::LogQuery;
 use crate::ethereum_types::{Address, U256};
-use crate::ethereum_types::{Address, U256};
 use boojum::cs::gates::{assert_no_placeholder_variables, assert_no_placeholders};
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::field::goldilocks::GoldilocksField;
