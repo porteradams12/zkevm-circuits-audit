@@ -451,7 +451,7 @@ pub fn create_prestate<
     let src0 = VMRegister::conditionally_select(cs, swap_operands, &selected_src1, &selected_src0);
     let src1 = VMRegister::conditionally_select(cs, swap_operands, &selected_src0, &selected_src1);
 
-    // Potentially erase fat pointer data is opcode shouldn't take pointers and we're not in kernel
+    // Potentially erase fat pointer data if opcode shouldn't take pointers and we're not in kernel
     // mode
     let should_erase_src0 = {
         use zkevm_opcode_defs::*;
