@@ -130,6 +130,12 @@ where
             .tail,
         round_function,
     );
+    use boojum::gadgets::traits::witnessable::WitnessHookable;
+    for challenge in challenges {
+        for c in challenge {
+            println!("CIRCUIT CHALLENGES {:?}", c.witness_hook(cs)().unwrap());
+        }
+    }
 
     let one = Num::allocated_constant(cs, F::ONE);
     let initial_lhs = Num::parallel_select(
