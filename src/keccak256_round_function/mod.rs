@@ -69,7 +69,7 @@ impl<F: SmallField> CSPlaceholder<F> for Keccak256PrecompileCallParams<F> {
 }
 
 impl<F: SmallField> Keccak256PrecompileCallParams<F> {
-    // from PrecompileCallInnerABI
+    // from PrecompileCallABI
     pub fn from_encoding<CS: ConstraintSystem<F>>(cs: &mut CS, encoding: UInt256<F>) -> Self {
         let input_memory_byte_offset = encoding.inner[0];
         let input_memory_byte_length = encoding.inner[1];
@@ -715,7 +715,7 @@ mod test {
     use boojum::gadgets::tables::*;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;
-    use zkevm_opcode_defs::PrecompileCallInnerABI;
+    use zkevm_opcode_defs::PrecompileCallABI;
 
     use super::*;
 
@@ -877,7 +877,7 @@ mod test {
         let cs = &mut owned_cs;
         let mut memory_queue = MemoryQueue::<F, R>::empty(cs);
 
-        let precompile_abi = PrecompileCallInnerABI {
+        let precompile_abi = PrecompileCallABI {
             input_memory_offset: unalignement as u32,
             input_memory_length: length as u32,
             output_memory_offset: 0,
