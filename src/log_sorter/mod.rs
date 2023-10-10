@@ -6,6 +6,7 @@ use crate::base_structures::vm_state::*;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::fsm_input_output::{commit_variable_length_encodable_item, ClosedFormInputCompactForm};
 use crate::storage_validity_by_grand_product::unpacked_long_comparison;
+use crate::utils::accumulate_grand_products;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
@@ -284,52 +285,30 @@ where
         let should_pop = original_is_empty.negated(cs);
         let is_trivial = original_is_empty;
 
-        let (_, original_encoding) = unsorted_queue.pop_front(cs, should_pop);
+        let (unsorted_item, original_encoding) = unsorted_queue.pop_front(cs, should_pop);
         let (sorted_item, sorted_encoding) = intermediate_sorted_queue.pop_front(cs, should_pop);
 
-        // we also ensure that items are "write" unless it's a padding
-        sorted_item
+        // we also ensure that original items are "write" unless it's a padding
+        unsorted_item
             .rw_flag
             .conditionally_enforce_true(cs, should_pop);
 
-        assert_eq!(original_encoding.len(), sorted_encoding.len());
-        assert_eq!(lhs.len(), rhs.len());
-        for ((challenges, lhs), rhs) in fs_challenges.iter().zip(lhs.iter_mut()).zip(rhs.iter_mut())
-        {
-            // additive parts
-            let mut lhs_contribution = challenges[LOG_QUERY_PACKED_WIDTH];
-            let mut rhs_contribution = challenges[LOG_QUERY_PACKED_WIDTH];
+        accumulate_grand_products::<
+            F,
+            CS,
+            LOG_QUERY_PACKED_WIDTH,
+            { LOG_QUERY_PACKED_WIDTH + 1 },
+            DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
+        >(
+            cs,
+            &mut lhs,
+            &mut rhs,
+            &fs_challenges,
+            &original_encoding,
+            &sorted_encoding,
+            should_pop,
+        );
 
-            for ((original_el, sorted_el), challenge) in original_encoding
-                .iter()
-                .zip(sorted_encoding.iter())
-                .zip(challenges.iter())
-            {
-                lhs_contribution = Num::fma(
-                    cs,
-                    &Num::from_variable(*original_el),
-                    challenge,
-                    &F::ONE,
-                    &lhs_contribution,
-                    &F::ONE,
-                );
-
-                rhs_contribution = Num::fma(
-                    cs,
-                    &Num::from_variable(*sorted_el),
-                    challenge,
-                    &F::ONE,
-                    &rhs_contribution,
-                    &F::ONE,
-                );
-            }
-
-            let new_lhs = lhs.mul(cs, &lhs_contribution);
-            let new_rhs = rhs.mul(cs, &rhs_contribution);
-
-            *lhs = Num::conditionally_select(cs, should_pop, &new_lhs, &lhs);
-            *rhs = Num::conditionally_select(cs, should_pop, &new_rhs, &rhs);
-        }
         // now ensure sorting
         {
             // sanity check - all such logs are "write into the sky"
