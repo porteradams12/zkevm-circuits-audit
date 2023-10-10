@@ -115,7 +115,7 @@ where
         CS,
         R,
         QUEUE_STATE_WIDTH,
-        { MEMORY_QUERY_PACKED_WIDTH + 1 },
+        { LOG_QUERY_PACKED_WIDTH + 1 },
         DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
     >(
         cs,
@@ -229,7 +229,7 @@ where
 
     input_commitment
 }
-use crate::base_structures::memory_query::MEMORY_QUERY_PACKED_WIDTH;
+
 pub fn repack_and_prove_events_rollbacks_inner<
     F: SmallField,
     CS: ConstraintSystem<F>,
@@ -242,7 +242,7 @@ pub fn repack_and_prove_events_rollbacks_inner<
     intermediate_sorted_queue: &mut StorageLogQueue<F, R>,
     result_queue: &mut StorageLogQueue<F, R>,
     is_start: Boolean<F>,
-    fs_challenges: [[Num<F>; MEMORY_QUERY_PACKED_WIDTH + 1];
+    fs_challenges: [[Num<F>; LOG_QUERY_PACKED_WIDTH + 1];
         DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS],
     mut previous_key: UInt32<F>,
     mut previous_item: LogQuery<F>,
@@ -297,8 +297,8 @@ where
         for ((challenges, lhs), rhs) in fs_challenges.iter().zip(lhs.iter_mut()).zip(rhs.iter_mut())
         {
             // additive parts
-            let mut lhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
-            let mut rhs_contribution = challenges[MEMORY_QUERY_PACKED_WIDTH];
+            let mut lhs_contribution = challenges[LOG_QUERY_PACKED_WIDTH];
+            let mut rhs_contribution = challenges[LOG_QUERY_PACKED_WIDTH];
 
             for ((original_el, sorted_el), challenge) in original_encoding
                 .iter()
@@ -624,7 +624,7 @@ mod tests {
             _,
             Poseidon2Goldilocks,
             QUEUE_STATE_WIDTH,
-            { MEMORY_QUERY_PACKED_WIDTH + 1 },
+            { LOG_QUERY_PACKED_WIDTH + 1 },
             DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
         >(
             cs,
