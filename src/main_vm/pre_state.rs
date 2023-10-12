@@ -448,8 +448,10 @@ pub fn create_prestate<
     let selected_src0 = src0;
     let selected_src1 = src1_register;
 
-    let src0 = VMRegister::conditionally_select(cs, swap_operands, &selected_src1, &selected_src0);
-    let src1 = VMRegister::conditionally_select(cs, swap_operands, &selected_src0, &selected_src1);
+    let mut src0 =
+        VMRegister::conditionally_select(cs, swap_operands, &selected_src1, &selected_src0);
+    let mut src1 =
+        VMRegister::conditionally_select(cs, swap_operands, &selected_src0, &selected_src1);
 
     // Potentially erase fat pointer data if opcode shouldn't take pointers and we're not in kernel
     // mode
@@ -501,6 +503,7 @@ pub fn create_prestate<
         Boolean::multi_and(
             cs,
             &[
+                src0.is_pointer,
                 is_ret0,
                 is_ret1,
                 is_ret2,
@@ -515,28 +518,15 @@ pub fn create_prestate<
                 is_far_call0,
                 is_far_call1,
                 is_far_call2,
+                is_kernel_mode,
             ],
         )
     };
     // We erase fat pointer data from src1 if it exists in non-kernel mode
-    let should_erase_src1 = is_kernel_mode;
+    let should_erase_src1 = Boolean::multi_and(cs, &[src1.is_pointer, is_kernel_mode]);
 
-    let mut erased_src0 = src0.clone();
-    let mut erased_src1 = src1.clone();
-
-    erased_src0.value.inner[1] = UInt32::zero(cs);
-    erased_src0.value.inner[2] = UInt32::zero(cs);
-    erased_src1.value.inner[1] = UInt32::zero(cs);
-    erased_src1.value.inner[2] = UInt32::zero(cs);
-
-    let erased_src0 = VMRegister::conditionally_select(cs, should_erase_src0, &erased_src0, &src0);
-    let erased_src1 = VMRegister::conditionally_select(cs, should_erase_src1, &erased_src1, &src1);
-
-    let erased_src0 = VMRegister::conditionally_select(cs, src0.is_pointer, &erased_src0, &src0);
-    let erased_src1 = VMRegister::conditionally_select(cs, src1.is_pointer, &erased_src1, &src1);
-
-    let src0 = VMRegister::conditionally_select(cs, is_kernel_mode, &src0, &erased_src0);
-    let src1 = VMRegister::conditionally_select(cs, is_kernel_mode, &src1, &erased_src1);
+    src0.conditionally_erase(cs, should_erase_src0);
+    src1.conditionally_erase(cs, should_erase_src1);
 
     let src0_view = RegisterInputView::from_input_value(cs, &src0);
     let src1_view = RegisterInputView::from_input_value(cs, &src1);
