@@ -518,8 +518,8 @@ pub fn create_prestate<
             ],
         )
     };
-    // We always erase fat pointer data from src1 if it exists
-    let should_erase_src1 = Boolean::allocated_constant(cs, true);
+    // We erase fat pointer data from src1 if it exists in non-kernel mode
+    let should_erase_src1 = is_kernel_mode;
 
     let mut erased_src0 = src0.clone();
     let mut erased_src1 = src1.clone();
