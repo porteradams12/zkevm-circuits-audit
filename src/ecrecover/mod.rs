@@ -48,12 +48,12 @@ use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 
 pub mod input;
 pub use self::input::*;
-mod naf_abs_div2_table;
+pub mod naf_abs_div2_table;
 use naf_abs_div2_table::*;
-mod decomp_table;
+pub mod decomp_table;
 use decomp_table::*;
 
-mod secp256k1;
+pub mod secp256k1;
 
 pub const MEMORY_QUERIES_PER_CALL: usize = 4;
 pub const ALLOW_ZERO_MESSAGE: bool = false;
