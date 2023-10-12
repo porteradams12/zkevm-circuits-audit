@@ -457,70 +457,22 @@ pub fn create_prestate<
     // mode
     let should_erase_src0 = {
         use zkevm_opcode_defs::*;
-        let is_ret0 = decoded_opcode
+        let is_ret = decoded_opcode
             .properties_bits
             .boolean_for_opcode(Opcode::Ret(RetOpcode::Ok));
-        let is_ret1 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::Ret(RetOpcode::Revert));
-        let is_ret2 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::Ret(RetOpcode::Panic));
-        let is_ptr0 = decoded_opcode
+        let is_ptr = decoded_opcode
             .properties_bits
             .boolean_for_opcode(Opcode::Ptr(PtrOpcode::Add));
-        let is_ptr1 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::Ptr(PtrOpcode::Pack));
-        let is_ptr2 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::Ptr(PtrOpcode::Shrink));
-        let is_ptr3 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::Ptr(PtrOpcode::Sub));
-        let is_uma0 = decoded_opcode
+        let is_uma = decoded_opcode
             .properties_bits
             .boolean_for_opcode(Opcode::UMA(UMAOpcode::AuxHeapRead));
-        let is_uma1 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::UMA(UMAOpcode::AuxHeapWrite));
-        let is_uma2 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::UMA(UMAOpcode::FatPointerRead));
-        let is_uma3 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::UMA(UMAOpcode::HeapRead));
-        let is_far_call0 = decoded_opcode
+        let is_far_call = decoded_opcode
             .properties_bits
             .boolean_for_opcode(Opcode::FarCall(FarCallOpcode::Delegate));
-        let is_far_call1 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::FarCall(FarCallOpcode::Mimic));
-        let is_far_call2 = decoded_opcode
-            .properties_bits
-            .boolean_for_opcode(Opcode::FarCall(FarCallOpcode::Normal));
 
-        Boolean::multi_and(
-            cs,
-            &[
-                src0.is_pointer,
-                is_ret0,
-                is_ret1,
-                is_ret2,
-                is_ptr0,
-                is_ptr1,
-                is_ptr2,
-                is_ptr3,
-                is_uma0,
-                is_uma1,
-                is_uma2,
-                is_uma3,
-                is_far_call0,
-                is_far_call1,
-                is_far_call2,
-                is_kernel_mode,
-            ],
-        )
+        let should_erase =
+            Boolean::multi_or(cs, &[is_ret, is_ptr, is_uma, is_far_call]).negated(cs);
+        Boolean::multi_and(cs, &[src0.is_pointer, should_erase, is_kernel_mode])
     };
     // We erase fat pointer data from src1 if it exists in non-kernel mode
     let should_erase_src1 = Boolean::multi_and(cs, &[src1.is_pointer, is_kernel_mode]);
