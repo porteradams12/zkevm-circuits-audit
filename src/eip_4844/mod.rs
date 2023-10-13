@@ -65,24 +65,16 @@ fn convert_keccak_digest_to_field_element<
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
     let mut limbs = [zero_var; N];
-    for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()) {
+    for (dst, src) in limbs.iter_mut().rev().zip(input.array_chunks::<2>()) {
         *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
 
-    let mut max_value = U1024::from_word(1u64);
-    max_value = max_value.shl_vartime(256);
-    max_value = max_value.saturating_sub(&U1024::from_word(1u64));
-
-    let (overflows, rem) = max_value.div_rem(&params.modulus_u1024);
-    let mut max_moduluses = overflows.as_words()[0] as u32;
-    if rem.is_zero().unwrap_u8() != 1 {
-        max_moduluses += 1;
-    }
-
+    // Note: we do not need to check for overflows because the max value is 2^248 which is less
+    // than the field modulus.
     NonNativeFieldOverU16 {
         limbs: limbs,
         non_zero_limbs: 16,
-        tracker: OverflowTracker { max_moduluses },
+        tracker: OverflowTracker { max_moduluses: 0 },
         form: RepresentationForm::Normalized,
         params: params.clone(),
         _marker: std::marker::PhantomData,
@@ -110,20 +102,12 @@ fn convert_blob_chunk_to_field_element<
     // we need to manually set the last byte in limbs
     limbs[15] = input[30].get_variable();
 
-    let mut max_value = U1024::from_word(1u64);
-    max_value = max_value.shl_vartime(256);
-    max_value = max_value.saturating_sub(&U1024::from_word(1u64));
-
-    let (overflows, rem) = max_value.div_rem(&params.modulus_u1024);
-    let mut max_moduluses = overflows.as_words()[0] as u32;
-    if rem.is_zero().unwrap_u8() != 1 {
-        max_moduluses += 1;
-    }
-
+    // Note: we do not need to check for overflows because the max value is 2^248 which is less
+    // than the field modulus.
     NonNativeFieldOverU16 {
         limbs: limbs,
         non_zero_limbs: 16,
-        tracker: OverflowTracker { max_moduluses },
+        tracker: OverflowTracker { max_moduluses: 0 },
         form: RepresentationForm::Normalized,
         params: params.clone(),
         _marker: std::marker::PhantomData,
@@ -151,9 +135,11 @@ where
     assert!(limit <= 4096); // max blob length eip4844
 
     let EIP4844CircuitInstanceWitness {
-        closed_form_input,
+        versioned_hash,
         blob,
     } = witness;
+
+    let versioned_hash = <[UInt8<F>; 32]>::allocate(cs, versioned_hash);
 
     let mut structured_input =
         EIP4844InputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
@@ -165,24 +151,15 @@ where
     // only 1 instance of the circuit here for now
     Boolean::enforce_equal(cs, &start_flag, &boolean_true);
 
-    let hash = structured_input.observable_input.hash;
-    let kzg_x = structured_input.observable_input.kzg_commitment_x;
-    let kzg_y = structured_input.observable_input.kzg_commitment_y;
-    let input_bytes = hash
-        .into_iter()
-        .chain(kzg_x)
-        .chain(kzg_y)
-        .collect::<Vec<UInt8<F>>>();
-
     // create a field element out of the hash of the input hash and the kzg commitment
-    let challenge_hash = boojum::gadgets::keccak256::keccak256(cs, &input_bytes);
+    let challenge_hash = boojum::gadgets::keccak256::keccak256(cs, &versioned_hash);
     // truncate hash to 128 bits
     // NOTE: it is safe to draw a random scalar at max 128 bits because of the schwartz zippel
     // lemma
     let mut truncated_hash = [UInt8::zero(cs); 16];
     truncated_hash.copy_from_slice(&challenge_hash[..16]);
     let params = Arc::new(Bls12_381ScalarNNFieldParams::create());
-    let mut z = convert_keccak_digest_to_field_element(cs, truncated_hash, &params);
+    let mut evaluation_point = convert_keccak_digest_to_field_element(cs, truncated_hash, &params);
 
     //
     // Recompute the hash and check equality, and form blob polynomial simultaneously.
@@ -212,55 +189,29 @@ where
     use boojum::gadgets::keccak256::KECCAK_RATE_BYTES;
 
     let no_work = Boolean::allocated_constant(cs, limit == 0);
-    let mut y = Bls12_381ScalarNNField::<F>::allocated_constant(cs, Bls12_381Fr::zero(), &params);
+    let mut opening_value =
+        Bls12_381ScalarNNField::<F>::allocated_constant(cs, Bls12_381Fr::zero(), &params);
 
     // fill up the buffer. since eip4844 blobs are always same size we can do this
     // without needing to account for variable lengths
-    if limit != 0 {
-        for cycle in 0..(limit - 1) {
-            // polynomial evaluations via horners rule
-            let el = blob[cycle];
-            let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
-            // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
-            // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
-            // since the blob is considered to be a polynomial in lagrange form, we essentially
-            // 'work backwards' and start with the highest degree coefficients first. so we can
-            // add and multiply and at the last step we just add the coefficient.
-            y = y.add(cs, &mut fe);
-            y = y.mul(cs, &mut z);
-
-            assert!(buffer.len() < 136);
-
-            buffer.extend(el.el);
-
-            // hash
-            if buffer.len() >= 136 {
-                let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
-                let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
-                let carry_on = buffer[136..].to_vec();
-
-                buffer = carry_on;
-
-                // absorb if we are not done yet
-                keccak256_conditionally_absorb_and_run_permutation(
-                    cs,
-                    boolean_true,
-                    &mut keccak_accumulator_state,
-                    &buffer_for_round,
-                );
-            }
-
-            assert!(buffer.len() < 136);
-        }
-
-        // last round
-        let el = blob[limit - 1];
+    assert!(limit != 0);
+    for cycle in 0..(limit - 1) {
+        // polynomial evaluations via horners rule
+        let el = blob[cycle];
         let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
-        y = y.add(cs, &mut fe); // as previously mentioned, last step only needs addition.
+        // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
+        // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
+        // since the blob is considered to be a polynomial in lagrange form, we essentially
+        // 'work backwards' and start with the highest degree coefficients first. so we can
+        // add and multiply and at the last step we just add the coefficient.
+        opening_value = opening_value.add(cs, &mut fe);
+        opening_value = opening_value.mul(cs, &mut evaluation_point);
+
+        assert!(buffer.len() < 136);
 
         buffer.extend(el.el);
 
-        // ensure circuit still matches up to hash if adding the new element puts us over 136 bytes
+        // hash
         if buffer.len() >= 136 {
             let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
             let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
@@ -277,29 +228,55 @@ where
             );
         }
 
-        let mut last_round_buffer = [zero_u8; 136];
-        let tail_len = buffer.len();
-        last_round_buffer[..tail_len].copy_from_slice(&buffer);
+        assert!(buffer.len() < 136);
+    }
 
-        if tail_len == KECCAK_RATE_BYTES - 1 {
-            // unreachable, but we set it for completeness
-            last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x81);
-        } else {
-            last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
-            last_round_buffer[KECCAK_RATE_BYTES - 1] = UInt8::allocated_constant(cs, 0x80);
-        }
+    // last round
+    let el = blob[limit - 1];
+    let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
+    opening_value = opening_value.add(cs, &mut fe); // as previously mentioned, last step only needs addition.
 
-        let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
+    buffer.extend(el.el);
 
+    // ensure circuit still matches up to hash if adding the new element puts us over 136 bytes
+    if buffer.len() >= 136 {
+        let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
+        let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
+        let carry_on = buffer[136..].to_vec();
+
+        buffer = carry_on;
+
+        // absorb if we are not done yet
         keccak256_conditionally_absorb_and_run_permutation(
             cs,
             boolean_true,
             &mut keccak_accumulator_state,
-            &last_round_buffer,
+            &buffer_for_round,
         );
-
-        y.normalize(cs);
     }
+
+    let mut last_round_buffer = [zero_u8; 136];
+    let tail_len = buffer.len();
+    last_round_buffer[..tail_len].copy_from_slice(&buffer);
+
+    if tail_len == KECCAK_RATE_BYTES - 1 {
+        // unreachable, but we set it for completeness
+        last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x81);
+    } else {
+        last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
+        last_round_buffer[KECCAK_RATE_BYTES - 1] = UInt8::allocated_constant(cs, 0x80);
+    }
+
+    let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
+
+    keccak256_conditionally_absorb_and_run_permutation(
+        cs,
+        boolean_true,
+        &mut keccak_accumulator_state,
+        &last_round_buffer,
+    );
+
+    opening_value.normalize(cs);
 
     structured_input.completion_flag = boolean_true;
 
@@ -321,32 +298,31 @@ where
         <[UInt8<F>; 32]>::conditionally_select(cs, no_work, &empty_hash, &keccak256_hash);
 
     // hash equality check
-    for (input_byte, hash_byte) in hash.iter().zip(keccak256_hash) {
+    for (input_byte, hash_byte) in versioned_hash.iter().zip(keccak256_hash) {
         let is_equal = UInt8::equals(cs, input_byte, &hash_byte);
         Boolean::enforce_equal(cs, &is_equal, &boolean_true);
     }
 
     let mut observable_output = EIP4844OutputData::placeholder(cs);
-    observable_output.z = unsafe {
+    observable_output.evaluation_point = unsafe {
         let mut arr = [UInt16::allocate_constant(cs, 0); NUM_WORDS_FR];
-        z.limbs
+        evaluation_point
+            .limbs
             .iter()
             .enumerate()
             .for_each(|(i, v)| arr[i] = UInt16::from_variable_unchecked(*v));
         arr
     };
-    observable_output.y = unsafe {
+    observable_output.opening_value = unsafe {
         let mut arr = [UInt16::allocate_constant(cs, 0); NUM_WORDS_FR];
-        y.limbs
+        opening_value
+            .limbs
             .iter()
             .enumerate()
             .for_each(|(i, v)| arr[i] = UInt16::from_variable_unchecked(*v));
         arr
     };
     structured_input.observable_output = observable_output;
-
-    // self-check
-    structured_input.hook_compare_witness(cs, &closed_form_input);
 
     use crate::fsm_input_output::commit_variable_length_encodable_item;
     use crate::fsm_input_output::ClosedFormInputCompactForm;

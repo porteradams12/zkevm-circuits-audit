@@ -158,53 +158,29 @@ impl<F: SmallField> CSAllocatableExt<F> for BlobChunk<F> {
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
-pub struct EIP4844InputData<F: SmallField> {
-    pub hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
-    pub kzg_commitment_x: [UInt8<F>; NUM_WORDS_FQ],
-    pub kzg_commitment_y: [UInt8<F>; NUM_WORDS_FQ],
-}
-
-impl<F: SmallField> CSPlaceholder<F> for EIP4844InputData<F> {
-    fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
-        Self {
-            hash: [UInt8::<F>::placeholder(cs); keccak256::KECCAK256_DIGEST_SIZE],
-            kzg_commitment_x: [UInt8::<F>::placeholder(cs); NUM_WORDS_FQ],
-            kzg_commitment_y: [UInt8::<F>::placeholder(cs); NUM_WORDS_FQ],
-        }
-    }
-}
-
-#[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
-#[derivative(Clone, Copy, Debug)]
-#[DerivePrettyComparison("true")]
 pub struct EIP4844OutputData<F: SmallField> {
-    pub z: [UInt16<F>; NUM_WORDS_FR],
-    pub y: [UInt16<F>; NUM_WORDS_FR],
+    pub output_hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
 }
 
 impl<F: SmallField> CSPlaceholder<F> for EIP4844OutputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            z: [UInt16::<F>::allocate_constant(cs, 0); NUM_WORDS_FR],
-            y: [UInt16::<F>::allocate_constant(cs, 0); NUM_WORDS_FR],
+            evaluation_point: [UInt16::<F>::allocate_constant(cs, 0); NUM_WORDS_FR],
+            opening_value: [UInt16::<F>::allocate_constant(cs, 0); NUM_WORDS_FR],
         }
     }
 }
 
 pub type EIP4844InputOutput<F> =
-    crate::fsm_input_output::ClosedFormInput<F, (), EIP4844InputData<F>, EIP4844OutputData<F>>;
+    crate::fsm_input_output::ClosedFormInput<F, (), (), EIP4844OutputData<F>>;
 
-pub type EIP4844InputOutputWitness<F> = crate::fsm_input_output::ClosedFormInputWitness<
-    F,
-    (),
-    EIP4844InputData<F>,
-    EIP4844OutputData<F>,
->;
+pub type EIP4844InputOutputWitness<F> =
+    crate::fsm_input_output::ClosedFormInputWitness<F, (), (), EIP4844OutputData<F>>;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
-    pub closed_form_input: EIP4844InputOutputWitness<F>,
-    pub blob: Vec<BlobChunk<F>>,
+    pub versioned_hash: [u8; 32],
+    pub blob: Vec<BlobChunkWitness<F>>,
 }
