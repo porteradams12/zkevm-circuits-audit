@@ -23,13 +23,7 @@ use derivative::*;
 use std::collections::VecDeque;
 
 #[derive(
-    Derivative,
-    CSAllocatable,
-    CSSelectable,
-    CSVarLengthEncodable,
-    WitnessHookable,
-    serde::Serialize,
-    serde::Deserialize,
+    Derivative, CSAllocatable, CSSelectable, WitnessHookable, serde::Serialize, serde::Deserialize,
 )]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
@@ -37,127 +31,6 @@ use std::collections::VecDeque;
 pub struct BlobChunk<F: SmallField> {
     pub el: [UInt8<F>; 31],
 }
-
-impl<F: SmallField> CircuitEncodable<F, 5> for BlobChunk<F> {
-    fn encode<CS: ConstraintSystem<F>>(&self, cs: &mut CS) -> [Variable; 5] {
-        debug_assert!(F::CAPACITY_BITS >= 56);
-
-        let v0 = Num::linear_combination(
-            cs,
-            &[
-                (self.el[0].get_variable(), F::ONE),
-                (self.el[1].get_variable(), F::from_u64_unchecked(1u64 << 8)),
-                (self.el[2].get_variable(), F::from_u64_unchecked(1u64 << 16)),
-                (self.el[3].get_variable(), F::from_u64_unchecked(1u64 << 24)),
-                (self.el[4].get_variable(), F::from_u64_unchecked(1u64 << 32)),
-                (self.el[5].get_variable(), F::from_u64_unchecked(1u64 << 40)),
-                (self.el[6].get_variable(), F::from_u64_unchecked(1u64 << 48)),
-            ],
-        )
-        .get_variable();
-
-        let v1 = Num::linear_combination(
-            cs,
-            &[
-                (self.el[7].get_variable(), F::ONE),
-                (self.el[8].get_variable(), F::from_u64_unchecked(1u64 << 8)),
-                (self.el[9].get_variable(), F::from_u64_unchecked(1u64 << 16)),
-                (
-                    self.el[10].get_variable(),
-                    F::from_u64_unchecked(1u64 << 24),
-                ),
-                (
-                    self.el[11].get_variable(),
-                    F::from_u64_unchecked(1u64 << 32),
-                ),
-                (
-                    self.el[12].get_variable(),
-                    F::from_u64_unchecked(1u64 << 40),
-                ),
-                (
-                    self.el[13].get_variable(),
-                    F::from_u64_unchecked(1u64 << 48),
-                ),
-            ],
-        )
-        .get_variable();
-
-        let v2 = Num::linear_combination(
-            cs,
-            &[
-                (self.el[14].get_variable(), F::ONE),
-                (self.el[15].get_variable(), F::from_u64_unchecked(1u64 << 8)),
-                (
-                    self.el[16].get_variable(),
-                    F::from_u64_unchecked(1u64 << 16),
-                ),
-                (
-                    self.el[17].get_variable(),
-                    F::from_u64_unchecked(1u64 << 24),
-                ),
-                (
-                    self.el[18].get_variable(),
-                    F::from_u64_unchecked(1u64 << 32),
-                ),
-                (
-                    self.el[19].get_variable(),
-                    F::from_u64_unchecked(1u64 << 40),
-                ),
-                (
-                    self.el[20].get_variable(),
-                    F::from_u64_unchecked(1u64 << 48),
-                ),
-            ],
-        )
-        .get_variable();
-
-        let v3 = Num::linear_combination(
-            cs,
-            &[
-                (self.el[21].get_variable(), F::ONE),
-                (self.el[22].get_variable(), F::from_u64_unchecked(1u64 << 8)),
-                (
-                    self.el[23].get_variable(),
-                    F::from_u64_unchecked(1u64 << 16),
-                ),
-                (
-                    self.el[24].get_variable(),
-                    F::from_u64_unchecked(1u64 << 24),
-                ),
-                (
-                    self.el[25].get_variable(),
-                    F::from_u64_unchecked(1u64 << 32),
-                ),
-                (
-                    self.el[26].get_variable(),
-                    F::from_u64_unchecked(1u64 << 40),
-                ),
-                (
-                    self.el[27].get_variable(),
-                    F::from_u64_unchecked(1u64 << 48),
-                ),
-            ],
-        )
-        .get_variable();
-
-        let v4 = Num::linear_combination(
-            cs,
-            &[
-                (self.el[28].get_variable(), F::ONE),
-                (self.el[29].get_variable(), F::from_u64_unchecked(1u64 << 8)),
-                (
-                    self.el[30].get_variable(),
-                    F::from_u64_unchecked(1u64 << 16),
-                ),
-            ],
-        )
-        .get_variable();
-
-        [v0, v1, v2, v3, v4]
-    }
-}
-
-impl<F: SmallField> CircuitEncodableExt<F, 5> for BlobChunk<F> {}
 
 impl<F: SmallField> CSAllocatableExt<F> for BlobChunk<F> {
     const INTERNAL_STRUCT_LEN: usize = 31;
