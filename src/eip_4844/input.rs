@@ -165,8 +165,7 @@ pub struct EIP4844OutputData<F: SmallField> {
 impl<F: SmallField> CSPlaceholder<F> for EIP4844OutputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
-            evaluation_point: [UInt16::<F>::allocate_constant(cs, 0); NUM_WORDS_FR],
-            opening_value: [UInt16::<F>::allocate_constant(cs, 0); NUM_WORDS_FR],
+            output_hash: [UInt8::<F>::allocate_constant(cs, 0); keccak256::KECCAK256_DIGEST_SIZE],
         }
     }
 }
@@ -182,5 +181,6 @@ pub type EIP4844InputOutputWitness<F> =
 #[serde(bound = "")]
 pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
     pub versioned_hash: [u8; 32],
+    pub blob_hash: [u8; 32],
     pub blob: Vec<BlobChunkWitness<F>>,
 }

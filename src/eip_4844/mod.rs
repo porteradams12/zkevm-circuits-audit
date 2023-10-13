@@ -136,13 +136,28 @@ where
 
     let EIP4844CircuitInstanceWitness {
         versioned_hash,
+        blob_hash,
         blob,
     } = witness;
 
     let versioned_hash = <[UInt8<F>; 32]>::allocate(cs, versioned_hash);
+    let blob_hash = <[UInt8<F>; 32]>::allocate(cs, blob_hash);
+    let blob = blob
+        .into_iter()
+        .map(|chunk| BlobChunk::<F>::allocate(cs, chunk))
+        .collect::<Vec<BlobChunk<F>>>();
 
-    let mut structured_input =
-        EIP4844InputOutput::alloc_ignoring_outputs(cs, closed_form_input.clone());
+    let closed_form_input = EIP4844InputOutputWitness::<F> {
+        start_flag: true,
+        completion_flag: true,
+        observable_input: (),
+        observable_output: EIP4844OutputDataWitness {
+            output_hash: [0u8; keccak256::KECCAK256_DIGEST_SIZE],
+        },
+        hidden_fsm_input: (),
+        hidden_fsm_output: (),
+    };
+    let mut structured_input = EIP4844InputOutput::alloc_ignoring_outputs(cs, closed_form_input);
     let start_flag = structured_input.start_flag;
 
     let zero_u8: UInt8<F> = UInt8::zero(cs);
@@ -152,7 +167,14 @@ where
     Boolean::enforce_equal(cs, &start_flag, &boolean_true);
 
     // create a field element out of the hash of the input hash and the kzg commitment
-    let challenge_hash = boojum::gadgets::keccak256::keccak256(cs, &versioned_hash);
+    let challenge_hash = boojum::gadgets::keccak256::keccak256(
+        cs,
+        blob_hash
+            .into_iter()
+            .chain(versioned_hash.into_iter())
+            .collect::<Vec<UInt8<F>>>()
+            .as_slice(),
+    );
     // truncate hash to 128 bits
     // NOTE: it is safe to draw a random scalar at max 128 bits because of the schwartz zippel
     // lemma
@@ -303,25 +325,38 @@ where
         Boolean::enforce_equal(cs, &is_equal, &boolean_true);
     }
 
+    use boojum::gadgets::keccak256::keccak256;
+    let evaluation_bytes = evaluation_point
+        .limbs
+        .iter()
+        .rev()
+        .flat_map(|v| unsafe {
+            let n = UInt16::from_variable_unchecked(*v).to_be_bytes(cs);
+            [n[0], n[1]]
+        })
+        .collect::<Vec<UInt8<F>>>();
+    let opening_bytes = opening_value
+        .limbs
+        .iter()
+        .rev()
+        .flat_map(|v| unsafe {
+            let n = UInt16::from_variable_unchecked(*v).to_be_bytes(cs);
+            [n[0], n[1]]
+        })
+        .collect::<Vec<UInt8<F>>>();
+
+    let output_hash = keccak256(
+        cs,
+        versioned_hash
+            .into_iter()
+            .chain(evaluation_bytes.into_iter())
+            .chain(opening_bytes.into_iter())
+            .collect::<Vec<UInt8<F>>>()
+            .as_slice(),
+    );
+
     let mut observable_output = EIP4844OutputData::placeholder(cs);
-    observable_output.evaluation_point = unsafe {
-        let mut arr = [UInt16::allocate_constant(cs, 0); NUM_WORDS_FR];
-        evaluation_point
-            .limbs
-            .iter()
-            .enumerate()
-            .for_each(|(i, v)| arr[i] = UInt16::from_variable_unchecked(*v));
-        arr
-    };
-    observable_output.opening_value = unsafe {
-        let mut arr = [UInt16::allocate_constant(cs, 0); NUM_WORDS_FR];
-        opening_value
-            .limbs
-            .iter()
-            .enumerate()
-            .for_each(|(i, v)| arr[i] = UInt16::from_variable_unchecked(*v));
-        arr
-    };
+    observable_output.output_hash = output_hash;
     structured_input.observable_output = observable_output;
 
     use crate::fsm_input_output::commit_variable_length_encodable_item;
