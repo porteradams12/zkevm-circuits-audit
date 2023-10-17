@@ -20,7 +20,6 @@ use boojum::gadgets::{
 use boojum::serde_utils::BigArraySerde;
 use cs_derive::*;
 use derivative::*;
-use std::collections::VecDeque;
 
 #[derive(
     Derivative, CSAllocatable, CSSelectable, WitnessHookable, serde::Serialize, serde::Deserialize,
@@ -182,5 +181,5 @@ pub type EIP4844InputOutputWitness<F> =
 pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
     pub versioned_hash: [u8; 32],
     pub blob_hash: [u8; 32],
-    pub blob: Vec<BlobChunkWitness<F>>,
+    pub blob: VecDeque<BlobChunkWitness<F>>,
 }

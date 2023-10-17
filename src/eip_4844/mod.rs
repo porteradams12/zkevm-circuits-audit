@@ -142,10 +142,10 @@ where
 
     let versioned_hash = <[UInt8<F>; 32]>::allocate(cs, versioned_hash);
     let blob_hash = <[UInt8<F>; 32]>::allocate(cs, blob_hash);
-    let blob = blob
+    let mut blob = blob
         .into_iter()
         .map(|chunk| BlobChunk::<F>::allocate(cs, chunk))
-        .collect::<Vec<BlobChunk<F>>>();
+        .collect::<VecDeque<BlobChunk<F>>>();
 
     let closed_form_input = EIP4844InputOutputWitness::<F> {
         start_flag: true,
@@ -213,25 +213,63 @@ where
     let no_work = Boolean::allocated_constant(cs, limit == 0);
     let mut opening_value =
         Bls12_381ScalarNNField::<F>::allocated_constant(cs, Bls12_381Fr::zero(), &params);
+    let mut done = Boolean::allocated_constant(cs, blob.is_empty());
+    let default_element = BlobChunk::allocate(cs, BlobChunkWitness { el: [0u8; 31] });
+    let mut end_reached = false;
 
     // fill up the buffer. since eip4844 blobs are always same size we can do this
     // without needing to account for variable lengths
     assert!(limit != 0);
-    for cycle in 0..(limit - 1) {
-        // polynomial evaluations via horners rule
-        let el = blob[cycle];
+    for _cycle in 0..limit {
+        // polynomial evaluations via horner's rule
+        let el = blob.pop_front();
+        let now_empty = Boolean::allocated_constant(cs, blob.is_empty());
+        let el_was_empty = el.is_none();
+        let el_is_empty = Boolean::allocated_constant(cs, el.is_none());
+        let el = BlobChunk::conditionally_select(cs, el_is_empty, &default_element, &el.unwrap());
         let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
         // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
         // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
         // since the blob is considered to be a polynomial in lagrange form, we essentially
         // 'work backwards' and start with the highest degree coefficients first. so we can
         // add and multiply and at the last step we just add the coefficient.
-        opening_value = opening_value.add(cs, &mut fe);
-        opening_value = opening_value.mul(cs, &mut evaluation_point);
+        let mut tmp = opening_value.add(cs, &mut fe);
+        let tmp2 = tmp.mul(cs, &mut evaluation_point);
+        // last iteration of horner's rule states that we should only add, so if the queue is empty
+        // we ignore the mul
+        tmp = Bls12_381ScalarNNField::conditionally_select(cs, now_empty, &tmp, &tmp2);
+        opening_value =
+            Bls12_381ScalarNNField::conditionally_select(cs, el_is_empty, &opening_value, &tmp);
 
         assert!(buffer.len() < 136);
 
-        buffer.extend(el.el);
+        // ensure padding is correct with homogeneous circuit structuring
+        if el_was_empty {
+            let buffer_len = buffer.len();
+            if buffer_len == KECCAK_RATE_BYTES - 1 && !end_reached {
+                buffer.push(UInt8::allocated_constant(cs, 0x81));
+            } else if buffer_len == KECCAK_RATE_BYTES - 1 && end_reached {
+                buffer.push(UInt8::allocated_constant(cs, 0x80));
+            } else if !end_reached {
+                buffer.push(UInt8::allocated_constant(cs, 0x01));
+            } else {
+                buffer.push(zero_u8);
+            }
+
+            let remaining = 136 - buffer.len();
+            if remaining <= 30 && remaining > 0 {
+                buffer.extend(vec![zero_u8; remaining]);
+                buffer[KECCAK_RATE_BYTES - 1] = UInt8::allocated_constant(cs, 0x80);
+            } else if remaining > 0 {
+                buffer.extend([zero_u8; 30]);
+            }
+
+            end_reached = true;
+        } else {
+            buffer.extend(el.el);
+        }
+
+        let should_absorb = done.negated(cs);
 
         // hash
         if buffer.len() >= 136 {
@@ -244,37 +282,15 @@ where
             // absorb if we are not done yet
             keccak256_conditionally_absorb_and_run_permutation(
                 cs,
-                boolean_true,
+                should_absorb,
                 &mut keccak_accumulator_state,
                 &buffer_for_round,
             );
         }
 
         assert!(buffer.len() < 136);
-    }
 
-    // last round
-    let el = blob[limit - 1];
-    let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
-    opening_value = opening_value.add(cs, &mut fe); // as previously mentioned, last step only needs addition.
-
-    buffer.extend(el.el);
-
-    // ensure circuit still matches up to hash if adding the new element puts us over 136 bytes
-    if buffer.len() >= 136 {
-        let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
-        let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
-        let carry_on = buffer[136..].to_vec();
-
-        buffer = carry_on;
-
-        // absorb if we are not done yet
-        keccak256_conditionally_absorb_and_run_permutation(
-            cs,
-            boolean_true,
-            &mut keccak_accumulator_state,
-            &buffer_for_round,
-        );
+        done = now_empty;
     }
 
     let mut last_round_buffer = [zero_u8; 136];
@@ -282,7 +298,6 @@ where
     last_round_buffer[..tail_len].copy_from_slice(&buffer);
 
     if tail_len == KECCAK_RATE_BYTES - 1 {
-        // unreachable, but we set it for completeness
         last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x81);
     } else {
         last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
@@ -290,10 +305,11 @@ where
     }
 
     let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
+    let should_run_last_round = done.negated(cs);
 
     keccak256_conditionally_absorb_and_run_permutation(
         cs,
-        boolean_true,
+        should_run_last_round,
         &mut keccak_accumulator_state,
         &last_round_buffer,
     );
@@ -641,7 +657,7 @@ mod tests {
                         .for_each(|(v, b)| *v = UInt8::allocate_constant(cs, b));
                     BlobChunk { el: allocated }
                 })
-                .collect::<Vec<BlobChunk<F>>>(),
+                .collect::<VecDeque<BlobChunk<F>>>(),
         };
 
         eip_4844_entry_point::<_, _, _, 17>(cs, witness, &round_function, 4096);
