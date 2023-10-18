@@ -65,16 +65,16 @@ fn convert_keccak_digest_to_field_element<
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
     let mut limbs = [zero_var; N];
-    for (dst, src) in limbs.iter_mut().rev().zip(input.array_chunks::<2>()) {
+    for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()) {
         *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
 
-    // Note: we do not need to check for overflows because the max value is 2^248 which is less
+    // Note: we do not need to check for overflows because the max value is 2^128 which is less
     // than the field modulus.
     NonNativeFieldOverU16 {
         limbs: limbs,
         non_zero_limbs: 16,
-        tracker: OverflowTracker { max_moduluses: 0 },
+        tracker: OverflowTracker { max_moduluses: 1 },
         form: RepresentationForm::Normalized,
         params: params.clone(),
         _marker: std::marker::PhantomData,
@@ -107,7 +107,7 @@ fn convert_blob_chunk_to_field_element<
     NonNativeFieldOverU16 {
         limbs: limbs,
         non_zero_limbs: 16,
-        tracker: OverflowTracker { max_moduluses: 0 },
+        tracker: OverflowTracker { max_moduluses: 1 },
         form: RepresentationForm::Normalized,
         params: params.clone(),
         _marker: std::marker::PhantomData,
@@ -293,6 +293,7 @@ where
         done = now_empty;
     }
 
+    let buffer_now_empty = Boolean::allocated_constant(cs, buffer.is_empty());
     let mut last_round_buffer = [zero_u8; 136];
     let tail_len = buffer.len();
     last_round_buffer[..tail_len].copy_from_slice(&buffer);
@@ -306,6 +307,12 @@ where
 
     let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
     let should_run_last_round = done.negated(cs);
+    let should_run_last_round = done.and(cs, buffer_now_empty).negated(cs);
+    use boojum::gadgets::traits::witnessable::WitnessHookable;
+    println!(
+        "SHOULD RUN {:?}",
+        should_run_last_round.witness_hook(cs)().unwrap()
+    );
 
     keccak256_conditionally_absorb_and_run_permutation(
         cs,
@@ -336,7 +343,7 @@ where
         <[UInt8<F>; 32]>::conditionally_select(cs, no_work, &empty_hash, &keccak256_hash);
 
     // hash equality check
-    for (input_byte, hash_byte) in versioned_hash.iter().zip(keccak256_hash) {
+    for (input_byte, hash_byte) in blob_hash.iter().zip(keccak256_hash) {
         let is_equal = UInt8::equals(cs, input_byte, &hash_byte);
         Boolean::enforce_equal(cs, &is_equal, &boolean_true);
     }
@@ -547,39 +554,30 @@ mod tests {
             .collect::<Vec<[u8; 31]>>();
 
         use zkevm_opcode_defs::sha3::*;
-        let mut observable_input = EIP4844InputData::placeholder_witness();
-        observable_input.hash = {
-            let mut result = [0u8; 32];
-            let digest =
-                Keccak256::digest(blobs.clone().into_iter().flatten().collect::<Vec<u8>>());
-            result.copy_from_slice(digest.as_slice());
-            result
-        };
-        observable_input.kzg_commitment_x = [0u8; NUM_WORDS_FQ];
-        observable_input.kzg_commitment_y = [0u8; NUM_WORDS_FQ];
-        use boojum::field::U64Representable;
-
-        let mut observable_output = EIP4844OutputData::placeholder_witness();
-        let z = Keccak256::digest(
-            observable_input
-                .hash
+        let mut blob_hash = [0u8; 32];
+        let digest = Keccak256::digest(blobs.clone().into_iter().flatten().collect::<Vec<u8>>());
+        blob_hash.copy_from_slice(digest.as_slice());
+        let kzg_commitment_x = [0u8; NUM_WORDS_FQ];
+        let kzg_commitment_y = [0u8; NUM_WORDS_FQ];
+        let mut versioned_hash = [0u8; 32];
+        let digest = Keccak256::digest(
+            kzg_commitment_x
                 .into_iter()
-                .chain(observable_input.kzg_commitment_x.into_iter())
-                .chain(observable_input.kzg_commitment_y.into_iter())
+                .chain(kzg_commitment_y.into_iter())
                 .collect::<Vec<u8>>(),
         );
-        observable_output.z = [0u16; NUM_WORDS_FR];
-        let z_u16 = z
-            .chunks(2)
-            .map(|els| {
-                let mut r = els[0] as u16;
-                r += (els[1] as u16) << 8;
-                r
-            })
-            .collect::<Vec<u16>>();
-        observable_output.z[..8].copy_from_slice(&z_u16[..8]);
+        versioned_hash.copy_from_slice(digest.as_slice());
+        versioned_hash[0] = 0x01;
 
-        let z_repr = z
+        let evaluation_point = Keccak256::digest(
+            blob_hash
+                .into_iter()
+                .chain(versioned_hash.into_iter())
+                .collect::<Vec<u8>>(),
+        )[..16]
+            .to_vec();
+
+        let evaluation_point_repr = evaluation_point
             .chunks(8)
             .map(|els| {
                 els.iter()
@@ -587,8 +585,8 @@ mod tests {
                     .fold(0u64, |acc, (i, el)| acc + ((*el as u64) << (8 * i)))
             })
             .collect::<Vec<u64>>();
-        let mut z_arr = [0u64; 4];
-        z_arr[..2].copy_from_slice(&z_repr[..2]);
+        let mut evaluation_point_arr = [0u64; 4];
+        evaluation_point_arr[..2].copy_from_slice(&evaluation_point_repr[..2]);
 
         let blob_arrs = blobs
             .clone()
@@ -610,54 +608,54 @@ mod tests {
 
         use boojum::pairing::bls12_381::FrRepr;
         // evaluate polynomial
-        let z_fr = Bls12_381Fr::from_repr(FrRepr(z_arr)).unwrap();
-        let y = blob_arrs.clone().into_iter().enumerate().fold(
+        let evaluation_point_fr = Bls12_381Fr::from_repr(FrRepr(evaluation_point_arr)).unwrap();
+        let opening_value = blob_arrs.clone().into_iter().enumerate().fold(
             Bls12_381Fr::zero(),
             |mut acc, (i, coeff)| {
                 let coeff = Bls12_381Fr::from_repr(FrRepr(coeff)).unwrap();
                 acc.add_assign(&coeff);
                 if i != blob_arrs.len() - 1 {
-                    acc.mul_assign(&z_fr);
+                    acc.mul_assign(&evaluation_point_fr);
                 }
                 acc
             },
         );
 
-        let y_limbs = {
-            let repr = y.into_repr();
+        let opening_value_bytes = {
+            let repr = opening_value.into_repr();
             let mut bytes = vec![];
             for limb in repr.0 {
-                bytes.push((limb & 0xffff) as u16);
-                bytes.push((limb >> 16 & 0xffff) as u16);
-                bytes.push((limb >> 32 & 0xffff) as u16);
-                bytes.push((limb >> 48 & 0xffff) as u16);
+                bytes.push((limb & 0xff) as u8);
+                bytes.push((limb >> 8 & 0xff) as u8);
+                bytes.push((limb >> 16 & 0xff) as u8);
+                bytes.push((limb >> 24 & 0xff) as u8);
+                bytes.push((limb >> 32 & 0xff) as u8);
+                bytes.push((limb >> 40 & 0xff) as u8);
+                bytes.push((limb >> 48 & 0xff) as u8);
+                bytes.push((limb >> 56 & 0xff) as u8);
             }
-            let mut arr = [0u16; NUM_WORDS_FR];
-            arr[..16].copy_from_slice(bytes.as_slice());
+            let mut arr = [0u8; 32];
+            arr[..32].copy_from_slice(bytes.as_slice());
             arr
         };
-        observable_output.y.copy_from_slice(&y_limbs);
+
+        let mut observable_output = EIP4844OutputData::<F>::placeholder_witness();
+        observable_output.output_hash = Keccak256::digest(
+            versioned_hash
+                .into_iter()
+                .chain(evaluation_point.into_iter())
+                .chain(opening_value_bytes.into_iter())
+                .collect::<Vec<u8>>(),
+        )
+        .into();
 
         let witness = EIP4844CircuitInstanceWitness {
-            closed_form_input: EIP4844InputOutputWitness {
-                start_flag: true,
-                completion_flag: true,
-                observable_input,
-                observable_output,
-                hidden_fsm_input: (),
-                hidden_fsm_output: (),
-            },
+            versioned_hash,
+            blob_hash,
             blob: blobs
                 .into_iter()
-                .map(|el| {
-                    let mut allocated = [UInt8::<F>::placeholder(cs); 31];
-                    allocated
-                        .iter_mut()
-                        .zip(el)
-                        .for_each(|(v, b)| *v = UInt8::allocate_constant(cs, b));
-                    BlobChunk { el: allocated }
-                })
-                .collect::<VecDeque<BlobChunk<F>>>(),
+                .map(|el| BlobChunkWitness { el })
+                .collect::<VecDeque<BlobChunkWitness<F>>>(),
         };
 
         eip_4844_entry_point::<_, _, _, 17>(cs, witness, &round_function, 4096);
