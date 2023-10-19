@@ -51,6 +51,7 @@ type Bls12_381ScalarNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fr, NUM
 type Bls12_381BaseNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fq, 25>;
 type Bls12_381ScalarNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fr, 17>;
 
+// TODO: check all endianness
 // turns 128 bits into a Bls12 field element.
 fn convert_keccak_digest_to_field_element<
     F: SmallField,
@@ -121,7 +122,7 @@ pub fn eip_4844_entry_point<
     const N: usize,
 >(
     cs: &mut CS,
-    witness: EIP4844CircuitInstanceWitness<F>,
+    witness: EIP4844CircuitInstanceWitness,
     round_function: &R,
     params: usize,
 ) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
@@ -306,13 +307,7 @@ where
     }
 
     let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
-    let should_run_last_round = done.negated(cs);
     let should_run_last_round = done.and(cs, buffer_now_empty).negated(cs);
-    use boojum::gadgets::traits::witnessable::WitnessHookable;
-    println!(
-        "SHOULD RUN {:?}",
-        should_run_last_round.witness_hook(cs)().unwrap()
-    );
 
     keccak256_conditionally_absorb_and_run_permutation(
         cs,
@@ -655,7 +650,7 @@ mod tests {
             blob: blobs
                 .into_iter()
                 .map(|el| BlobChunkWitness { el })
-                .collect::<VecDeque<BlobChunkWitness<F>>>(),
+                .collect::<VecDeque<BlobChunkWitness>>(),
         };
 
         eip_4844_entry_point::<_, _, _, 17>(cs, witness, &round_function, 4096);
