@@ -21,69 +21,13 @@ use boojum::serde_utils::BigArraySerde;
 use cs_derive::*;
 use derivative::*;
 
-#[derive(Clone, Copy, Debug, Default, Hash, serde::Serialize, serde::Deserialize)]
-pub struct BlobChunkWitness {
-    pub el: [u8; 31],
-}
-
-#[derive(Derivative, CSSelectable, WitnessHookable, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Derivative, CSAllocatable, CSSelectable, WitnessHookable, serde::Serialize, serde::Deserialize,
+)]
 #[derivative(Clone, Copy, Debug)]
 #[serde(bound = "")]
 pub struct BlobChunk<F: SmallField> {
     pub el: [UInt8<F>; 31],
-}
-
-impl<F: SmallField> CSAllocatable<F> for BlobChunk<F> {
-    type Witness = BlobChunkWitness;
-
-    fn placeholder_witness() -> Self::Witness {
-        BlobChunkWitness::default()
-    }
-
-    #[inline(always)]
-    fn allocate_without_value<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
-        let el = (0..31)
-            .map(|_| UInt8::allocate_without_value(cs))
-            .collect::<Vec<UInt8<F>>>()
-            .try_into()
-            .expect("should be able to create array of UInt8");
-
-        Self { el }
-    }
-
-    #[inline(always)]
-    fn allocate<CS: ConstraintSystem<F>>(cs: &mut CS, witness: Self::Witness) -> Self {
-        let el = witness
-            .el
-            .chunks(2)
-            .flat_map(|values| {
-                let mut arr = [0u8; 2];
-                if values.len() == 2 {
-                    arr.copy_from_slice(values);
-                } else {
-                    arr[0] = values[0];
-                }
-                UInt8::allocate_pair(cs, arr)
-            })
-            .collect::<Vec<UInt8<F>>>()[..31]
-            .try_into()
-            .expect("should be able to create array of UInt8");
-
-        Self { el }
-    }
-
-    #[inline(always)]
-    fn allocate_constant<CS: ConstraintSystem<F>>(cs: &mut CS, witness: Self::Witness) -> Self {
-        let el = witness
-            .el
-            .iter()
-            .map(|v| UInt8::allocate_constant(cs, *v))
-            .collect::<Vec<UInt8<F>>>()
-            .try_into()
-            .expect("should be able to create array of UInt8");
-
-        Self { el }
-    }
 }
 
 impl<F: SmallField> CSAllocatableExt<F> for BlobChunk<F> {
@@ -233,8 +177,8 @@ pub type EIP4844InputOutputWitness<F> =
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
-pub struct EIP4844CircuitInstanceWitness {
+pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
     pub versioned_hash: [u8; 32],
-    pub blob_hash: [u8; 32],
-    pub blob: VecDeque<BlobChunkWitness>,
+    pub linear_hash_output: [u8; 32],
+    pub data_chunks: VecDeque<BlobChunkWitness<F>>,
 }

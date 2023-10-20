@@ -60,13 +60,15 @@ fn convert_keccak_digest_to_field_element<
     const N: usize,
 >(
     cs: &mut CS,
-    input: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE / 2],
+    input: [UInt8<F>; 16],
     params: &Arc<NonNativeFieldOverU16Params<P, N>>,
 ) -> NonNativeFieldOverU16<F, P, N> {
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
     let mut limbs = [zero_var; N];
-    for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()) {
+    // since the value would be interpreted as big endian in the L1 we need to reverse our bytes to
+    // get the correct value
+    for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()).rev() {
         *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
 
@@ -89,19 +91,21 @@ fn convert_blob_chunk_to_field_element<
     const N: usize,
 >(
     cs: &mut CS,
-    input: &[UInt8<F>],
+    input: &[UInt8<F>; 31],
     params: &Arc<NonNativeFieldOverU16Params<P, N>>,
 ) -> NonNativeFieldOverU16<F, P, N> {
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
     let mut limbs = [zero_var; N];
-    for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()) {
+    let input_chunks = input.array_chunks::<2>();
+    let remainder = input_chunks.remainder();
+    for (dst, src) in limbs.iter_mut().zip(input_chunks) {
         *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
 
     // since array_chunks drops any remaining elements that don't fit in the size requirement,
     // we need to manually set the last byte in limbs
-    limbs[15] = input[30].get_variable();
+    limbs[15] = remainder[0].get_variable();
 
     // Note: we do not need to check for overflows because the max value is 2^248 which is less
     // than the field modulus.
@@ -122,7 +126,7 @@ pub fn eip_4844_entry_point<
     const N: usize,
 >(
     cs: &mut CS,
-    witness: EIP4844CircuitInstanceWitness,
+    witness: EIP4844CircuitInstanceWitness<F>,
     round_function: &R,
     params: usize,
 ) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
@@ -133,44 +137,40 @@ where
 {
     let limit = params;
 
-    assert!(limit <= 4096); // max blob length eip4844
+    assert!(limit == 4096); // max blob length eip4844
 
     let EIP4844CircuitInstanceWitness {
         versioned_hash,
-        blob_hash,
-        blob,
+        linear_hash_output,
+        data_chunks,
     } = witness;
 
     let versioned_hash = <[UInt8<F>; 32]>::allocate(cs, versioned_hash);
-    let blob_hash = <[UInt8<F>; 32]>::allocate(cs, blob_hash);
-    let mut blob = blob
+    let linear_hash_output = <[UInt8<F>; 32]>::allocate(cs, linear_hash_output);
+
+    let mut data_chunks = data_chunks
         .into_iter()
         .map(|chunk| BlobChunk::<F>::allocate(cs, chunk))
         .collect::<VecDeque<BlobChunk<F>>>();
 
-    let closed_form_input = EIP4844InputOutputWitness::<F> {
-        start_flag: true,
-        completion_flag: true,
+    let boolean_true = Boolean::allocated_constant(cs, true);
+    let mut structured_input = EIP4844InputOutput::<F> {
+        start_flag: boolean_true,
+        completion_flag: boolean_true,
         observable_input: (),
-        observable_output: EIP4844OutputDataWitness {
-            output_hash: [0u8; keccak256::KECCAK256_DIGEST_SIZE],
+        observable_output: EIP4844OutputData {
+            output_hash: [UInt8::<F>::zero(cs); keccak256::KECCAK256_DIGEST_SIZE],
         },
         hidden_fsm_input: (),
         hidden_fsm_output: (),
     };
-    let mut structured_input = EIP4844InputOutput::alloc_ignoring_outputs(cs, closed_form_input);
-    let start_flag = structured_input.start_flag;
 
     let zero_u8: UInt8<F> = UInt8::zero(cs);
-    let boolean_true = Boolean::allocated_constant(cs, true);
-
-    // only 1 instance of the circuit here for now
-    Boolean::enforce_equal(cs, &start_flag, &boolean_true);
 
     // create a field element out of the hash of the input hash and the kzg commitment
     let challenge_hash = boojum::gadgets::keccak256::keccak256(
         cs,
-        blob_hash
+        linear_hash_output
             .into_iter()
             .chain(versioned_hash.into_iter())
             .collect::<Vec<UInt8<F>>>()
@@ -180,7 +180,8 @@ where
     // NOTE: it is safe to draw a random scalar at max 128 bits because of the schwartz zippel
     // lemma
     let mut truncated_hash = [UInt8::zero(cs); 16];
-    truncated_hash.copy_from_slice(&challenge_hash[..16]);
+    truncated_hash.copy_from_slice(&challenge_hash[16..]); // take last 16 bytes to get max 2^128
+                                                           // in big endian scenario
     let params = Arc::new(Bls12_381ScalarNNFieldParams::create());
     let mut evaluation_point = convert_keccak_digest_to_field_element(cs, truncated_hash, &params);
 
@@ -196,38 +197,21 @@ where
     use crate::base_structures::log_query::L2_TO_L1_MESSAGE_BYTE_LENGTH;
     // we do not serialize length because it's recalculatable in L1
 
-    let empty_hash = {
-        use zkevm_opcode_defs::sha3::*;
-
-        let mut result = [0u8; 32];
-        let digest = Keccak256::digest(&[]);
-        result.copy_from_slice(digest.as_slice());
-
-        result.map(|el| UInt8::allocated_constant(cs, el))
-    };
-
     let mut buffer = vec![];
 
     use crate::storage_application::keccak256_conditionally_absorb_and_run_permutation;
     use boojum::gadgets::keccak256::KECCAK_RATE_BYTES;
 
-    let no_work = Boolean::allocated_constant(cs, limit == 0);
     let mut opening_value =
         Bls12_381ScalarNNField::<F>::allocated_constant(cs, Bls12_381Fr::zero(), &params);
-    let mut done = Boolean::allocated_constant(cs, blob.is_empty());
-    let default_element = BlobChunk::allocate(cs, BlobChunkWitness { el: [0u8; 31] });
-    let mut end_reached = false;
+    let mut done = Boolean::allocated_constant(cs, false);
+    let default_element = BlobChunk::allocate_constant(cs, BlobChunkWitness { el: [0u8; 31] });
 
-    // fill up the buffer. since eip4844 blobs are always same size we can do this
-    // without needing to account for variable lengths
-    assert!(limit != 0);
     for _cycle in 0..limit {
+        let should_pop = Boolean::allocated_constant(cs, data_chunks.is_empty()).negated(cs);
+        let el = data_chunks.pop_front().unwrap_or(default_element);
+        let now_empty = Boolean::allocated_constant(cs, data_chunks.is_empty());
         // polynomial evaluations via horner's rule
-        let el = blob.pop_front();
-        let now_empty = Boolean::allocated_constant(cs, blob.is_empty());
-        let el_was_empty = el.is_none();
-        let el_is_empty = Boolean::allocated_constant(cs, el.is_none());
-        let el = BlobChunk::conditionally_select(cs, el_is_empty, &default_element, &el.unwrap());
         let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
         // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
         // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
@@ -240,35 +224,11 @@ where
         // we ignore the mul
         tmp = Bls12_381ScalarNNField::conditionally_select(cs, now_empty, &tmp, &tmp2);
         opening_value =
-            Bls12_381ScalarNNField::conditionally_select(cs, el_is_empty, &opening_value, &tmp);
+            Bls12_381ScalarNNField::conditionally_select(cs, should_pop, &opening_value, &tmp);
 
         assert!(buffer.len() < 136);
 
-        // ensure padding is correct with homogeneous circuit structuring
-        if el_was_empty {
-            let buffer_len = buffer.len();
-            if buffer_len == KECCAK_RATE_BYTES - 1 && !end_reached {
-                buffer.push(UInt8::allocated_constant(cs, 0x81));
-            } else if buffer_len == KECCAK_RATE_BYTES - 1 && end_reached {
-                buffer.push(UInt8::allocated_constant(cs, 0x80));
-            } else if !end_reached {
-                buffer.push(UInt8::allocated_constant(cs, 0x01));
-            } else {
-                buffer.push(zero_u8);
-            }
-
-            let remaining = 136 - buffer.len();
-            if remaining <= 30 && remaining > 0 {
-                buffer.extend(vec![zero_u8; remaining]);
-                buffer[KECCAK_RATE_BYTES - 1] = UInt8::allocated_constant(cs, 0x80);
-            } else if remaining > 0 {
-                buffer.extend([zero_u8; 30]);
-            }
-
-            end_reached = true;
-        } else {
-            buffer.extend(el.el);
-        }
+        buffer.extend(el.el);
 
         let should_absorb = done.negated(cs);
 
@@ -289,9 +249,30 @@ where
             );
         }
 
-        assert!(buffer.len() < 136);
+        // potentially finalize
+        let should_finalize = Boolean::multi_and(cs, &[should_absorb, should_pop, done]);
+        let mut last_round_buffer = [zero_u8; KECCAK_RATE_BYTES];
+        let tail_len = buffer.len();
+        last_round_buffer[..tail_len].copy_from_slice(&buffer);
 
-        done = now_empty;
+        if tail_len == KECCAK_RATE_BYTES - 1 {
+            last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x81);
+        } else {
+            last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
+            last_round_buffer[KECCAK_RATE_BYTES - 1] = UInt8::allocated_constant(cs, 0x80);
+        }
+
+        let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
+
+        keccak256_conditionally_absorb_and_run_permutation(
+            cs,
+            should_finalize,
+            &mut keccak_accumulator_state,
+            &last_round_buffer,
+        );
+
+        assert!(buffer.len() < 136);
+        done = done.or(cs, now_empty);
     }
 
     let buffer_now_empty = Boolean::allocated_constant(cs, buffer.is_empty());
@@ -334,27 +315,14 @@ where
 
     let keccak256_hash = unsafe { keccak256_hash.map(|el| el.assume_init()) };
 
-    let keccak256_hash =
-        <[UInt8<F>; 32]>::conditionally_select(cs, no_work, &empty_hash, &keccak256_hash);
-
     // hash equality check
-    for (input_byte, hash_byte) in blob_hash.iter().zip(keccak256_hash) {
-        let is_equal = UInt8::equals(cs, input_byte, &hash_byte);
-        Boolean::enforce_equal(cs, &is_equal, &boolean_true);
+    for (input_byte, hash_byte) in linear_hash_output.iter().zip(keccak256_hash) {
+        Num::enforce_equal(cs, &input_byte.into_num(), &hash_byte.into_num());
     }
 
     use boojum::gadgets::keccak256::keccak256;
-    let evaluation_bytes = evaluation_point
-        .limbs
-        .iter()
-        .rev()
-        .flat_map(|v| unsafe {
-            let n = UInt16::from_variable_unchecked(*v).to_be_bytes(cs);
-            [n[0], n[1]]
-        })
-        .collect::<Vec<UInt8<F>>>();
-    let opening_bytes = opening_value
-        .limbs
+    opening_value.enforce_reduced(cs);
+    let opening_bytes = opening_value.limbs[..16]
         .iter()
         .rev()
         .flat_map(|v| unsafe {
@@ -367,7 +335,7 @@ where
         cs,
         versioned_hash
             .into_iter()
-            .chain(evaluation_bytes.into_iter())
+            .chain(truncated_hash.into_iter())
             .chain(opening_bytes.into_iter())
             .collect::<Vec<UInt8<F>>>()
             .as_slice(),
@@ -524,9 +492,9 @@ mod tests {
 
         let round_function = Poseidon2Goldilocks;
 
-        let blobs = vec![[0u8; 31]; 4096];
+        let data_chunks = vec![[0u8; 31]; 4096];
         let mut rng = rand::thread_rng();
-        let blobs = blobs
+        let data_chunks = data_chunks
             .into_iter()
             .map(|_| {
                 let el = Bls12_381Fr::rand(&mut rng);
@@ -549,9 +517,15 @@ mod tests {
             .collect::<Vec<[u8; 31]>>();
 
         use zkevm_opcode_defs::sha3::*;
-        let mut blob_hash = [0u8; 32];
-        let digest = Keccak256::digest(blobs.clone().into_iter().flatten().collect::<Vec<u8>>());
-        blob_hash.copy_from_slice(digest.as_slice());
+        let mut linear_hash_output = [0u8; 32];
+        let digest = Keccak256::digest(
+            data_chunks
+                .clone()
+                .into_iter()
+                .flatten()
+                .collect::<Vec<u8>>(),
+        );
+        linear_hash_output.copy_from_slice(digest.as_slice());
         let kzg_commitment_x = [0u8; NUM_WORDS_FQ];
         let kzg_commitment_y = [0u8; NUM_WORDS_FQ];
         let mut versioned_hash = [0u8; 32];
@@ -565,7 +539,7 @@ mod tests {
         versioned_hash[0] = 0x01;
 
         let evaluation_point = Keccak256::digest(
-            blob_hash
+            linear_hash_output
                 .into_iter()
                 .chain(versioned_hash.into_iter())
                 .collect::<Vec<u8>>(),
@@ -583,7 +557,7 @@ mod tests {
         let mut evaluation_point_arr = [0u64; 4];
         evaluation_point_arr[..2].copy_from_slice(&evaluation_point_repr[..2]);
 
-        let blob_arrs = blobs
+        let blob_arrs = data_chunks
             .clone()
             .iter()
             .map(|bytes| {
@@ -646,11 +620,11 @@ mod tests {
 
         let witness = EIP4844CircuitInstanceWitness {
             versioned_hash,
-            blob_hash,
-            blob: blobs
+            linear_hash_output,
+            data_chunks: data_chunks
                 .into_iter()
                 .map(|el| BlobChunkWitness { el })
-                .collect::<VecDeque<BlobChunkWitness>>(),
+                .collect::<VecDeque<BlobChunkWitness<F>>>(),
         };
 
         eip_4844_entry_point::<_, _, _, 17>(cs, witness, &round_function, 4096);
