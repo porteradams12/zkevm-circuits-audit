@@ -90,15 +90,18 @@ fn convert_blob_chunk_to_field_element<
     const N: usize,
 >(
     cs: &mut CS,
-    input: &[UInt8<F>; 31],
+    mut input: [UInt8<F>; 31],
     params: &Arc<NonNativeFieldOverU16Params<P, N>>,
 ) -> NonNativeFieldOverU16<F, P, N> {
+    // since the value would be interpreted as big endian in the L1 we need to reverse our bytes to
+    // get the correct value
+    input.reverse();
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
     let mut limbs = [zero_var; N];
     let input_chunks = input.array_chunks::<2>();
     let remainder = input_chunks.remainder();
-    for (dst, src) in limbs.iter_mut().zip(input_chunks) {
+    for (dst, src) in limbs.iter_mut().zip(input_chunks).rev() {
         *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
 
@@ -207,7 +210,7 @@ where
     for cycle in 0..(limit - 1) {
         let el = data_chunks[cycle];
         // polynomial evaluations via horner's rule
-        let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
+        let mut fe = convert_blob_chunk_to_field_element(cs, el.el.clone(), &params);
         // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
         // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
         // since the blob is considered to be a polynomial in lagrange form, we essentially
@@ -242,7 +245,7 @@ where
 
     // last round
     let el = data_chunks[limit - 1];
-    let mut fe = convert_blob_chunk_to_field_element(cs, &el.el, &params);
+    let mut fe = convert_blob_chunk_to_field_element(cs, el.el.clone(), &params);
     opening_value = opening_value.add(cs, &mut fe); // as previously mentioned, last step only needs addition.
 
     buffer.extend(el.el);
@@ -475,6 +478,8 @@ mod tests {
                     bytes.push((limb >> 48 & 0xff) as u8);
                     bytes.push((limb >> 56 & 0xff) as u8);
                 }
+                // swap to big endian
+                let bytes = bytes.into_iter().rev().collect::<Vec<u8>>();
                 let mut arr = [0u8; 31];
                 arr.copy_from_slice(&bytes.as_slice()[..31]);
                 arr
@@ -524,8 +529,9 @@ mod tests {
 
         let blob_arrs = data_chunks
             .clone()
-            .iter()
+            .iter_mut()
             .map(|bytes| {
+                bytes.reverse();
                 let limbs = bytes
                     .chunks(8)
                     .map(|els| {
