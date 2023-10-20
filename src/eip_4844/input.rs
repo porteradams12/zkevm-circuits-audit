@@ -180,5 +180,5 @@ pub type EIP4844InputOutputWitness<F> =
 pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
     pub versioned_hash: [u8; 32],
     pub linear_hash_output: [u8; 32],
-    pub data_chunks: VecDeque<BlobChunkWitness<F>>,
+    pub data_chunks: Vec<BlobChunkWitness<F>>,
 }
