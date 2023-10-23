@@ -183,6 +183,7 @@ pub(crate) fn apply_uma<
 
     // penalize for heap out of bounds access
     let uint32_max = UInt32::allocated_constant(cs, u32::MAX);
+    let mut growth_cost = calculate_memory_cost_eth(cs, growth_cost);
     growth_cost = UInt32::conditionally_select(
         cs,
         exception_heap_deref_out_of_bounds,
