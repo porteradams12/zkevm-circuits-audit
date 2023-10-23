@@ -526,15 +526,15 @@ pub fn may_be_read_memory_for_source_operand<
 /// appendix H. https://ethereum.github.io/yellowpaper/paper.pdf
 pub fn calculate_memory_cost_eth<CS: ConstraintSystem<F>, F: SmallField>(
     cs: &mut CS,
-    bytes: UInt32<F>,
+    growth_in_bytes: UInt32<F>,
 ) -> UInt32<F> {
     let zero = UInt32::allocated_constant(cs, 0);
     let cost_multiplier = UInt32::allocated_constant(cs, 3);
 
     // Take ceiling of the division as memory growth in the EVM is on a per-256bit word basis and
     // taking even one byte of the next word should count as cost.
-    let (mut words, rem) = bytes.div_by_constant(cs, 256);
-    // This should be safe since we just divided the number by 256.
+    let (mut words, rem) = growth_in_bytes.div_by_constant(cs, 32);
+    // This should be safe since we just divided the number by 32.
     let words_plus_one = unsafe { words.increment_unchecked(cs) };
     let rem_is_zero = rem.is_zero(cs);
     words = UInt32::conditionally_select(cs, rem_is_zero, &words, &words_plus_one);
@@ -549,9 +549,9 @@ pub fn calculate_memory_cost_eth<CS: ConstraintSystem<F>, F: SmallField>(
     // return u32::MAX and bankrupt the VM.
     let [lo, hi] = UInt32::fma_with_carry(cs, words, words, zero, zero);
 
-    // We perform a single right shift for bytes 5, 4, 3, 2 in that order to arrive at the
+    // We perform a single right shift for bytes 6, 5, 4, 3, 2 in that order to arrive at the
     // floor-divided value.
-    let mut bytes = [hi.1[0], lo.1[3], lo.1[2], lo.1[1]];
+    let mut bytes = [hi.1[1], hi.1[0], lo.1[3], lo.1[2], lo.1[1]];
 
     {
         let byte_split_id = cs
@@ -577,6 +577,7 @@ pub fn calculate_memory_cost_eth<CS: ConstraintSystem<F>, F: SmallField>(
         });
     }
 
+    let bytes = [bytes[1], bytes[2], bytes[3], bytes[4]];
     let mut rhs = UInt32::from_be_bytes(cs, bytes);
 
     // Check bytes 6, 7, 8 for zero.
