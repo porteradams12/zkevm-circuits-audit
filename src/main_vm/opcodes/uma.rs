@@ -1003,9 +1003,6 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
         already_panicked: Boolean<F>,
         is_fat_ptr: Boolean<F>,
     ) -> Self {
-        // we can never address a range [2^32 - 32..2^32] this way, but we don't care because
-        // it's impossible to pay for such memory growth
-
         let offset = input.u32x8_view[0];
         let page = input.u32x8_view[1];
         let start = input.u32x8_view[2];
@@ -1032,18 +1029,28 @@ impl<F: SmallField> QuasiFatPtrInUMA<F> {
 
         let u32_constant_32 = UInt32::allocated_constant(cs, 32);
 
-        let (incremented_offset, is_non_addressable) = offset.overflowing_add(cs, u32_constant_32);
+        let (incremented_offset, _) = offset.overflowing_add(cs, u32_constant_32);
+
+        let (end_non_inclusive, slice_u32_range_overflow) = start.overflowing_add(cs, length);
+        let limit = UInt32::allocated_constant(cs, (1 << 30) - 1);
+        let (_, is_non_addressable) = limit.overflowing_sub(cs, end_non_inclusive);
 
         // check that we agree in logic with out-of-circuit comparisons
         debug_assert_eq!(
-            zkevm_opcode_defs::uma::MAX_OFFSET_TO_DEREF_LOW_U32 + 32u32,
-            u32::MAX
+            zkevm_opcode_defs::uma::MAX_OFFSET_TO_DEREF_LOW_U32 + 1u32,
+            1 << 30
         );
-        let max_offset = UInt32::allocated_constant(cs, u32::MAX);
+        let max_offset = UInt32::allocated_constant(cs, 1 << 30);
         let is_non_addressable_extra = UInt32::equals(cs, &incremented_offset, &max_offset);
 
-        let is_non_addressable =
-            Boolean::multi_or(cs, &[is_non_addressable, is_non_addressable_extra]);
+        let is_non_addressable = Boolean::multi_or(
+            cs,
+            &[
+                slice_u32_range_overflow,
+                is_non_addressable,
+                is_non_addressable_extra,
+            ],
+        );
 
         let should_set_panic = Boolean::multi_or(cs, &[already_panicked, is_non_addressable]);
 

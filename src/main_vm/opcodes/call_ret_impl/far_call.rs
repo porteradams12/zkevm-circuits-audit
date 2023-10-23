@@ -155,8 +155,6 @@ impl<F: SmallField> FatPtrInABI<F> {
         input: &RegisterInputView<F>,
         as_fresh: Boolean<F>,
     ) -> (Self, UInt32<F>, PtrValidationData<F>) {
-        // we can never address a range [2^32 - 32..2^32] this way, but we don't care because
-        // it's impossible to pay for such memory growth
         let offset = input.u32x8_view[0];
         let page = input.u32x8_view[1];
         let start = input.u32x8_view[2];
@@ -170,6 +168,10 @@ impl<F: SmallField> FatPtrInABI<F> {
 
         let (end_non_inclusive, slice_u32_range_overflow) = start.overflowing_add(cs, length);
 
+        // addressing anything at 2^30 or above is illegal
+        let limit = UInt32::allocated_constant(cs, (1 << 30) - 1);
+        let (_, range_too_high) = limit.overflowing_sub(cs, end_non_inclusive);
+
         // offset <= length, that captures the empty slice (0, 0)
         let (_, is_invalid_as_slice) = length.overflowing_sub(cs, offset);
 
@@ -178,6 +180,7 @@ impl<F: SmallField> FatPtrInABI<F> {
             &[
                 non_zero_offset_if_should_be_fresh,
                 slice_u32_range_overflow,
+                range_too_high,
                 is_invalid_as_slice,
             ],
         );
