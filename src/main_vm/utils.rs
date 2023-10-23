@@ -8,6 +8,8 @@ use crate::base_structures::register::VMRegister;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::config::*;
 use boojum::cs::gates::ConstantAllocatableCS;
+use boojum::gadgets::blake2s::mixing_function::merge_byte_using_table;
+use boojum::gadgets::tables::ByteSplitTable;
 use boojum::gadgets::traits::encodable::CircuitEncodable;
 use boojum::gadgets::u256::UInt256;
 
@@ -518,4 +520,73 @@ pub fn may_be_read_memory_for_source_operand<
         as_register,
         (initial_state, final_state, new_length, should_access),
     )
+}
+
+/// Calculates the cost of memory growth according to the EVM formula found in the EVM yellowpaper,
+/// appendix H. https://ethereum.github.io/yellowpaper/paper.pdf
+pub fn calculate_memory_cost_eth<CS: ConstraintSystem<F>, F: SmallField>(
+    cs: &mut CS,
+    bytes: UInt32<F>,
+) -> UInt32<F> {
+    let zero = UInt32::allocated_constant(cs, 0);
+    let cost_multiplier = UInt32::allocated_constant(cs, 3);
+
+    // Take ceiling of the division as memory growth in the EVM is on a per-256bit word basis and
+    // taking even one byte of the next word should count as cost.
+    let (mut words, rem) = bytes.div_by_constant(cs, 256);
+    let words_plus_one = words.increment_unchecked(cs);
+    let rem_is_zero = rem.is_zero(cs);
+    words = UInt32::conditionally_select(cs, rem_is_zero, &words, &words_plus_one);
+
+    let lhs = cost_multiplier.non_widening_mul(cs, &words); // should always fit in 2^32
+
+    // Compute floor(a^2 / 512). We can do this easily with an FMA gate. We calculate a * a in
+    // FMA, and get out a fully widened result. Then, if we want to take floor division by 512, we
+    // simply shift right by 9 (2^9 = 512). So we reconstitute a UInt32 by dropping the lowest
+    // byte and bitshifting the next 5 UInt8s. We can subsequently check if we have overflowed
+    // by applying zero checks on the top 3 bytes after shifting, in which case we should just
+    // return u32::MAX and bankrupt the VM.
+    let [lo, hi] = UInt32::fma_with_carry(cs, words, words, zero, zero);
+
+    // We perform a single right shift for bytes 5, 4, 3, 2 in that order to arrive at the
+    // floor-divided value.
+    let mut bytes = [hi.1[0], lo.1[3], lo.1[2], lo.1[1]];
+
+    {
+        let byte_split_id = cs
+            .get_table_id_for_marker::<ByteSplitTable<1>>()
+            .expect("table should exist");
+        let mut carry = None;
+        bytes.iter_mut().for_each(|byte| {
+            let res = cs.perform_lookup::<1, 2>(byte_split_id, &[byte.get_variable()]);
+            // This should produce the same circuit structure every single time.
+            if carry.is_some() {
+                *byte = unsafe {
+                    UInt8::from_variable_unchecked(merge_byte_using_table::<_, _, 7>(
+                        cs,
+                        res[1],
+                        carry.unwrap(),
+                    ))
+                };
+            } else {
+                *byte = unsafe { UInt8::from_variable_unchecked(res[1]) };
+            }
+
+            carry = Some(res[0]);
+        });
+    }
+
+    let mut rhs = UInt32::from_be_bytes(cs, bytes);
+
+    // Check bytes 6, 7, 8 for zero.
+    let byte6_is_zero = hi.1[1].is_zero(cs);
+    let byte7_is_zero = hi.1[2].is_zero(cs);
+    let byte8_is_zero = hi.1[3].is_zero(cs);
+    let hi_is_zero = Boolean::multi_and(cs, &[byte6_is_zero, byte7_is_zero, byte8_is_zero]);
+
+    // Ensure the next addition will overflow if we already overflowed.
+    let limit = UInt32::allocated_constant(cs, (1 << 32) - 1);
+    rhs = UInt32::conditionally_select(cs, hi_is_zero, &rhs, &limit);
+    let (res, of) = lhs.overflowing_add(cs, rhs);
+    UInt32::conditionally_select(cs, of, &limit, &res)
 }
