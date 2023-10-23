@@ -534,7 +534,8 @@ pub fn calculate_memory_cost_eth<CS: ConstraintSystem<F>, F: SmallField>(
     // Take ceiling of the division as memory growth in the EVM is on a per-256bit word basis and
     // taking even one byte of the next word should count as cost.
     let (mut words, rem) = bytes.div_by_constant(cs, 256);
-    let words_plus_one = words.increment_unchecked(cs);
+    // This should be safe since we just divided the number by 256.
+    let words_plus_one = unsafe { words.increment_unchecked(cs) };
     let rem_is_zero = rem.is_zero(cs);
     words = UInt32::conditionally_select(cs, rem_is_zero, &words, &words_plus_one);
 

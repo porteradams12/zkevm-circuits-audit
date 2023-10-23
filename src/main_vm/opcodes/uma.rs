@@ -7,6 +7,7 @@ use crate::base_structures::memory_query::MemoryQueryWitness;
 use crate::base_structures::memory_query::MemoryValue;
 use crate::main_vm::pre_state::MemoryLocation;
 use crate::main_vm::register_input_view::RegisterInputView;
+use crate::main_vm::utils::calculate_memory_cost_eth;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use arrayvec::ArrayVec;

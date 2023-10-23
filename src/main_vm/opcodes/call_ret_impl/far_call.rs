@@ -16,6 +16,7 @@ use crate::base_structures::vm_state::GlobalContext;
 use crate::base_structures::vm_state::QUEUE_STATE_WIDTH;
 use crate::main_vm::opcodes::call_ret_impl::far_call::log_query::LogQueryWitness;
 use crate::main_vm::state_diffs::MAX_SPONGES_PER_CYCLE;
+use crate::main_vm::utils::calculate_memory_cost_eth;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use arrayvec::ArrayVec;

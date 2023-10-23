@@ -6,6 +6,7 @@ use super::*;
 
 use crate::base_structures::vm_state::saved_context::ExecutionContextRecord;
 use crate::base_structures::vm_state::QUEUE_STATE_WIDTH;
+use crate::main_vm::utils::calculate_memory_cost_eth;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
