@@ -588,7 +588,7 @@ pub fn calculate_memory_cost_eth<CS: ConstraintSystem<F>, F: SmallField>(
     let hi_is_zero = Boolean::multi_and(cs, &[byte6_is_zero, byte7_is_zero, byte8_is_zero]);
 
     // Ensure the next addition will overflow if we already overflowed.
-    let limit = UInt32::allocated_constant(cs, (1 << 32) - 1);
+    let limit = UInt32::allocated_constant(cs, u32::MAX);
     rhs = UInt32::conditionally_select(cs, hi_is_zero, &rhs, &limit);
     let (res, of) = lhs.overflowing_add(cs, rhs);
     UInt32::conditionally_select(cs, of, &limit, &res)
