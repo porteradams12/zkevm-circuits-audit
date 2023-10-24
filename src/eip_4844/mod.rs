@@ -207,6 +207,10 @@ where
     let mut opening_value =
         Bls12_381ScalarNNField::<F>::allocated_constant(cs, Bls12_381Fr::zero(), &params);
 
+    // We always pad the pubdata to be 31*(2^12) bytes, no matter how many elements we fill.
+    // Therefore, we can run the circuit straightforwardly without needing to account for potential
+    // changes in the cycle number in which the padding happens. Hence, we run the hash loop
+    // limit-1 times and then finalize the hash out of the loop for the last cycle.
     for cycle in 0..(limit - 1) {
         let el = data_chunks[cycle];
         // polynomial evaluations via horner's rule
