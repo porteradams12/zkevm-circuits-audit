@@ -696,7 +696,7 @@ where
 
     let mut growth_cost = heap_growth.mask(cs, grow_heap);
     growth_cost = UInt32::conditionally_select(cs, grow_aux_heap, &aux_heap_growth, &growth_cost);
-    let mut growth_cost = calculate_memory_cost_eth(cs, growth_cost);
+    let growth_cost = calculate_memory_cost_eth(cs, growth_cost);
 
     // if crate::config::CIRCUIT_VERSOBE {
     //     if execute.witness_hook(&*cs)().unwrap() {
