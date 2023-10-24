@@ -3,7 +3,6 @@ use crate::base_structures::log_query::*;
 use crate::base_structures::memory_query::*;
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
 use crate::demux_log_queue::StorageLogQueue;
-use crate::ecrecover::secp256k1::fixed_base_mul_table::FixedBaseMulTable;
 use crate::ethereum_types::U256;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::fsm_input_output::*;
@@ -12,20 +11,14 @@ use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::crypto_bigint::{Zero, U1024};
 use boojum::cs::gates::ConstantAllocatableCS;
 use boojum::cs::traits::cs::ConstraintSystem;
-use boojum::cs::Variable;
 use boojum::field::SmallField;
-use boojum::gadgets::blake2s::mixing_function::merge_byte_using_table;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::curves::sw_projective::SWProjectivePoint;
-use boojum::gadgets::curves::zeroable_affine::ZeroableAffinePoint;
 use boojum::gadgets::keccak256::keccak256;
 use boojum::gadgets::non_native_field::implementations::*;
-use boojum::gadgets::non_native_field::traits::NonNativeField;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
-use boojum::gadgets::tables::And8Table;
-use boojum::gadgets::tables::ByteSplitTable;
 use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
@@ -34,23 +27,15 @@ use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u160::UInt160;
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
-use boojum::gadgets::u512::UInt512;
 use boojum::gadgets::u8::UInt8;
-use boojum::pairing::ff::PrimeField;
-use boojum::pairing::GenericCurveAffine;
-use boojum::pairing::{CurveAffine, GenericCurveProjective};
-use boojum::sha3::digest::typenum::private::IsGreaterPrivate;
 use cs_derive::*;
 use std::collections::VecDeque;
-use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 
-pub use self::input::*;
-use super::input::*;
-
 pub const MEMORY_QUERIES_PER_CALL: usize = 4;
-pub const ALLOW_ZERO_MESSAGE: bool = false;
+
+use super::input::*;
 
 #[derive(Derivative, CSSelectable)]
 #[derivative(Clone, Debug)]
@@ -62,6 +47,15 @@ pub struct EcrecoverPrecompileCallParams<F: SmallField> {
 }
 
 impl<F: SmallField> EcrecoverPrecompileCallParams<F> {
+    // pub fn empty() -> Self {
+    //     Self {
+    //         input_page: UInt32::<E>::zero(),
+    //         input_offset: UInt32::<E>::zero(),
+    //         output_page: UInt32::<E>::zero(),
+    //         output_offset: UInt32::<E>::zero(),
+    //     }
+    // }
+
     pub fn from_encoding<CS: ConstraintSystem<F>>(_cs: &mut CS, encoding: UInt256<F>) -> Self {
         let input_offset = encoding.inner[0];
         let output_offset = encoding.inner[2];
@@ -81,30 +75,11 @@ impl<F: SmallField> EcrecoverPrecompileCallParams<F> {
 
 const NUM_WORDS: usize = 17;
 const SECP_B_COEF: u64 = 7;
-const EXCEPTION_FLAGS_ARR_LEN: usize = 9;
+const EXCEPTION_FLAGS_ARR_LEN: usize = 8;
 const NUM_MEMORY_READS_PER_CYCLE: usize = 4;
 const X_POWERS_ARR_LEN: usize = 256;
 const VALID_Y_IN_EXTERNAL_FIELD: u64 = 4;
 const VALID_X_CUBED_IN_EXTERNAL_FIELD: u64 = 9;
-
-// GLV consts
-
-// 2**128
-const TWO_POW_128: &'static str = "340282366920938463463374607431768211456";
-// BETA s.t. for any curve point Q = (x,y):
-// lambda * Q = (beta*x mod p, y)
-const BETA: &'static str =
-    "55594575648329892869085402983802832744385952214688224221778511981742606582254";
-// Secp256k1.p - 1 / 2
-// 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc2f - 0x1 / 0x2
-const MODULUS_MINUS_ONE_DIV_TWO: &'static str =
-    "7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0";
-// Decomposition constants
-// Derived through algorithm 3.74 http://tomlr.free.fr/Math%E9matiques/Math%20Complete/Cryptography/Guide%20to%20Elliptic%20Curve%20Cryptography%20-%20D.%20Hankerson,%20A.%20Menezes,%20S.%20Vanstone.pdf
-// NOTE: B2 == A1
-const A1: &'static str = "0x3086d221a7d46bcde86c90e49284eb15";
-const B1: &'static str = "0xe4437ed6010e88286f547fa90abfe4c3";
-const A2: &'static str = "0x114ca50f7a8e2f3f657c1108d9d44cfd8";
 
 // assume that constructed field element is not zero
 // if this is not satisfied - set the result to be F::one
@@ -204,388 +179,7 @@ fn convert_uint256_to_field_element<
     element
 }
 
-// NOTE: caller must ensure that the field element is normalized, otherwise this will fail.
-fn convert_field_element_to_uint256<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
-    P: boojum::pairing::ff::PrimeField,
-    const N: usize,
->(
-    cs: &mut CS,
-    mut elem: NonNativeFieldOverU16<F, P, N>,
-) -> UInt256<F> {
-    assert_eq!(elem.form, RepresentationForm::Normalized);
-    assert_eq!(elem.tracker.max_moduluses, 1);
-
-    let mut limbs = [UInt32::<F>::zero(cs); 8];
-    let two_pow_16 = Num::allocated_constant(cs, F::from_u64_unchecked(2u32.pow(16) as u64));
-    for (dst, src) in limbs.iter_mut().zip(elem.limbs.array_chunks_mut::<2>()) {
-        let low = Num::from_variable(src[0]);
-        let high = Num::from_variable(src[1]);
-        *dst = unsafe {
-            UInt32::from_variable_unchecked(
-                Num::fma(cs, &high, &two_pow_16, &F::ONE, &low, &F::ONE).get_variable(),
-            )
-        };
-    }
-
-    UInt256 { inner: limbs }
-}
-
-fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
-    cs: &mut CS,
-    e: Secp256ScalarNNField<F>,
-    neg: Boolean<F>,
-    decomp_id: u32,
-    byte_split_id: u32,
-) -> Vec<UInt8<F>> {
-    let mut naf = vec![];
-    let mut bytes = e
-        .limbs
-        .iter()
-        .flat_map(|el| unsafe { UInt16::from_variable_unchecked(*el).to_le_bytes(cs) })
-        .collect::<Vec<UInt8<F>>>();
-
-    // Loop for max amount of bits in e to ensure homogenous circuit
-    for i in 0..33 {
-        // Since each lookup consumes 2 bits of information, and we need at least 3 bits for
-        // figuring out the NAF number, we can do two lookups before needing to propagated the
-        // changes up the bytestring.
-        let mut naf_overflow = None;
-        for j in 0..2 {
-            let res = cs.perform_lookup::<1, 2>(decomp_id, &[bytes[0].get_variable()]);
-            let wnaf_and_carry_bits = unsafe { UInt32::from_variable_unchecked(res[0]) };
-            let wnaf_bytes = wnaf_and_carry_bits.to_le_bytes(cs);
-            bytes[0] = unsafe { UInt8::from_variable_unchecked(res[1]) };
-            wnaf_bytes[..2].iter().for_each(|byte| {
-                let byte_neg = byte.negate(cs);
-                let byte = Selectable::conditionally_select(cs, neg, byte, &byte_neg);
-                naf.push(byte);
-            });
-            // Save carry bit.
-            // It only ever matters to save it on the first iteration as it is not possible
-            // to overflow for the second.
-            if j == 0 {
-                naf_overflow = Some(wnaf_bytes[2]);
-            }
-        }
-
-        // Break up the first byte into a lower chunk and a (potential) carry bit.
-        let res = cs.perform_lookup::<1, 2>(byte_split_id, &[bytes[0].get_variable()]);
-        let mut low = res[0];
-        let carry_bit = unsafe { UInt8::from_variable_unchecked(res[1]) };
-        let mut of = Boolean::allocated_constant(cs, true);
-
-        // Shift e and propagate carry.
-        // Because a GLV decomposed scalar is at most 129 bits, we only care to shift
-        // the lower 17 bytes of the number initially, and as we progress, more zero bytes
-        // will appear, lowering the amount of iterations needed to shift our number.
-        let num_iter = 16 - (i / 2);
-        bytes
-            .iter_mut()
-            .skip(1)
-            .take(num_iter)
-            .enumerate()
-            .for_each(|(i, b)| {
-                // Propagate carry
-                let (added_b, new_of) = b.overflowing_add(cs, &carry_bit);
-                *b = Selectable::conditionally_select(cs, of, &added_b, b);
-                of = new_of;
-                // If this is the first byte, we also add the NAF carry bit.
-                if i == 0 {
-                    let naf_of;
-                    (*b, naf_of) = b.overflowing_add(cs, &naf_overflow.unwrap());
-                    // If this overflows, we should remember to add a carry bit to the next element.
-                    of = Selectable::conditionally_select(cs, naf_of, &naf_of, &of);
-                }
-
-                // Glue bytes
-                let res = cs.perform_lookup::<1, 2>(byte_split_id, &[b.get_variable()]);
-                *b = unsafe {
-                    UInt8::from_variable_unchecked(merge_byte_using_table::<_, _, 4>(
-                        cs, low, res[0],
-                    ))
-                };
-                low = res[1];
-            });
-
-        // Shift up by one to align.
-        bytes = bytes[1..].to_vec();
-    }
-
-    naf
-}
-
-fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
-    cs: &mut CS,
-    mut point: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>,
-    mut scalar: Secp256ScalarNNField<F>,
-    base_field_params: &Arc<Secp256BaseNNFieldParams>,
-    scalar_field_params: &Arc<Secp256ScalarNNFieldParams>,
-) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
-    scalar.enforce_reduced(cs);
-
-    let pow_2_128 = U256::from_dec_str(TWO_POW_128).unwrap();
-    let pow_2_128 = UInt512::allocated_constant(cs, (pow_2_128, U256::zero()));
-
-    let beta = Secp256Fq::from_str(BETA).unwrap();
-    let mut beta = Secp256BaseNNField::allocated_constant(cs, beta, &base_field_params);
-
-    let bigint_from_hex_str = |cs: &mut CS, s: &str| -> UInt512<F> {
-        let v = U256::from_str_radix(s, 16).unwrap();
-        UInt512::allocated_constant(cs, (v, U256::zero()))
-    };
-
-    let modulus_minus_one_div_two = bigint_from_hex_str(cs, MODULUS_MINUS_ONE_DIV_TWO);
-
-    // Scalar decomposition
-    let (k1_neg, k1, k2_neg, k2) = {
-        let u256_from_hex_str = |cs: &mut CS, s: &str| -> UInt256<F> {
-            let v = U256::from_str_radix(s, 16).unwrap();
-            UInt256::allocated_constant(cs, v)
-        };
-
-        let a1 = u256_from_hex_str(cs, A1);
-        let b1 = u256_from_hex_str(cs, B1);
-        let a2 = u256_from_hex_str(cs, A2);
-        let b2 = a1.clone();
-
-        let k = convert_field_element_to_uint256(cs, scalar.clone());
-
-        // We take 8 non-zero limbs for the scalar (since it could be of any size), and 4 for B2
-        // (since it fits in 128 bits).
-        let b2_times_k = k.widening_mul(cs, &b2, 8, 4);
-        let b2_times_k = b2_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
-        let c1 = b2_times_k.0.to_high();
-
-        // We take 8 non-zero limbs for the scalar (since it could be of any size), and 4 for B1
-        // (since it fits in 128 bits).
-        let b1_times_k = k.widening_mul(cs, &b1, 8, 4);
-        let b1_times_k = b1_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
-        let c2 = b1_times_k.0.to_high();
-
-        let mut a1 = convert_uint256_to_field_element(cs, &a1, &scalar_field_params);
-        let mut b1 = convert_uint256_to_field_element(cs, &b1, &scalar_field_params);
-        let mut a2 = convert_uint256_to_field_element(cs, &a2, &scalar_field_params);
-        let mut b2 = a1.clone();
-        let mut c1 = convert_uint256_to_field_element(cs, &c1, &scalar_field_params);
-        let mut c2 = convert_uint256_to_field_element(cs, &c2, &scalar_field_params);
-
-        let mut c1_times_a1 = c1.mul(cs, &mut a1);
-        let mut c2_times_a2 = c2.mul(cs, &mut a2);
-        let mut k1 = scalar.sub(cs, &mut c1_times_a1).sub(cs, &mut c2_times_a2);
-        k1.normalize(cs);
-        let mut c2_times_b2 = c2.mul(cs, &mut b2);
-        let mut k2 = c1.mul(cs, &mut b1).sub(cs, &mut c2_times_b2);
-        k2.normalize(cs);
-
-        let k1_u256 = convert_field_element_to_uint256(cs, k1.clone());
-        let k2_u256 = convert_field_element_to_uint256(cs, k2.clone());
-        let low_pow_2_128 = pow_2_128.to_low();
-        let (_res, k1_neg) = k1_u256.overflowing_sub(cs, &low_pow_2_128);
-        let k1_negated = k1.negated(cs);
-        let k1 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
-            cs,
-            k1_neg,
-            &k1,
-            &k1_negated,
-        );
-        let (_res, k2_neg) = k2_u256.overflowing_sub(cs, &low_pow_2_128);
-        let k2_negated = k2.negated(cs);
-        let k2 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
-            cs,
-            k2_neg,
-            &k2,
-            &k2_negated,
-        );
-
-        (k1_neg, k1, k2_neg, k2)
-    };
-
-    // WNAF
-    // The scalar multiplication window size.
-    const GLV_WINDOW_SIZE: usize = 2;
-
-    // The GLV table length.
-    const L: usize = 1 << (GLV_WINDOW_SIZE - 1);
-
-    let mut t1 = Vec::with_capacity(L);
-    // We use `convert_to_affine_or_default`, but we don't need to worry about returning 1, since
-    // we know that the point is not infinity.
-    let (mut double, _) = point
-        .double(cs)
-        .convert_to_affine_or_default(cs, Secp256Affine::one());
-    t1.push(point.clone());
-    for i in 1..L {
-        let next = t1[i - 1].add_mixed(cs, &mut double);
-        t1.push(next);
-    }
-
-    let t1 = t1
-        .iter_mut()
-        .map(|el| el.convert_to_affine_or_default(cs, Secp256Affine::one()).0)
-        .collect::<Vec<_>>();
-
-    let t2 = t1
-        .clone()
-        .into_iter()
-        .map(|mut el| (el.0.mul(cs, &mut beta), el.1))
-        .collect::<Vec<_>>();
-
-    let overflow_checker = UInt8::allocated_constant(cs, 2u8.pow(7));
-    let decomp_id = cs
-        .get_table_id_for_marker::<WnafDecompTable>()
-        .expect("table should exist");
-    let byte_split_id = cs
-        .get_table_id_for_marker::<ByteSplitTable<4>>()
-        .expect("table should exist");
-
-    let naf_abs_div2_table_id = cs
-        .get_table_id_for_marker::<NafAbsDiv2Table>()
-        .expect("table must exist");
-    let naf_add =
-        |cs: &mut CS,
-         table: &[(Secp256BaseNNField<F>, Secp256BaseNNField<F>)],
-         naf: UInt8<F>,
-         acc: &mut SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>| {
-            let is_zero = naf.is_zero(cs);
-            let index = unsafe {
-                UInt8::from_variable_unchecked(
-                    cs.perform_lookup::<1, 2>(naf_abs_div2_table_id, &[naf.get_variable()])[0],
-                )
-            };
-            let coords = &table[index.witness_hook(cs)().unwrap() as usize];
-            let mut p_1 =
-                SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(
-                    cs,
-                    coords.0.clone(),
-                    coords.1.clone(),
-                );
-            let (_, naf_is_positive) = naf.overflowing_sub(cs, &overflow_checker);
-            let p_1_neg = p_1.negated(cs);
-            p_1 = Selectable::conditionally_select(cs, naf_is_positive, &p_1, &p_1_neg);
-            let acc_added = acc.add_mixed(cs, &mut (p_1.x, p_1.y));
-            *acc = Selectable::conditionally_select(cs, is_zero, &acc, &acc_added);
-        };
-
-    let naf1 = to_wnaf(cs, k1, k1_neg, decomp_id, byte_split_id);
-    let naf2 = to_wnaf(cs, k2, k2_neg, decomp_id, byte_split_id);
-    let mut acc =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_field_params);
-    for i in (0..129).rev() {
-        naf_add(cs, &t1, naf1[i], &mut acc);
-        naf_add(cs, &t2, naf2[i], &mut acc);
-        if i != 0 {
-            acc = acc.double(cs);
-        }
-    }
-
-    acc
-}
-
-fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
-    cs: &mut CS,
-    mut message_hash_by_r_inv: Secp256ScalarNNField<F>,
-    base_field_params: &Arc<Secp256BaseNNFieldParams>,
-) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
-    message_hash_by_r_inv.enforce_reduced(cs);
-    let is_zero = message_hash_by_r_inv.is_zero(cs);
-    let bytes = message_hash_by_r_inv
-        .limbs
-        .iter()
-        .take(16)
-        .flat_map(|el| unsafe { UInt16::from_variable_unchecked(*el).to_le_bytes(cs) })
-        .collect::<Vec<UInt8<F>>>();
-
-    let zero_point =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
-    let mut acc =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
-    let mut full_table_ids = vec![];
-    seq_macro::seq!(C in 0..32 {
-        let ids = vec![
-            cs.get_table_id_for_marker::<FixedBaseMulTable<0, C>>()
-                .expect("table must exist"),
-            cs.get_table_id_for_marker::<FixedBaseMulTable<1, C>>()
-                .expect("table must exist"),
-            cs.get_table_id_for_marker::<FixedBaseMulTable<2, C>>()
-                .expect("table must exist"),
-            cs.get_table_id_for_marker::<FixedBaseMulTable<3, C>>()
-                .expect("table must exist"),
-            cs.get_table_id_for_marker::<FixedBaseMulTable<4, C>>()
-                .expect("table must exist"),
-            cs.get_table_id_for_marker::<FixedBaseMulTable<5, C>>()
-                .expect("table must exist"),
-            cs.get_table_id_for_marker::<FixedBaseMulTable<6, C>>()
-                .expect("table must exist"),
-            cs.get_table_id_for_marker::<FixedBaseMulTable<7, C>>()
-                .expect("table must exist"),
-        ];
-        full_table_ids.push(ids);
-    });
-
-    full_table_ids
-        .into_iter()
-        .zip(bytes)
-        .rev()
-        .for_each(|(ids, byte)| {
-            // let chunks = ids
-            //     .iter()
-            //     .map(|id| cs.perform_lookup::<1, 2>(*id, &[byte.get_variable()]))
-            //     .collect::<Vec<[Variable; 2]>>();
-
-            let (x, y): (Vec<Variable>, Vec<Variable>) = ids
-                .iter()
-                .flat_map(|id| {
-                    let [x_v, y_v] = cs.perform_lookup::<1, 2>(*id, &[byte.get_variable()]);
-                    let x_v = unsafe { UInt32::from_variable_unchecked(x_v) };
-                    let y_v = unsafe { UInt32::from_variable_unchecked(y_v) };
-                    let x_v = x_v.to_le_bytes(cs);
-                    let y_v = y_v.to_le_bytes(cs);
-                    let x_1 = UInt16::from_le_bytes(cs, x_v[..2].try_into().unwrap());
-                    let x_2 = UInt16::from_le_bytes(cs, x_v[2..].try_into().unwrap());
-                    let y_1 = UInt16::from_le_bytes(cs, y_v[..2].try_into().unwrap());
-                    let y_2 = UInt16::from_le_bytes(cs, y_v[2..].try_into().unwrap());
-                    [
-                        (x_1.get_variable(), y_1.get_variable()),
-                        (x_2.get_variable(), y_2.get_variable()),
-                    ]
-                })
-                .collect::<Vec<(Variable, Variable)>>()
-                .into_iter()
-                .unzip();
-            let zero_var = cs.allocate_constant(F::ZERO);
-            let mut x_arr = [zero_var; 17];
-            x_arr[..16].copy_from_slice(&x[..16]);
-            let mut y_arr = [zero_var; 17];
-            y_arr[..16].copy_from_slice(&y[..16]);
-            let x = NonNativeFieldOverU16 {
-                limbs: x_arr,
-                non_zero_limbs: 16,
-                tracker: OverflowTracker { max_moduluses: 1 },
-                form: RepresentationForm::Normalized,
-                params: base_field_params.clone(),
-                _marker: std::marker::PhantomData,
-            };
-            let y = NonNativeFieldOverU16 {
-                limbs: y_arr,
-                non_zero_limbs: 16,
-                tracker: OverflowTracker { max_moduluses: 1 },
-                form: RepresentationForm::Normalized,
-                params: base_field_params.clone(),
-                _marker: std::marker::PhantomData,
-            };
-            acc = acc.add_mixed(cs, &mut (x, y));
-        });
-    acc = Selectable::conditionally_select(cs, is_zero, &zero_point, &acc);
-    acc
-}
-
-fn ecrecover_precompile_inner_routine<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
-    const MESSAGE_HASH_CAN_BE_ZERO: bool,
->(
+fn ecrecover_precompile_inner_routine<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     recid: &UInt8<F>,
     r: &UInt256<F>,
@@ -660,14 +254,9 @@ fn ecrecover_precompile_inner_routine<
         convert_uint256_to_field_element_masked(cs, &s, &scalar_field_params);
     exception_flags.push(s_is_zero);
 
-    let (mut message_hash_fe, message_hash_is_zero) = if MESSAGE_HASH_CAN_BE_ZERO {
-        (
-            convert_uint256_to_field_element(cs, &message_hash, scalar_field_params),
-            Boolean::allocated_constant(cs, false),
-        )
-    } else {
-        convert_uint256_to_field_element_masked(cs, &message_hash, scalar_field_params)
-    };
+    // NB: although it is not strictly an exception we also assume that hash is never zero as field element
+    let (mut message_hash_fe, message_hash_is_zero) =
+        convert_uint256_to_field_element_masked(cs, &message_hash, &scalar_field_params);
     exception_flags.push(message_hash_is_zero);
 
     // curve equation is y^2 = x^3 + b
@@ -718,7 +307,8 @@ fn ecrecover_precompile_inner_routine<
 
     let mut may_be_recovered_y = t_powers[254].div_unchecked(cs, &mut acc_2);
     may_be_recovered_y.normalize(cs);
-    let may_be_recovered_y_negated = may_be_recovered_y.negated(cs);
+    let mut may_be_recovered_y_negated = may_be_recovered_y.negated(cs);
+    may_be_recovered_y_negated.normalize(cs);
 
     let [lowest_bit, ..] =
         Num::<F>::from_variable(may_be_recovered_y.limbs[0]).spread_into_bits::<_, 16>(cs);
@@ -755,30 +345,67 @@ fn ecrecover_precompile_inner_routine<
     s_by_r_inv.normalize(cs);
     message_hash_by_r_inv.normalize(cs);
 
+    let mut gen_negated = Secp256Affine::one();
+    gen_negated.negate();
+    let (gen_negated_x, gen_negated_y) = gen_negated.into_xy_unchecked();
+    let gen_negated_x =
+        Secp256BaseNNField::allocated_constant(cs, gen_negated_x, base_field_params);
+    let gen_negated_y =
+        Secp256BaseNNField::allocated_constant(cs, gen_negated_y, base_field_params);
+
+    let s_by_r_inv_normalized_lsb_bits: Vec<_> = s_by_r_inv
+        .limbs
+        .iter()
+        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
+        .flatten()
+        .collect();
+    let message_hash_by_r_inv_lsb_bits: Vec<_> = message_hash_by_r_inv
+        .limbs
+        .iter()
+        .map(|el| Num::<F>::from_variable(*el).spread_into_bits::<_, 16>(cs))
+        .flatten()
+        .collect();
+
     // now we are going to compute the public key Q = (x, y) determined by the formula:
     // Q = (s * X - hash * G) / r which is equivalent to r * Q = s * X - hash * G
+    // current implementation of point by scalar multiplications doesn't support multiplication by zero
+    // so we check that all s, r, hash are not zero (as FieldElements):
+    // if any of them is zero we reject the signature and in circuit itself replace all zero variables by ones
 
-    let recovered_point =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(cs, x, y);
-    // now we do multiplication
-    let mut s_times_x = wnaf_scalar_mul(
-        cs,
-        recovered_point.clone(),
-        s_by_r_inv.clone(),
-        &base_field_params,
-        &scalar_field_params,
-    );
+    let mut recovered_point = (x, y);
+    let mut generator_point = (gen_negated_x, gen_negated_y);
+    // now we do multiexponentiation
+    let mut q_acc =
+        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
 
-    let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv, &base_field_params);
+    // we should start from MSB, double the accumulator, then conditionally add
+    for (cycle, (x_bit, hash_bit)) in s_by_r_inv_normalized_lsb_bits
+        .into_iter()
+        .rev()
+        .zip(message_hash_by_r_inv_lsb_bits.into_iter().rev())
+        .enumerate()
+    {
+        if cycle != 0 {
+            q_acc = q_acc.double(cs);
+        }
+        let q_plus_x = q_acc.add_mixed(cs, &mut recovered_point);
+        let mut q_0: SWProjectivePoint<F, Secp256Affine, NonNativeFieldOverU16<F, Secp256Fq, 17>> =
+            Selectable::conditionally_select(cs, x_bit, &q_plus_x, &q_acc);
 
-    let (mut q_acc, is_infinity) =
-        hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
-    let q_acc_added = s_times_x.add_mixed(cs, &mut q_acc);
-    let mut q_acc = Selectable::conditionally_select(cs, is_infinity, &s_times_x, &q_acc_added);
+        let q_plux_gen = q_0.add_mixed(cs, &mut generator_point);
+        let q_1 = Selectable::conditionally_select(cs, hash_bit, &q_plux_gen, &q_0);
 
-    let ((q_x, q_y), is_infinity) = q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
+        q_acc = q_1;
+    }
+
+    use boojum::pairing::GenericCurveAffine;
+    let ((mut q_x, mut q_y), is_infinity) =
+        q_acc.convert_to_affine_or_default(cs, Secp256Affine::one());
     exception_flags.push(is_infinity);
     let any_exception = Boolean::multi_or(cs, &exception_flags[..]);
+
+    q_x.normalize(cs);
+    q_y.normalize(cs);
 
     let zero_u8 = UInt8::zero(cs);
 
@@ -966,7 +593,7 @@ where
         let [message_hash_as_u256, v_as_u256, r_as_u256, s_as_u256] = read_values;
         let rec_id = v_as_u256.inner[0].to_le_bytes(cs)[0];
 
-        let (success, written_value) = ecrecover_precompile_inner_routine::<_, _, ALLOW_ZERO_MESSAGE>(
+        let (success, written_value) = ecrecover_precompile_inner_routine(
             cs,
             &rec_id,
             &r_as_u256,
@@ -1132,28 +759,17 @@ mod test {
         u256
     }
 
-    use crate::ecrecover::secp256k1::fixed_base_mul_table::{
-        create_fixed_base_mul_table, FixedBaseMulTable,
-    };
     use boojum::cs::cs_builder::*;
     use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
     use boojum::cs::gates::*;
-    use boojum::cs::implementations::reference_cs::CSReferenceImplementation;
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::gadgets::tables::*;
 
-    fn create_cs(
-        max_trace_len: usize,
-    ) -> CSReferenceImplementation<
-        F,
-        P,
-        DevCSConfig,
-        impl GateConfigurationHolder<F>,
-        impl StaticToolboxHolder,
-    > {
+    #[test]
+    fn test_signature_for_address_verification() {
         let geometry = CSGeometry {
             num_columns_under_copy_permutation: 100,
             num_witness_columns: 0,
@@ -1161,6 +777,7 @@ mod test {
             max_allowed_constraint_degree: 4,
         };
         let max_variables = 1 << 26;
+        let max_trace_len = 1 << 20;
 
         fn configure<
             F: SmallField,
@@ -1176,10 +793,6 @@ mod test {
                     num_repetitions: 8,
                     share_table_id: true,
                 },
-            );
-            let builder = U8x4FMAGate::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
             );
             let builder = ConstantsAllocatorGate::configure_builder(
                 builder,
@@ -1203,10 +816,6 @@ mod test {
                 GatePlacementStrategy::UseGeneralPurposeColumns,
             );
             let builder = UIntXAddGate::<16>::configure_builder(
-                builder,
-                GatePlacementStrategy::UseGeneralPurposeColumns,
-            );
-            let builder = UIntXAddGate::<8>::configure_builder(
                 builder,
                 GatePlacementStrategy::UseGeneralPurposeColumns,
             );
@@ -1249,31 +858,6 @@ mod test {
         let table = create_and8_table();
         owned_cs.add_lookup_table::<And8Table, 3>(table);
 
-        let table = create_naf_abs_div2_table();
-        owned_cs.add_lookup_table::<NafAbsDiv2Table, 3>(table);
-
-        let table = create_wnaf_decomp_table();
-        owned_cs.add_lookup_table::<WnafDecompTable, 3>(table);
-
-        seq_macro::seq!(C in 0..32 {
-            let table = create_fixed_base_mul_table::<F, 0, C>();
-            owned_cs.add_lookup_table::<FixedBaseMulTable<0, C>, 3>(table);
-            let table = create_fixed_base_mul_table::<F, 1, C>();
-            owned_cs.add_lookup_table::<FixedBaseMulTable<1, C>, 3>(table);
-            let table = create_fixed_base_mul_table::<F, 2, C>();
-            owned_cs.add_lookup_table::<FixedBaseMulTable<2, C>, 3>(table);
-            let table = create_fixed_base_mul_table::<F, 3, C>();
-            owned_cs.add_lookup_table::<FixedBaseMulTable<3, C>, 3>(table);
-            let table = create_fixed_base_mul_table::<F, 4, C>();
-            owned_cs.add_lookup_table::<FixedBaseMulTable<4, C>, 3>(table);
-            let table = create_fixed_base_mul_table::<F, 5, C>();
-            owned_cs.add_lookup_table::<FixedBaseMulTable<5, C>, 3>(table);
-            let table = create_fixed_base_mul_table::<F, 6, C>();
-            owned_cs.add_lookup_table::<FixedBaseMulTable<6, C>, 3>(table);
-            let table = create_fixed_base_mul_table::<F, 7, C>();
-            owned_cs.add_lookup_table::<FixedBaseMulTable<7, C>, 3>(table);
-        });
-
         let table = create_byte_split_table::<F, 1>();
         owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
         let table = create_byte_split_table::<F, 2>();
@@ -1283,12 +867,6 @@ mod test {
         let table = create_byte_split_table::<F, 4>();
         owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
 
-        owned_cs
-    }
-
-    #[test]
-    fn test_signature_for_address_verification() {
-        let mut owned_cs = create_cs(1 << 20);
         let cs = &mut owned_cs;
 
         let sk = crate::ff::from_hex::<Secp256Fr>(
@@ -1329,215 +907,23 @@ mod test {
             &base_params,
         );
 
-        for _ in 0..5 {
-            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, false>(
-                cs,
-                &rec_id,
-                &r,
-                &s,
-                &digest,
-                valid_x_in_external_field.clone(),
-                valid_y_in_external_field.clone(),
-                valid_t_in_external_field.clone(),
-                &base_params,
-                &scalar_params,
-            );
-
-            assert!(no_error.witness_hook(&*cs)().unwrap() == true);
-            let recovered_address = digest.to_be_bytes(cs);
-            let recovered_address = recovered_address.witness_hook(cs)().unwrap();
-            assert_eq!(&recovered_address[12..], &eth_address[..]);
-        }
-
-        dbg!(cs.next_available_row());
-
-        cs.pad_and_shrink();
-
-        let mut cs = owned_cs.into_assembly();
-        cs.print_gate_stats();
-        let worker = Worker::new();
-        assert!(cs.check_if_satisfied(&worker));
-    }
-
-    #[test]
-    fn test_ecrecover_zero_elements() {
-        let mut owned_cs = create_cs(1 << 21);
-        let cs = &mut owned_cs;
-
-        let sk = crate::ff::from_hex::<Secp256Fr>(
-            "b5b1870957d373ef0eeffecc6e4812c0fd08f554b37b233526acc331bf1544f7",
-        )
-        .unwrap();
-        let (r, s, _pk, digest) = simulate_signature_for_sk(sk);
-
-        let scalar_params = secp256k1_scalar_field_params();
-        let base_params = secp256k1_base_field_params();
-
-        let zero_digest = Secp256Fr::zero();
-        let zero_r = Secp256Fr::zero();
-        let zero_s = Secp256Fr::zero();
-
-        let digest_u256 = repr_into_u256(digest.into_repr());
-        let r_u256 = repr_into_u256(r.into_repr());
-        let s_u256 = repr_into_u256(s.into_repr());
-
-        let zero_digest_u256 = repr_into_u256(zero_digest.into_repr());
-        let zero_r_u256 = repr_into_u256(zero_r.into_repr());
-        let zero_s_u256 = repr_into_u256(zero_s.into_repr());
-
-        let rec_id = UInt8::allocate_checked(cs, 0);
-        let r = UInt256::allocate(cs, r_u256);
-        let s = UInt256::allocate(cs, s_u256);
-        let digest = UInt256::allocate(cs, digest_u256);
-
-        let zero_r = UInt256::allocate(cs, zero_r_u256);
-        let zero_s = UInt256::allocate(cs, zero_s_u256);
-        let zero_digest = UInt256::allocate(cs, zero_digest_u256);
-
-        // Create an r that is unrecoverable.
-        let r_unrecoverable =
-            UInt256::allocate(cs, U256::from(0u64).overflowing_sub(U256::from(1u64)).0);
-
-        let scalar_params = Arc::new(scalar_params);
-        let base_params = Arc::new(base_params);
-
-        let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
+        let (no_error, digest) = ecrecover_precompile_inner_routine(
             cs,
-            Secp256Fq::from_str("9").unwrap(),
+            &rec_id,
+            &r,
+            &s,
+            &digest,
+            valid_x_in_external_field.clone(),
+            valid_y_in_external_field.clone(),
+            valid_t_in_external_field.clone(),
             &base_params,
-        );
-        let valid_t_in_external_field = Secp256BaseNNField::allocated_constant(
-            cs,
-            Secp256Fq::from_str("16").unwrap(),
-            &base_params,
-        );
-        let valid_y_in_external_field = Secp256BaseNNField::allocated_constant(
-            cs,
-            Secp256Fq::from_str("4").unwrap(),
-            &base_params,
+            &scalar_params,
         );
 
-        // Construct a table of all combinations of correct and incorrect values
-        // for r, s, and digest.
-        let r_values = vec![r, zero_r, r_unrecoverable];
-        let s_values = vec![s, zero_s];
-        let digest_values = vec![digest, zero_digest];
-
-        // We ensure that there are no combinations where all correct items are chosen, so that we
-        // can consistently check for errors.
-        let mut first = true;
-        let mut all_combinations = vec![];
-        for r in r_values.iter() {
-            for s in s_values.iter() {
-                for digest in digest_values.iter() {
-                    if first {
-                        first = false;
-                        continue;
-                    }
-                    all_combinations.push((r.clone(), s.clone(), digest.clone()));
-                }
-            }
-        }
-
-        for (r, s, digest) in all_combinations.into_iter() {
-            let (no_error, _digest) = ecrecover_precompile_inner_routine::<_, _, false>(
-                cs,
-                &rec_id,
-                &r,
-                &s,
-                &digest,
-                valid_x_in_external_field.clone(),
-                valid_y_in_external_field.clone(),
-                valid_t_in_external_field.clone(),
-                &base_params,
-                &scalar_params,
-            );
-
-            assert!(no_error.witness_hook(&*cs)().unwrap() == false);
-        }
-    }
-
-    // As discussed on ethresearch forums, a caller may 'abuse' ecrecover in order to compute a
-    // secp256k1 ecmul in the EVM. This test compares the result of an ecrecover scalar mul with
-    // the output of a previously tested ecmul in the EVM.
-    //
-    // It works as follows: given a point x coordinate `r`, we set `s` to be `r * k` for some `k`.
-    // This then works out in the secp256k1 recover equation to create the equation
-    // `res = (r, y) * r * k * inv(r, P)` which is equal to `res = (r, y) * k`, effectively
-    // performing a scalar multiplication.
-    //
-    // https://ethresear.ch/t/you-can-kinda-abuse-ecrecover-to-do-ecmul-in-secp256k1-today/2384
-    #[test]
-    fn test_ecrecover_scalar_mul_trick() {
-        use rand::Rand;
-        let mut owned_cs = create_cs(1 << 20);
-        let cs = &mut owned_cs;
-
-        // NOTE: This is essentially reducing a base field to a scalar field element. Due to the
-        // nature of the recovery equation turning into `(r, y) * r * k * inv(r, P)`, reducing r to
-        // a scalar value would yield the same result regardless.
-        let r = crate::ff::from_hex::<Secp256Fr>(
-            "00000000000000009b37e91445e92b1423354825aa33d841d83cacfdd895d316ae88dabc31736996",
-        )
-        .unwrap();
-        let k = crate::ff::from_hex::<Secp256Fr>(
-            "0000000000000000005aa98b08426f9dea29001fc925f3f35a10c9927082fe4d026cc485d1ebb430",
-        )
-        .unwrap();
-        let mut s = r.clone();
-        s.mul_assign(&k);
-        let evm_tested_digest = hex::decode("eDc01060fdD6592f54A63EAE6C89436675C4d70D").unwrap();
-
-        let scalar_params = secp256k1_scalar_field_params();
-        let base_params = secp256k1_base_field_params();
-
-        let r_u256 = repr_into_u256(r.into_repr());
-        let s_u256 = repr_into_u256(s.into_repr());
-
-        let rec_id = UInt8::allocate_checked(cs, 0);
-        let r = UInt256::allocate(cs, r_u256);
-        let s = UInt256::allocate(cs, s_u256);
-        let digest = UInt256::allocate(cs, U256::zero());
-
-        let scalar_params = Arc::new(scalar_params);
-        let base_params = Arc::new(base_params);
-
-        let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
-            cs,
-            Secp256Fq::from_str("9").unwrap(),
-            &base_params,
-        );
-        let valid_t_in_external_field = Secp256BaseNNField::allocated_constant(
-            cs,
-            Secp256Fq::from_str("16").unwrap(),
-            &base_params,
-        );
-        let valid_y_in_external_field = Secp256BaseNNField::allocated_constant(
-            cs,
-            Secp256Fq::from_str("4").unwrap(),
-            &base_params,
-        );
-
-        for _ in 0..5 {
-            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, true>(
-                cs,
-                &rec_id,
-                &r,
-                &s,
-                &digest,
-                valid_x_in_external_field.clone(),
-                valid_y_in_external_field.clone(),
-                valid_t_in_external_field.clone(),
-                &base_params,
-                &scalar_params,
-            );
-
-            // Zero digest shouldn't give us an error
-            assert!(no_error.witness_hook(&*cs)().unwrap() == true);
-            let recovered_address = digest.to_be_bytes(cs);
-            let recovered_address = recovered_address.witness_hook(cs)().unwrap();
-            assert_eq!(&recovered_address[12..], &evm_tested_digest[..]);
-        }
+        assert!(no_error.witness_hook(&*cs)().unwrap() == true);
+        let recovered_address = digest.to_be_bytes(cs);
+        let recovered_address = recovered_address.witness_hook(cs)().unwrap();
+        assert_eq!(&recovered_address[12..], &eth_address[..]);
 
         dbg!(cs.next_available_row());
 
