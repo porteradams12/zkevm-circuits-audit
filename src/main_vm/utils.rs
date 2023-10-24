@@ -577,11 +577,12 @@ pub fn calculate_memory_cost_eth<CS: ConstraintSystem<F>, F: SmallField>(
         });
     }
 
-    let bytes = [bytes[1], bytes[2], bytes[3], bytes[4]];
-    let mut rhs = UInt32::from_be_bytes(cs, bytes);
+    let rhs_bytes = [bytes[4], bytes[3], bytes[2], bytes[1]];
+    let mut rhs = UInt32::from_le_bytes(cs, rhs_bytes);
 
     // Check bytes 6, 7, 8 for zero.
-    let byte6_is_zero = hi.1[1].is_zero(cs);
+    let byte6_is_zero = bytes[0].is_zero(cs); // check directly from the array here since we
+                                              // shifted it
     let byte7_is_zero = hi.1[2].is_zero(cs);
     let byte8_is_zero = hi.1[3].is_zero(cs);
     let hi_is_zero = Boolean::multi_and(cs, &[byte6_is_zero, byte7_is_zero, byte8_is_zero]);
