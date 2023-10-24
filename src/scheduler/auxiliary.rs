@@ -14,6 +14,7 @@ use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::{boolean::Boolean, num::Num, queue::*, traits::selectable::Selectable};
 
 use crate::base_structures::precompile_input_outputs::*;
+use crate::eip_4844::input::EIP4844OutputData;
 use crate::log_sorter::input::*;
 use crate::storage_application::input::*;
 use boojum::gadgets::u8::UInt8;
@@ -40,6 +41,7 @@ pub enum BaseLayerCircuitType {
     EventsRevertsFilter = 11,
     L1MessagesRevertsFilter = 12,
     L1MessagesHasher = 13,
+    EIP4844 = 14,
 }
 
 impl BaseLayerCircuitType {
@@ -58,6 +60,7 @@ impl BaseLayerCircuitType {
             a if a == Self::EventsRevertsFilter as u8 => Self::EventsRevertsFilter,
             a if a == Self::L1MessagesRevertsFilter as u8 => Self::L1MessagesRevertsFilter,
             a if a == Self::L1MessagesHasher as u8 => Self::L1MessagesHasher,
+            a if a == Self::EIP4844 as u8 => Self::EIP4844,
             _ => {
                 panic!("unknown circuit type {}", value)
             }
@@ -236,6 +239,21 @@ pub(crate) fn compute_hasher_circuit_commitment<
         commit_variable_length_encodable_item(cs, &output_data, round_function);
 
     (input_data_commitment, output_data_commitment)
+}
+
+#[track_caller]
+pub(crate) fn compute_eip4844_circuit_commitment<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+>(
+    cs: &mut CS,
+    output_hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
+    round_function: &R,
+) -> [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH] {
+    let output_data = EIP4844OutputData { output_hash };
+
+    commit_variable_length_encodable_item(cs, &output_data, round_function)
 }
 
 #[track_caller]

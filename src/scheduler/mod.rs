@@ -56,6 +56,7 @@ use std::collections::HashMap;
 use crate::base_structures::vm_state::*;
 use crate::code_unpacker_sha256::input::*;
 use crate::demux_log_queue::input::*;
+use crate::eip_4844::input::*;
 use crate::fsm_input_output::circuit_inputs::main_vm::*;
 use crate::fsm_input_output::*;
 use crate::log_sorter::input::*;
@@ -86,6 +87,7 @@ pub const SEQUENCE_OF_CIRCUIT_TYPES: [BaseLayerCircuitType; NUM_CIRCUIT_TYPES_TO
     BaseLayerCircuitType::EventsRevertsFilter,
     BaseLayerCircuitType::L1MessagesRevertsFilter,
     BaseLayerCircuitType::L1MessagesHasher,
+    BaseLayerCircuitType::EIP4844,
 ];
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
@@ -208,6 +210,9 @@ pub fn scheduler_function<
     let l1messages_linear_hasher_observable_output =
         LinearHasherOutputData::allocate(cs, witness.l1messages_linear_hasher_observable_output);
 
+    let eip4844_observable_output =
+        EIP4844OutputData::allocate(cs, witness.eip4844_observable_output);
+
     // auxilary intermediate states
     let rollup_storage_sorter_intermediate_queue_state = QueueTailState::allocate(
         cs,
@@ -321,6 +326,13 @@ pub fn scheduler_function<
         &log_demuxer_observable_output.ecrecover_access_queue_state,
         &sha256_observable_output.final_memory_state,
         &ecrecover_observable_output.final_memory_state,
+        round_function,
+    );
+
+    // eip4844
+    let eip4844_circuit_observable_output_commitment = compute_eip4844_circuit_commitment(
+        cs,
+        eip4844_observable_output.output_hash,
         round_function,
     );
 
@@ -553,6 +565,10 @@ pub fn scheduler_function<
                 (
                     BaseLayerCircuitType::L1MessagesHasher,
                     l1_messages_hasher_output_com,
+                ),
+                (
+                    BaseLayerCircuitType::EIP4844,
+                    eip4844_circuit_observable_output_commitment,
                 ),
             ]
             .into_iter(),
