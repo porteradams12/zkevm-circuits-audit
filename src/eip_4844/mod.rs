@@ -188,15 +188,6 @@ where
     let params = Arc::new(Bls12_381ScalarNNFieldParams::create());
     let mut evaluation_point = convert_keccak_digest_to_field_element(cs, truncated_hash, &params);
 
-    //
-    // Recompute the hash and check equality, and form blob polynomial simultaneously.
-    //
-    let keccak_accumulator_state =
-        [[[zero_u8; keccak256::BYTES_PER_WORD]; keccak256::LANE_WIDTH]; keccak256::LANE_WIDTH];
-
-    let mut keccak_accumulator_state =
-        keccak_accumulator_state.map(|el| el.map(|el| el.map(|el| el.get_variable())));
-
     use crate::base_structures::log_query::L2_TO_L1_MESSAGE_BYTE_LENGTH;
     // we do not serialize length because it's recalculatable in L1
 
