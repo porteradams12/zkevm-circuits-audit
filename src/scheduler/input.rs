@@ -74,6 +74,12 @@ pub struct SchedulerCircuitInstanceWitness<
     pub previous_block_meta_hash: [u8; 32],
     pub previous_block_aux_hash: [u8; 32],
 
+    // eip4844 witnesses
+    pub linear_hash: [[u8; 32]; 2],
+    pub versioned_hash: [[u8; 32]; 2],
+    pub evaluation_point: [[u8; 32]; 2],
+    pub opening_value: [[u8; 32]; 2],
+
     // proofs for every individual circuit type's aggregation subtree
     #[derivative(Debug = "ignore")]
     pub proof_witnesses: VecDeque<Proof<F, H::NonCircuitSimulator, EXT>>,
@@ -121,6 +127,11 @@ impl<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, Ba
 
             previous_block_meta_hash: [0u8; 32],
             previous_block_aux_hash: [0u8; 32],
+
+            linear_hash: [[0u8; 32]; 2],
+            versioned_hash: [[0u8; 32]; 2],
+            evaluation_point: [[0u8; 32]; 2],
+            opening_value: [[0u8; 32]; 2],
 
             proof_witnesses: VecDeque::new(),
             node_layer_vk_witness: VerificationKey::default(),

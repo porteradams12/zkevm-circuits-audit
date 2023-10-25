@@ -209,9 +209,6 @@ pub fn scheduler_function<
     let l1messages_linear_hasher_observable_output =
         LinearHasherOutputData::allocate(cs, witness.l1messages_linear_hasher_observable_output);
 
-    let eip4844_observable_output =
-        EIP4844OutputData::allocate(cs, witness.eip4844_observable_output);
-
     // auxilary intermediate states
     let rollup_storage_sorter_intermediate_queue_state = QueueTailState::allocate(
         cs,
@@ -325,14 +322,6 @@ pub fn scheduler_function<
         &log_demuxer_observable_output.ecrecover_access_queue_state,
         &sha256_observable_output.final_memory_state,
         &ecrecover_observable_output.final_memory_state,
-        round_function,
-    );
-
-    // eip4844
-    let eip4844_circuit_observable_output_commitment = compute_eip4844_output_commitment(
-        cs,
-        eip4844_observable_output.linear_hash,
-        eip4844_observable_output.output_hash,
         round_function,
     );
 
@@ -565,10 +554,6 @@ pub fn scheduler_function<
                 (
                     BaseLayerCircuitType::L1MessagesHasher,
                     l1_messages_hasher_output_com,
-                ),
-                (
-                    BaseLayerCircuitType::EIP4844,
-                    eip4844_circuit_observable_output_commitment,
                 ),
             ]
             .into_iter(),
@@ -974,12 +959,67 @@ pub fn scheduler_function<
         dst.reverse();
     }
 
+    // eip4844 circuit
+    let mut eip4844_linear_hashes = vec![];
+    let mut eip4844_output_commitment_hashes = vec![];
+    for (((linear_hash, versioned_hash), evaluation_point), opening_value) in witness
+        .linear_hash
+        .iter()
+        .zip(witness.versioned_hash.iter())
+        .zip(witness.evaluation_point.iter())
+        .zip(witness.opening_value.iter())
+    {
+        let linear_hash_is_zero = *linear_hash != [0u8; 32];
+        let should_verify = Boolean::allocated_constant(cs, linear_hash_is_zero);
+        let linear_hash = <[UInt8<F>; 32]>::allocate(cs, *linear_hash);
+        let versioned_hash = <[UInt8<F>; 32]>::allocate(cs, *versioned_hash);
+        let evaluation_point = <[UInt8<F>; 32]>::allocate(cs, *evaluation_point);
+        let opening_value = <[UInt8<F>; 32]>::allocate(cs, *opening_value);
+        let expected_output_commitment_hash = keccak256::keccak256(
+            cs,
+            &versioned_hash
+                .into_iter()
+                .chain(evaluation_point.into_iter())
+                .chain(opening_value.into_iter())
+                .collect::<Vec<UInt8<F>>>(),
+        );
+
+        let proof_witness = proof_witnesses.pop_front();
+
+        let proof = AllocatedProof::allocate_from_witness(
+            cs,
+            proof_witness,
+            &verifier,
+            &config.vk_fixed_parameters,
+            &config.proof_config,
+        );
+
+        let (is_valid, _inputs) = verifier.verify::<H, TR, CTR, POW>(
+            cs,
+            transcript_params.clone(),
+            &proof,
+            &config.vk_fixed_parameters,
+            &config.proof_config,
+            &node_layer_vk,
+        );
+
+        is_valid.conditionally_enforce_true(cs, should_verify);
+        eip4844_linear_hashes.push(linear_hash);
+        eip4844_output_commitment_hashes.push(expected_output_commitment_hash);
+    }
+
     let aux_data = BlockAuxilaryOutput {
         rollup_state_diff_for_compression: storage_application_observable_output
             .state_diffs_keccak256_hash,
         bootloader_heap_initial_content,
         events_queue_state,
         l1_messages_linear_hash: l1messages_linear_hasher_observable_output.keccak256_hash,
+        eip4844_linear_hashes: eip4844_linear_hashes
+            .try_into()
+            .expect("should be able to create array from vec"),
+        eip4844_output_commitment_hashes: eip4844_output_commitment_hashes
+            .try_into()
+            .expect("should be able to create array from vec"),
     };
 
     let block_content_header = BlockContentHeader {

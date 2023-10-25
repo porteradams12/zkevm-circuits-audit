@@ -54,6 +54,8 @@ pub struct BlockAuxilaryOutput<F: SmallField> {
     pub rollup_state_diff_for_compression: [UInt8<F>; 32],
     pub bootloader_heap_initial_content: [UInt8<F>; 32],
     pub events_queue_state: [UInt8<F>; 32],
+    pub eip4844_linear_hashes: [[UInt8<F>; 32]; 2],
+    pub eip4844_output_commitment_hashes: [[UInt8<F>; 32]; 2],
 }
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]

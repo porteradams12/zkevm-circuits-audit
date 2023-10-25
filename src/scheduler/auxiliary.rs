@@ -240,25 +240,6 @@ pub(crate) fn compute_hasher_circuit_commitment<
 }
 
 #[track_caller]
-pub(crate) fn compute_eip4844_output_commitment<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
-    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
->(
-    cs: &mut CS,
-    linear_hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
-    output_hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
-    round_function: &R,
-) -> [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH] {
-    let output_data = EIP4844OutputData {
-        linear_hash,
-        output_hash,
-    };
-
-    commit_variable_length_encodable_item(cs, &output_data, round_function)
-}
-
-#[track_caller]
 pub(crate) fn conditionally_enforce_circuit_commitment<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     should_validate: Boolean<F>,
