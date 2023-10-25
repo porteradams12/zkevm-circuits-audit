@@ -31,12 +31,14 @@ pub struct BlobChunk<F: SmallField> {
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
 pub struct EIP4844OutputData<F: SmallField> {
+    pub linear_hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
     pub output_hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
 }
 
 impl<F: SmallField> CSPlaceholder<F> for EIP4844OutputData<F> {
     fn placeholder<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
         Self {
+            linear_hash: [UInt8::<F>::allocate_constant(cs, 0); keccak256::KECCAK256_DIGEST_SIZE],
             output_hash: [UInt8::<F>::allocate_constant(cs, 0); keccak256::KECCAK256_DIGEST_SIZE],
         }
     }

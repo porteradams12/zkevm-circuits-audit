@@ -248,10 +248,14 @@ pub(crate) fn compute_eip4844_circuit_commitment<
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
 >(
     cs: &mut CS,
+    linear_hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
     output_hash: [UInt8<F>; keccak256::KECCAK256_DIGEST_SIZE],
     round_function: &R,
 ) -> [Num<F>; CLOSED_FORM_COMMITTMENT_LENGTH] {
-    let output_data = EIP4844OutputData { output_hash };
+    let output_data = EIP4844OutputData {
+        linear_hash,
+        output_hash,
+    };
 
     commit_variable_length_encodable_item(cs, &output_data, round_function)
 }

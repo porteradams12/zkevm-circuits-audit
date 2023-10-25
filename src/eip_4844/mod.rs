@@ -161,6 +161,7 @@ where
         completion_flag: boolean_true,
         observable_input: (),
         observable_output: EIP4844OutputData {
+            linear_hash: [UInt8::<F>::zero(cs); keccak256::KECCAK256_DIGEST_SIZE],
             output_hash: [UInt8::<F>::zero(cs); keccak256::KECCAK256_DIGEST_SIZE],
         },
         hidden_fsm_input: (),
@@ -319,6 +320,7 @@ where
     );
 
     let mut observable_output = EIP4844OutputData::placeholder(cs);
+    observable_output.linear_hash = keccak256_hash;
     observable_output.output_hash = output_hash;
     structured_input.observable_output = observable_output;
 
