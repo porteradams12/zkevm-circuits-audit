@@ -168,8 +168,6 @@ where
         hidden_fsm_output: (),
     };
 
-    let zero_u8: UInt8<F> = UInt8::zero(cs);
-
     // create a field element out of the hash of the input hash and the kzg commitment
     let challenge_hash = boojum::gadgets::keccak256::keccak256(
         cs,
