@@ -330,8 +330,9 @@ pub fn scheduler_function<
     );
 
     // eip4844
-    let eip4844_circuit_observable_output_commitment = compute_eip4844_circuit_commitment(
+    let eip4844_circuit_observable_output_commitment = compute_eip4844_output_commitment(
         cs,
+        eip4844_observable_output.linear_hash,
         eip4844_observable_output.output_hash,
         round_function,
     );

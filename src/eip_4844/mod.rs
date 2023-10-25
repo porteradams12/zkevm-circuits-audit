@@ -210,9 +210,10 @@ where
 
     // We always pad the pubdata to be 31*(2^12) bytes, no matter how many elements we fill.
     // Therefore, we can run the circuit straightforwardly without needing to account for potential
-    // changes in the cycle number in which the padding happens. Hence, we run the hash loop
-    // limit-1 times and then finalize the hash out of the loop for the last cycle.
-    for cycle in 0..(limit - 1) {
+    // changes in the cycle number in which the padding happens. Hence, we run the loop
+    // to perform the horner's rule evaluation of the blob polynomial and then finalize the hash
+    // out of the loop with a single keccak256 call.
+    for cycle in 0..limit {
         let el = data_chunks[cycle];
         // polynomial evaluations via horner's rule
         let mut fe = convert_blob_chunk_to_field_element(cs, el.el.clone(), &params);
@@ -220,78 +221,21 @@ where
         // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
         // since the blob is considered to be a polynomial in lagrange form, we essentially
         // 'work backwards' and start with the highest degree coefficients first. so we can
-        // add and multiply and at the last step we just add the coefficient.
+        // add and multiply and at the last step we only add the coefficient.
         opening_value = opening_value.add(cs, &mut fe);
-        opening_value = opening_value.mul(cs, &mut evaluation_point);
-
-        assert!(buffer.len() < 136);
-
-        buffer.extend(el.el);
-
-        // hash
-        if buffer.len() >= 136 {
-            let buffer_for_round: [UInt8<F>; 136] = buffer[..136].try_into().unwrap();
-            let buffer_for_round = buffer_for_round.map(|el| el.get_variable());
-            let carry_on = buffer[136..].to_vec();
-
-            buffer = carry_on;
-
-            // absorb if we are not done yet
-            keccak256_conditionally_absorb_and_run_permutation(
-                cs,
-                boolean_true,
-                &mut keccak_accumulator_state,
-                &buffer_for_round,
-            );
+        if cycle != limit - 1 {
+            opening_value = opening_value.mul(cs, &mut evaluation_point);
         }
 
-        assert!(buffer.len() < 136);
+        buffer.extend(el.el);
     }
-
-    // last round
-    let el = data_chunks[limit - 1];
-    let mut fe = convert_blob_chunk_to_field_element(cs, el.el.clone(), &params);
-    opening_value = opening_value.add(cs, &mut fe); // as previously mentioned, last step only needs addition.
-
-    buffer.extend(el.el);
-
-    let mut last_round_buffer = [zero_u8; 136];
-    let tail_len = buffer.len();
-    last_round_buffer[..tail_len].copy_from_slice(&buffer);
-
-    if tail_len == KECCAK_RATE_BYTES - 1 {
-        last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x81);
-    } else {
-        last_round_buffer[tail_len] = UInt8::allocated_constant(cs, 0x01);
-        last_round_buffer[KECCAK_RATE_BYTES - 1] = UInt8::allocated_constant(cs, 0x80);
-    }
-
-    let last_round_buffer = last_round_buffer.map(|el| el.get_variable());
-
-    keccak256_conditionally_absorb_and_run_permutation(
-        cs,
-        boolean_true,
-        &mut keccak_accumulator_state,
-        &last_round_buffer,
-    );
 
     opening_value.normalize(cs);
-
-    structured_input.completion_flag = boolean_true;
 
     let fsm_output = ();
     structured_input.hidden_fsm_output = fsm_output;
 
-    // squeeze
-    let mut keccak256_hash = [MaybeUninit::<UInt8<F>>::uninit(); keccak256::KECCAK256_DIGEST_SIZE];
-    for (i, dst) in keccak256_hash.array_chunks_mut::<8>().enumerate() {
-        for (dst, src) in dst.iter_mut().zip(keccak_accumulator_state[i][0].iter()) {
-            let tmp = unsafe { UInt8::from_variable_unchecked(*src) };
-            dst.write(tmp);
-        }
-    }
-
-    let keccak256_hash = unsafe { keccak256_hash.map(|el| el.assume_init()) };
+    let keccak256_hash = keccak256(cs, &buffer);
 
     // hash equality check
     for (input_byte, hash_byte) in linear_hash_output.iter().zip(keccak256_hash) {

@@ -242,7 +242,7 @@ pub(crate) fn compute_hasher_circuit_commitment<
 }
 
 #[track_caller]
-pub(crate) fn compute_eip4844_circuit_commitment<
+pub(crate) fn compute_eip4844_output_commitment<
     F: SmallField,
     CS: ConstraintSystem<F>,
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
