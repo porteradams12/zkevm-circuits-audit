@@ -87,7 +87,6 @@ pub const SEQUENCE_OF_CIRCUIT_TYPES: [BaseLayerCircuitType; NUM_CIRCUIT_TYPES_TO
     BaseLayerCircuitType::EventsRevertsFilter,
     BaseLayerCircuitType::L1MessagesRevertsFilter,
     BaseLayerCircuitType::L1MessagesHasher,
-    BaseLayerCircuitType::EIP4844,
 ];
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]

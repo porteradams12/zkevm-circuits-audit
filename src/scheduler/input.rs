@@ -55,7 +55,6 @@ pub struct SchedulerCircuitInstanceWitness<
     pub events_sorter_observable_output: EventsDeduplicatorOutputDataWitness<F>,
     pub l1messages_sorter_observable_output: EventsDeduplicatorOutputDataWitness<F>,
     pub l1messages_linear_hasher_observable_output: LinearHasherOutputDataWitness<F>,
-    pub eip4844_observable_output: EIP4844OutputDataWitness<F>,
 
     // very few things that we need to properly produce this block
     pub storage_log_tail: [F; QUEUE_STATE_WIDTH],
@@ -108,7 +107,6 @@ impl<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, Ba
             ),
             l1messages_linear_hasher_observable_output: LinearHasherOutputData::placeholder_witness(
             ),
-            eip4844_observable_output: EIP4844OutputData::placeholder_witness(),
 
             storage_log_tail: [F::ZERO; QUEUE_STATE_WIDTH],
             per_circuit_closed_form_inputs: VecDeque::new(),
