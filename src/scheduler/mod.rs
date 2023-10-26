@@ -960,31 +960,16 @@ pub fn scheduler_function<
     }
 
     // eip4844 circuit
+    assert!(witness.eip4844_proofs.len() == 2);
     let mut eip4844_linear_hashes = vec![];
     let mut eip4844_output_commitment_hashes = vec![];
-    for (((linear_hash, versioned_hash), evaluation_point), opening_value) in witness
-        .linear_hash
-        .iter()
-        .zip(witness.versioned_hash.iter())
-        .zip(witness.evaluation_point.iter())
-        .zip(witness.opening_value.iter())
-    {
-        let linear_hash_is_zero = *linear_hash != [0u8; 32];
+    for w in witness.eip4844_witnesses {
+        let linear_hash_is_zero = w.linear_hash != [0u8; 32];
         let should_verify = Boolean::allocated_constant(cs, linear_hash_is_zero);
-        let linear_hash = <[UInt8<F>; 32]>::allocate(cs, *linear_hash);
-        let versioned_hash = <[UInt8<F>; 32]>::allocate(cs, *versioned_hash);
-        let evaluation_point = <[UInt8<F>; 32]>::allocate(cs, *evaluation_point);
-        let opening_value = <[UInt8<F>; 32]>::allocate(cs, *opening_value);
-        let expected_output_commitment_hash = keccak256::keccak256(
-            cs,
-            &versioned_hash
-                .into_iter()
-                .chain(evaluation_point.into_iter())
-                .chain(opening_value.into_iter())
-                .collect::<Vec<UInt8<F>>>(),
-        );
+        let output_data = EIP4844OutputData::allocate(cs, w);
 
-        let proof_witness = proof_witnesses.pop_front();
+        let proof_witness = witness.eip4844_proofs.pop_front();
+        let eip4844_vk = AllocatedVerificationKey::<F, H>::allocate(cs, witness.eip4844_vk.clone());
 
         let proof = AllocatedProof::allocate_from_witness(
             cs,
@@ -1000,12 +985,12 @@ pub fn scheduler_function<
             &proof,
             &config.vk_fixed_parameters,
             &config.proof_config,
-            &node_layer_vk,
+            &eip4844_vk,
         );
 
         is_valid.conditionally_enforce_true(cs, should_verify);
-        eip4844_linear_hashes.push(linear_hash);
-        eip4844_output_commitment_hashes.push(expected_output_commitment_hash);
+        eip4844_linear_hashes.push(output_data.linear_hash);
+        eip4844_output_commitment_hashes.push(output_data.output_hash);
     }
 
     let aux_data = BlockAuxilaryOutput {
