@@ -346,8 +346,6 @@ pub(crate) fn apply_mul_div<F: SmallField, CS: ConstraintSystem<F>>(
     let mask_remainder_into_zero = Boolean::multi_and(cs, &[should_apply_div, divisor_is_zero]);
     let result_1 = result_1.map(|el| el.mask_negated(cs, mask_remainder_into_zero));
 
-    remainder_is_zero.conditionally_enforce_true(cs, divisor_is_zero);
-
     let of_div = divisor_is_zero;
     let eq_div = {
         let x = divisor_is_zero.negated(cs);
