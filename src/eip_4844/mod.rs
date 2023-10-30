@@ -1,5 +1,3 @@
-use std::mem::MaybeUninit;
-
 use crate::base_structures::state_diff_record::StateDiffRecord;
 use crate::demux_log_queue::StorageLogQueue;
 use crate::ethereum_types::U256;
@@ -23,52 +21,41 @@ use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt, CSPl
 use boojum::gadgets::traits::castable::WitnessCastable;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;
-use boojum::pairing::ff::Field;
+use boojum::pairing::ff::{Field, PrimeField};
+use std::mem::MaybeUninit;
 use std::sync::{Arc, RwLock};
-use zkevm_opcode_defs::system_params::STORAGE_AUX_BYTE;
 
 use super::*;
 
 pub mod input;
 use self::input::*;
 
-use boojum::pairing::bls12_381::fq::Fq as Bls12_381Fq;
 use boojum::pairing::bls12_381::fr::Fr as Bls12_381Fr;
-use boojum::pairing::bls12_381::G1Affine as Bls12_381G1Affine;
-use boojum::pairing::bls12_381::G2Affine as Bls12_381G2Affine;
 
 const NUM_WORDS_FR: usize = 17;
-const NUM_WORDS_FQ: usize = 25;
-
-type Bls12_381BaseNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fq, NUM_WORDS_FQ>;
 type Bls12_381ScalarNNFieldParams = NonNativeFieldOverU16Params<Bls12_381Fr, NUM_WORDS_FR>;
-
-type Bls12_381BaseNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fq, 25>;
 type Bls12_381ScalarNNField<F> = NonNativeFieldOverU16<F, Bls12_381Fr, 17>;
 
-// TODO: check all endianness
 // turns 128 bits into a Bls12 field element.
-fn convert_keccak_digest_to_field_element<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
-    P: boojum::pairing::ff::PrimeField,
-    const N: usize,
->(
+fn convert_truncated_keccak_digest_to_field_element<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     input: [UInt8<F>; 16],
-    params: &Arc<NonNativeFieldOverU16Params<P, N>>,
-) -> NonNativeFieldOverU16<F, P, N> {
+    params: &Arc<Bls12_381ScalarNNFieldParams>,
+) -> Bls12_381ScalarNNField<F> {
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
-    let mut limbs = [zero_var; N];
+    let mut limbs = [zero_var; NUM_WORDS_FR];
     // since the value would be interpreted as big endian in the L1 we need to reverse our bytes to
     // get the correct value
-    for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>()).rev() {
-        *dst = UInt16::from_le_bytes(cs, *src).get_variable();
+    for (dst, src) in limbs.iter_mut().zip(input.array_chunks::<2>().rev()) {
+        let [c0, c1] = *src;
+        // for some reason there is no "from_be_bytes"
+        *dst = UInt16::from_le_bytes(cs, [c1, c0]).get_variable();
     }
 
     // Note: we do not need to check for overflows because the max value is 2^128 which is less
@@ -83,25 +70,18 @@ fn convert_keccak_digest_to_field_element<
     }
 }
 
-fn convert_blob_chunk_to_field_element<
-    F: SmallField,
-    CS: ConstraintSystem<F>,
-    P: boojum::pairing::ff::PrimeField,
-    const N: usize,
->(
+// here we just interpret it as LE
+fn convert_blob_chunk_to_field_element<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
-    mut input: [UInt8<F>; 31],
-    params: &Arc<NonNativeFieldOverU16Params<P, N>>,
-) -> NonNativeFieldOverU16<F, P, N> {
-    // since the value would be interpreted as big endian in the L1 we need to reverse our bytes to
-    // get the correct value
-    input.reverse();
+    input: [UInt8<F>; BLOB_CHUNK_SIZE],
+    params: &Arc<Bls12_381ScalarNNFieldParams>,
+) -> Bls12_381ScalarNNField<F> {
     // compose the bytes into u16 words for the nonnative wrapper
     let zero_var = cs.allocate_constant(F::ZERO);
-    let mut limbs = [zero_var; N];
+    let mut limbs = [zero_var; NUM_WORDS_FR];
     let input_chunks = input.array_chunks::<2>();
     let remainder = input_chunks.remainder();
-    for (dst, src) in limbs.iter_mut().zip(input_chunks).rev() {
+    for (dst, src) in limbs.iter_mut().zip(input_chunks) {
         *dst = UInt16::from_le_bytes(cs, *src).get_variable();
     }
 
@@ -121,11 +101,13 @@ fn convert_blob_chunk_to_field_element<
     }
 }
 
+/// We interpret out pubdata as chunks of 31 bytes, that are coefficients of
+/// some polynomial, starting from the highest one. It's different from 4844 blob data format,
+/// and we provide additional functions to compute the corresponding 4844 blob data, and restore back
 pub fn eip_4844_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F>,
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-    const N: usize,
 >(
     cs: &mut CS,
     witness: EIP4844CircuitInstanceWitness<F>,
@@ -135,25 +117,27 @@ pub fn eip_4844_entry_point<
 where
     [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <UInt256<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN + 1]:,
-    [(); N + 1]:,
 {
     let limit = params;
 
-    assert!(limit == 4096); // max blob length eip4844
+    assert_eq!(limit, ELEMENTS_PER_4844_BLOCK); // max blob length eip4844
 
     let EIP4844CircuitInstanceWitness {
+        closed_form_input,
         versioned_hash,
         linear_hash_output,
         data_chunks,
     } = witness;
 
+    if <CS::Config as CSConfig>::WitnessConfig::EVALUATE_WITNESS {
+        assert_eq!(data_chunks.len(), ELEMENTS_PER_4844_BLOCK)
+    }
+
+    let mut data_chunks = data_chunks;
+    let zero_u8 = UInt8::zero(cs);
+
     let versioned_hash = <[UInt8<F>; 32]>::allocate(cs, versioned_hash);
     let linear_hash_output = <[UInt8<F>; 32]>::allocate(cs, linear_hash_output);
-
-    let data_chunks = data_chunks
-        .into_iter()
-        .map(|chunk| BlobChunk::<F>::allocate(cs, chunk))
-        .collect::<Vec<BlobChunk<F>>>();
 
     let boolean_true = Boolean::allocated_constant(cs, true);
     let mut structured_input = EIP4844InputOutput::<F> {
@@ -177,22 +161,19 @@ where
             .collect::<Vec<UInt8<F>>>()
             .as_slice(),
     );
+
     // truncate hash to 128 bits
     // NOTE: it is safe to draw a random scalar at max 128 bits because of the schwartz zippel
     // lemma
-    let mut truncated_hash = [UInt8::zero(cs); 16];
-    truncated_hash.copy_from_slice(&challenge_hash[16..]); // take last 16 bytes to get max 2^128
-                                                           // in big endian scenario
+    let mut truncated_hash = [zero_u8; 16];
+    // take last 16 bytes to get max 2^128
+    // in big endian scenario
+    truncated_hash.copy_from_slice(&challenge_hash[16..]);
     let params = Arc::new(Bls12_381ScalarNNFieldParams::create());
-    let mut evaluation_point = convert_keccak_digest_to_field_element(cs, truncated_hash, &params);
+    let mut evaluation_point =
+        convert_truncated_keccak_digest_to_field_element(cs, truncated_hash, &params);
 
-    use crate::base_structures::log_query::L2_TO_L1_MESSAGE_BYTE_LENGTH;
-    // we do not serialize length because it's recalculatable in L1
-
-    let mut buffer = vec![];
-
-    use crate::storage_application::keccak256_conditionally_absorb_and_run_permutation;
-    use boojum::gadgets::keccak256::KECCAK_RATE_BYTES;
+    let mut buffer = Vec::with_capacity(31 * 4096);
 
     let mut opening_value =
         Bls12_381ScalarNNField::<F>::allocated_constant(cs, Bls12_381Fr::zero(), &params);
@@ -203,9 +184,12 @@ where
     // to perform the horner's rule evaluation of the blob polynomial and then finalize the hash
     // out of the loop with a single keccak256 call.
     for cycle in 0..limit {
-        let el = data_chunks[cycle];
+        let el = data_chunks
+            .pop_front()
+            .unwrap_or(BlobChunk::placeholder_witness());
+        let el = BlobChunk::<F>::allocate(cs, el);
         // polynomial evaluations via horner's rule
-        let mut fe = convert_blob_chunk_to_field_element(cs, el.el.clone(), &params);
+        let mut fe = convert_blob_chunk_to_field_element(cs, el.inner, &params);
         // horner's rule is defined as evaluating a polynomial a_0 + a_1x + a_2x^2 + ... + a_nx^n
         // in the form of a_0 + x(a_1 + x(a_2 + x(a_3 + ... + x(a_{n-1} + xa_n))))
         // since the blob is considered to be a polynomial in lagrange form, we essentially
@@ -216,14 +200,10 @@ where
             opening_value = opening_value.mul(cs, &mut evaluation_point);
         }
 
-        buffer.extend(el.el);
+        buffer.extend(el.inner);
     }
 
-    opening_value.normalize(cs);
-
-    let fsm_output = ();
-    structured_input.hidden_fsm_output = fsm_output;
-
+    use boojum::gadgets::keccak256::keccak256;
     let keccak256_hash = keccak256(cs, &buffer);
 
     // hash equality check
@@ -231,23 +211,27 @@ where
         Num::enforce_equal(cs, &input_byte.into_num(), &hash_byte.into_num());
     }
 
-    use boojum::gadgets::keccak256::keccak256;
-    opening_value.enforce_reduced(cs);
-    let opening_bytes = opening_value.limbs[..16]
-        .iter()
-        .rev()
-        .flat_map(|v| unsafe {
-            let n = UInt16::from_variable_unchecked(*v).to_be_bytes(cs);
-            [n[0], n[1]]
-        })
-        .collect::<Vec<UInt8<F>>>();
+    // now commit to versioned hash || opening point || openinig value
+
+    // normalize and serialize opening value as BE
+    let mut opening_value_be_bytes = [zero_u8; 32];
+    opening_value.normalize(cs);
+
+    for (dst, src) in opening_value_be_bytes
+        .array_chunks_mut::<2>()
+        .zip(opening_value.limbs[..16].iter().rev())
+    {
+        // field element is normalized, so all limbs are 16 bits
+        let be_bytes = unsafe { UInt16::from_variable_unchecked(*src).to_be_bytes(cs) };
+        *dst = be_bytes;
+    }
 
     let output_hash = keccak256(
         cs,
         versioned_hash
             .into_iter()
             .chain(truncated_hash.into_iter())
-            .chain(opening_bytes.into_iter())
+            .chain(opening_value_be_bytes.into_iter())
             .collect::<Vec<UInt8<F>>>()
             .as_slice(),
     );
@@ -256,6 +240,9 @@ where
     observable_output.linear_hash = keccak256_hash;
     observable_output.output_hash = output_hash;
     structured_input.observable_output = observable_output;
+
+    // self-check
+    structured_input.hook_compare_witness(cs, &closed_form_input);
 
     use crate::fsm_input_output::commit_variable_length_encodable_item;
     use crate::fsm_input_output::ClosedFormInputCompactForm;
@@ -272,8 +259,164 @@ where
     input_commitment
 }
 
+fn omega() -> Bls12_381Fr {
+    let mut omega = Bls12_381Fr::root_of_unity();
+    let exp = ELEMENTS_PER_4844_BLOCK.trailing_zeros();
+
+    for _ in exp..Bls12_381Fr::S {
+        omega.square();
+    }
+
+    omega
+}
+
+fn omega_inv() -> Bls12_381Fr {
+    omega().inverse().unwrap()
+}
+
+fn m_inv() -> Bls12_381Fr {
+    Bls12_381Fr::from_str(&format!("{}", ELEMENTS_PER_4844_BLOCK))
+        .unwrap()
+        .inverse()
+        .unwrap()
+}
+
+fn bitreverse_idx(mut n: u32, l: u32) -> u32 {
+    let mut r = 0;
+    for _ in 0..l {
+        r = (r << 1) | (n & 1);
+        n >>= 1;
+    }
+
+    r
+}
+
+fn bitreverse<T>(a: &mut [T]) {
+    let n = a.len() as u32;
+    assert!(n.is_power_of_two());
+    let log_n = n.trailing_zeros();
+
+    for k in 0..n {
+        let rk = bitreverse_idx(k, log_n);
+        if k < rk {
+            a.swap(rk as usize, k as usize);
+        }
+    }
+}
+
+fn serial_fft(a: &mut [Bls12_381Fr], omega: &Bls12_381Fr, log_n: u32) {
+    let n = a.len() as u32;
+    assert_eq!(n, 1 << log_n);
+
+    bitreverse(a);
+
+    let mut m = 1;
+    for _ in 0..log_n {
+        let w_m = omega.pow(&[(n / (2 * m)) as u64]);
+
+        let mut k = 0;
+        while k < n {
+            let mut w = Bls12_381Fr::one();
+            for j in 0..m {
+                let mut t = a[(k + j + m) as usize];
+                t.mul_assign(&w);
+                let mut tmp = a[(k + j) as usize];
+                tmp.sub_assign(&t);
+                a[(k + j + m) as usize] = tmp;
+                a[(k + j) as usize].add_assign(&t);
+                w.mul_assign(&w_m);
+            }
+
+            k += 2 * m;
+        }
+
+        m *= 2;
+    }
+}
+
+fn fft(a: &mut [Bls12_381Fr]) {
+    serial_fft(a, &omega(), ELEMENTS_PER_4844_BLOCK.trailing_zeros());
+}
+
+fn ifft(a: &mut [Bls12_381Fr]) {
+    serial_fft(a, &omega_inv(), ELEMENTS_PER_4844_BLOCK.trailing_zeros());
+    let m_inv = m_inv();
+    for a in a.iter_mut() {
+        a.mul_assign(&m_inv);
+    }
+}
+
+pub fn zksync_pubdata_into_ethereum_4844_data(input: &[u8]) -> Vec<u8> {
+    let mut poly = zksync_pubdata_into_monomial_form_poly(input);
+    fft(&mut poly);
+    // and we need to bitreverse
+    bitreverse(&mut poly);
+    // and now serialize in BE form as Ethereum expects
+    let mut result = Vec::with_capacity(32 * ELEMENTS_PER_4844_BLOCK);
+    use boojum::pairing::ff::PrimeFieldRepr;
+    for el in poly.into_iter() {
+        let mut buffer = [0u8; 32];
+        el.into_repr().write_be(&mut buffer[..]).unwrap();
+        result.extend(buffer);
+    }
+
+    result
+}
+
+pub fn zksync_pubdata_into_monomial_form_poly(input: &[u8]) -> Vec<Bls12_381Fr> {
+    assert_eq!(input.len(), BLOB_CHUNK_SIZE * ELEMENTS_PER_4844_BLOCK);
+    // we interpret it as coefficients starting from the top one
+    let mut poly = Vec::with_capacity(ELEMENTS_PER_4844_BLOCK);
+    use boojum::pairing::ff::PrimeFieldRepr;
+    for bytes in input.array_chunks::<BLOB_CHUNK_SIZE>().rev() {
+        let mut buffer = [0u8; 32];
+        buffer[..BLOB_CHUNK_SIZE].copy_from_slice(bytes);
+        let mut repr = <Bls12_381Fr as boojum::pairing::ff::PrimeField>::Repr::default();
+        repr.read_le(&buffer[..]).unwrap();
+        let as_field_element = Bls12_381Fr::from_repr(repr).unwrap();
+        poly.push(as_field_element);
+    }
+
+    poly
+}
+
+pub fn ethereum_4844_pubdata_into_bitreversed_lagrange_form_poly(input: &[u8]) -> Vec<Bls12_381Fr> {
+    assert_eq!(input.len(), 32 * ELEMENTS_PER_4844_BLOCK);
+    let mut poly = Vec::with_capacity(ELEMENTS_PER_4844_BLOCK);
+    use boojum::pairing::ff::PrimeFieldRepr;
+    for bytes in input.array_chunks::<32>().rev() {
+        let mut repr = <Bls12_381Fr as boojum::pairing::ff::PrimeField>::Repr::default();
+        repr.read_be(&bytes[..]).unwrap();
+        let as_field_element = Bls12_381Fr::from_repr(repr).unwrap();
+        poly.push(as_field_element);
+    }
+
+    poly
+}
+
+pub fn ethereum_4844_data_into_zksync_pubdata(input: &[u8]) -> Vec<u8> {
+    assert_eq!(input.len(), 32 * ELEMENTS_PER_4844_BLOCK);
+    let mut poly = ethereum_4844_pubdata_into_bitreversed_lagrange_form_poly(input);
+    // and we need to bitreverse
+    bitreverse(&mut poly);
+    // now we need to iFFT it to get monomial form
+    ifft(&mut poly);
+    // and now serialize in LE by BLOB_CHUNK_SIZE chunks
+    let mut result = Vec::with_capacity(BLOB_CHUNK_SIZE * ELEMENTS_PER_4844_BLOCK);
+    use boojum::pairing::ff::PrimeFieldRepr;
+    for el in poly.into_iter() {
+        let mut buffer = [0u8; 32];
+        el.into_repr().write_le(&mut buffer[..]).unwrap();
+        result.extend_from_slice(&buffer[..BLOB_CHUNK_SIZE]);
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use super::*;
     use boojum::config::DevCSConfig;
     use boojum::cs::cs_builder::*;
@@ -290,8 +433,11 @@ mod tests {
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::gadgets::tables::*;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
+    use boojum::pairing::bls12_381::G1;
+    use boojum::pairing::ff::PrimeFieldRepr;
     use boojum::pairing::ff::{Field as PairingField, PrimeField, SqrtField};
     use boojum::worker::Worker;
+    use rand::SeedableRng;
     use rand::{Rand, Rng};
 
     type F = GoldilocksField;
@@ -300,13 +446,13 @@ mod tests {
     #[test]
     fn test_eip4844() {
         let geometry = CSGeometry {
-            num_columns_under_copy_permutation: 100,
+            num_columns_under_copy_permutation: 60,
             num_witness_columns: 0,
             num_constant_columns: 8,
             max_allowed_constraint_degree: 4,
         };
         let max_variables = 1 << 26;
-        let max_trace_len = 1 << 22;
+        let max_trace_len = 1 << 20;
 
         fn configure<
             F: SmallField,
@@ -319,7 +465,7 @@ mod tests {
             let builder = builder.allow_lookup(
                 LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
                     width: 3,
-                    num_repetitions: 8,
+                    num_repetitions: 20,
                     share_table_id: true,
                 },
             );
@@ -399,51 +545,62 @@ mod tests {
 
         let round_function = Poseidon2Goldilocks;
 
-        let data_chunks = vec![[0u8; 31]; 4096];
-        let mut rng = rand::thread_rng();
-        let data_chunks = data_chunks
-            .into_iter()
-            .map(|_| {
-                let el = Bls12_381Fr::rand(&mut rng);
-                let repr = el.into_repr();
-                let mut bytes = vec![];
-                for limb in repr.0 {
-                    bytes.push((limb & 0xff) as u8);
-                    bytes.push((limb >> 8 & 0xff) as u8);
-                    bytes.push((limb >> 16 & 0xff) as u8);
-                    bytes.push((limb >> 24 & 0xff) as u8);
-                    bytes.push((limb >> 32 & 0xff) as u8);
-                    bytes.push((limb >> 40 & 0xff) as u8);
-                    bytes.push((limb >> 48 & 0xff) as u8);
-                    bytes.push((limb >> 56 & 0xff) as u8);
-                }
-                // swap to big endian
-                let bytes = bytes.into_iter().rev().collect::<Vec<u8>>();
-                let mut arr = [0u8; 31];
-                arr.copy_from_slice(&bytes.as_slice()[..31]);
-                arr
-            })
-            .collect::<Vec<[u8; 31]>>();
+        // make some random chunks
+        let mut data_chunks = vec![[0u8; BLOB_CHUNK_SIZE]; ELEMENTS_PER_4844_BLOCK];
+        let mut rng = rand::XorShiftRng::from_seed([0, 0, 0, 42]);
+        for dst in data_chunks.iter_mut() {
+            let el = Bls12_381Fr::rand(&mut rng);
+            let mut bytes = [0u8; 32];
+            el.into_repr().write_le(&mut bytes[..]).unwrap();
+            dst.copy_from_slice(&bytes[..BLOB_CHUNK_SIZE]);
+        }
 
+        let mut blob_data_flattened = vec![];
+        for el in data_chunks.iter() {
+            blob_data_flattened.extend_from_slice(el);
+        }
+
+        // now we can get it as polynomial, and
         use zkevm_opcode_defs::sha3::*;
         let mut linear_hash_output = [0u8; 32];
-        let digest = Keccak256::digest(
-            data_chunks
-                .clone()
-                .into_iter()
-                .flatten()
-                .collect::<Vec<u8>>(),
-        );
+        let digest = Keccak256::digest(&blob_data_flattened);
+
         linear_hash_output.copy_from_slice(digest.as_slice());
-        let kzg_commitment_x = [0u8; NUM_WORDS_FQ];
-        let kzg_commitment_y = [0u8; NUM_WORDS_FQ];
+
+        // now we can get some quasi-setup for KZG and make a blob
+        let poly = zksync_pubdata_into_monomial_form_poly(&blob_data_flattened);
+
+        let mut setup = Vec::with_capacity(ELEMENTS_PER_4844_BLOCK);
+        use boojum::pairing::CurveAffine;
+        use boojum::pairing::CurveProjective;
+        let mut point = G1::one();
+        let scalar = Bls12_381Fr::from_str("42").unwrap().into_repr();
+        for _ in 0..ELEMENTS_PER_4844_BLOCK {
+            setup.push(point);
+            point.mul_assign(scalar);
+        }
+
+        // compute commitment
+        let mut commitment = G1::zero();
+        for (scalar, point) in poly.iter().zip(setup.iter()) {
+            let mut el = *point;
+            el.mul_assign(scalar.into_repr());
+            commitment.add_assign(&el);
+        }
+
+        let (kzg_commitment_x, kzg_commitment_y) = commitment.into_affine().into_xy_unchecked();
+        let mut buffer = [0u8; 96];
+        kzg_commitment_x
+            .into_repr()
+            .write_be(&mut buffer[..48])
+            .unwrap();
+        kzg_commitment_y
+            .into_repr()
+            .write_be(&mut buffer[48..])
+            .unwrap();
+
         let mut versioned_hash = [0u8; 32];
-        let digest = Keccak256::digest(
-            kzg_commitment_x
-                .into_iter()
-                .chain(kzg_commitment_y.into_iter())
-                .collect::<Vec<u8>>(),
-        );
+        let digest = Keccak256::digest(&buffer);
         versioned_hash.copy_from_slice(digest.as_slice());
         versioned_hash[0] = 0x01;
 
@@ -452,74 +609,39 @@ mod tests {
                 .into_iter()
                 .chain(versioned_hash.into_iter())
                 .collect::<Vec<u8>>(),
-        )[..16]
+        )[16..]
             .to_vec();
 
-        let evaluation_point_repr = evaluation_point
-            .chunks(8)
-            .map(|els| {
-                els.iter()
-                    .enumerate()
-                    .fold(0u64, |acc, (i, el)| acc + ((*el as u64) << (8 * i)))
-            })
-            .collect::<Vec<u64>>();
-        let mut evaluation_point_arr = [0u64; 4];
-        evaluation_point_arr[..2].copy_from_slice(&evaluation_point_repr[..2]);
+        dbg!(hex::encode(&evaluation_point));
 
-        let blob_arrs = data_chunks
-            .clone()
-            .iter_mut()
-            .map(|bytes| {
-                bytes.reverse();
-                let limbs = bytes
-                    .chunks(8)
-                    .map(|els| {
-                        els.iter()
-                            .enumerate()
-                            .fold(0u64, |acc, (i, el)| acc + ((*el as u64) << (8 * i)))
-                    })
-                    .collect::<Vec<u64>>();
-                let mut limb_arr = [0u64; 4];
-                limb_arr.copy_from_slice(&limbs);
-                limb_arr
-            })
-            .collect::<Vec<[u64; 4]>>();
+        let mut buffer = [0u8; 32];
+        buffer[16..].copy_from_slice(&evaluation_point);
+        let mut evaluation_point_repr =
+            <Bls12_381Fr as boojum::pairing::ff::PrimeField>::Repr::default();
+        evaluation_point_repr.read_be(&buffer[..]).unwrap();
+        let evaluation_point_fr = Bls12_381Fr::from_repr(evaluation_point_repr).unwrap();
+        dbg!(evaluation_point_fr);
 
         use boojum::pairing::bls12_381::FrRepr;
         // evaluate polynomial
-        let evaluation_point_fr = Bls12_381Fr::from_repr(FrRepr(evaluation_point_arr)).unwrap();
-        let opening_value = blob_arrs.clone().into_iter().enumerate().fold(
-            Bls12_381Fr::zero(),
-            |mut acc, (i, coeff)| {
-                let coeff = Bls12_381Fr::from_repr(FrRepr(coeff)).unwrap();
-                acc.add_assign(&coeff);
-                if i != blob_arrs.len() - 1 {
-                    acc.mul_assign(&evaluation_point_fr);
-                }
-                acc
-            },
-        );
+        let mut evaluation_result = Bls12_381Fr::zero();
+        let mut power = Bls12_381Fr::one();
+        for coeff in poly.iter() {
+            let mut tmp = *coeff;
+            tmp.mul_assign(&power);
+            evaluation_result.add_assign(&tmp);
+            power.mul_assign(&evaluation_point_fr);
+        }
 
-        let opening_value_bytes = {
-            let repr = opening_value.into_repr();
-            let mut bytes = vec![];
-            for limb in repr.0 {
-                bytes.push((limb & 0xff) as u8);
-                bytes.push((limb >> 8 & 0xff) as u8);
-                bytes.push((limb >> 16 & 0xff) as u8);
-                bytes.push((limb >> 24 & 0xff) as u8);
-                bytes.push((limb >> 32 & 0xff) as u8);
-                bytes.push((limb >> 40 & 0xff) as u8);
-                bytes.push((limb >> 48 & 0xff) as u8);
-                bytes.push((limb >> 56 & 0xff) as u8);
-            }
-            let mut arr = [0u8; 32];
-            arr[..32].copy_from_slice(bytes.as_slice());
-            arr
-        };
+        dbg!(evaluation_result);
+        let mut opening_value_bytes = [0u8; 32];
+        evaluation_result
+            .into_repr()
+            .write_be(&mut opening_value_bytes[..])
+            .unwrap();
 
         let mut observable_output = EIP4844OutputData::<F>::placeholder_witness();
-        observable_output.output_hash = Keccak256::digest(
+        let output_hash = Keccak256::digest(
             versioned_hash
                 .into_iter()
                 .chain(evaluation_point.into_iter())
@@ -527,17 +649,30 @@ mod tests {
                 .collect::<Vec<u8>>(),
         )
         .into();
+        dbg!(hex::encode(&output_hash));
+        observable_output.output_hash = output_hash;
+        observable_output.linear_hash = linear_hash_output;
+
+        let closed_form_input = EIP4844InputOutputWitness {
+            start_flag: true,
+            completion_flag: true,
+            observable_input: (),
+            observable_output: observable_output,
+            hidden_fsm_input: (),
+            hidden_fsm_output: (),
+        };
 
         let witness = EIP4844CircuitInstanceWitness {
+            closed_form_input,
             versioned_hash,
             linear_hash_output,
             data_chunks: data_chunks
                 .into_iter()
-                .map(|el| BlobChunkWitness { el })
-                .collect::<Vec<BlobChunkWitness<F>>>(),
+                .map(|el| BlobChunkWitness { inner: el })
+                .collect::<VecDeque<BlobChunkWitness<F>>>(),
         };
 
-        eip_4844_entry_point::<_, _, _, 17>(cs, witness, &round_function, 4096);
+        eip_4844_entry_point::<_, _, _>(cs, witness, &round_function, 4096);
 
         dbg!(cs.next_available_row());
 

@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use super::*;
 use crate::base_structures::vm_state::*;
 use boojum::cs::{traits::cs::ConstraintSystem, Variable};
@@ -21,10 +23,13 @@ use boojum::serde_utils::BigArraySerde;
 use cs_derive::*;
 use derivative::*;
 
+pub const BLOB_CHUNK_SIZE: usize = 31;
+pub const ELEMENTS_PER_4844_BLOCK: usize = 4096;
+
 #[derive(Derivative, CSAllocatable, CSSelectable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 pub struct BlobChunk<F: SmallField> {
-    pub el: [UInt8<F>; 31],
+    pub inner: [UInt8<F>; BLOB_CHUNK_SIZE],
 }
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
@@ -54,7 +59,8 @@ pub type EIP4844InputOutputWitness<F> =
 #[derivative(Clone, Debug, Default)]
 #[serde(bound = "")]
 pub struct EIP4844CircuitInstanceWitness<F: SmallField> {
+    pub closed_form_input: EIP4844InputOutputWitness<F>,
     pub versioned_hash: [u8; 32],
     pub linear_hash_output: [u8; 32],
-    pub data_chunks: Vec<BlobChunkWitness<F>>,
+    pub data_chunks: VecDeque<BlobChunkWitness<F>>,
 }
