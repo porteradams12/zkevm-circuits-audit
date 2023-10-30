@@ -11,6 +11,7 @@ pub use auxiliary as aux;
 
 use boojum::cs::implementations::proof::Proof;
 
+use boojum::cs::implementations::verifier::VerificationKey;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::field::SmallField;
 
@@ -72,6 +73,7 @@ pub const SCHEDULER_TIMESTAMP: u32 = 1;
 pub const NUM_SCHEDULER_PUBLIC_INPUTS: usize = 4;
 pub const LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH: usize = 4;
 pub const QUEUE_FINAL_STATE_COMMITMENT_LENGTH: usize = 4;
+pub const IMPLEMENT_4844_FUNCTIONALITY: bool = false;
 
 pub const SEQUENCE_OF_CIRCUIT_TYPES: [BaseLayerCircuitType; NUM_CIRCUIT_TYPES_TO_SCHEDULE] = [
     BaseLayerCircuitType::VM,
@@ -118,10 +120,58 @@ pub fn scheduler_function<
     POW: RecursivePoWRunner<F>,
 >(
     cs: &mut CS,
+    witness: SchedulerCircuitInstanceWitness<F, H, EXT>,
+    round_function: &R,
+    config: SchedulerConfig<F, H::NonCircuitSimulator, EXT>,
+    verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
+    transcript_params: TR::TransciptParameters,
+) where
+    [(); <RecursionQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+    [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
+    scheduler_function_inner::<F, CS, R, H, EXT, TR, CTR, POW, IMPLEMENT_4844_FUNCTIONALITY>(
+        cs,
+        witness,
+        round_function,
+        config,
+        verifier_builder,
+        None,
+        None,
+        None,
+        None,
+        transcript_params,
+    )
+}
+
+pub fn scheduler_function_inner<
+    F: SmallField,
+    CS: ConstraintSystem<F> + 'static,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+    H: RecursiveTreeHasher<F, Num<F>>,
+    EXT: FieldExtension<2, BaseField = F>,
+    TR: RecursiveTranscript<
+        F,
+        CompatibleCap = <H::NonCircuitSimulator as TreeHasher<F>>::Output,
+        CircuitReflection = CTR,
+    >,
+    CTR: CircuitTranscript<
+        F,
+        CircuitCompatibleCap = <H as CircuitTreeHasher<F, Num<F>>>::CircuitOutput,
+        TransciptParameters = TR::TransciptParameters,
+    >,
+    POW: RecursivePoWRunner<F>,
+    const USE_4844: bool,
+>(
+    cs: &mut CS,
     mut witness: SchedulerCircuitInstanceWitness<F, H, EXT>,
     round_function: &R,
     config: SchedulerConfig<F, H::NonCircuitSimulator, EXT>,
     verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
+    eip4844_proof_config: Option<ProofConfig>,
+    eip4844_vk_fixed_parameters: Option<VerificationKeyCircuitGeometry>,
+    eip4844_vk: Option<VerificationKey<F, H::NonCircuitSimulator>>,
+    eip4844_verifier_builder: Option<Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>>,
     transcript_params: TR::TransciptParameters,
 ) where
     [(); <RecursionQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
@@ -959,39 +1009,66 @@ pub fn scheduler_function<
         dst.reverse();
     }
 
-    // eip4844 circuit
-    assert!(witness.eip4844_proofs.len() == 2);
-    let mut eip4844_linear_hashes = vec![];
-    let mut eip4844_output_commitment_hashes = vec![];
-    for w in witness.eip4844_witnesses {
-        let linear_hash_is_zero = w.linear_hash != [0u8; 32];
-        let should_verify = Boolean::allocated_constant(cs, linear_hash_is_zero);
-        let output_data = EIP4844OutputData::allocate(cs, w);
+    let (eip4844_linear_hashes, eip4844_output_commitment_hashes) = if USE_4844 {
+        // eip4844 circuit
+        let verifier_builder =
+            eip4844_verifier_builder.expect("if EIP 4844 is used then builder must be provided");
+        let verifier = verifier_builder.create_recursive_verifier(cs);
+        let proof_config =
+            eip4844_proof_config.expect("if EIP 4844 is used then proof config must be provided");
+        let vk_fixed_parameters = eip4844_vk_fixed_parameters
+            .expect("if EIP 4844 is used then vk fixed parameters must be provided");
+        let vk = eip4844_vk.expect("if EIP 4844 is used then VK must be provided");
 
-        let proof_witness = witness.eip4844_proofs.pop_front();
-        let eip4844_vk = AllocatedVerificationKey::<F, H>::allocate(cs, witness.eip4844_vk.clone());
+        let eip4844_vk = AllocatedVerificationKey::<F, H>::allocate_constant(cs, vk);
 
-        let proof = AllocatedProof::allocate_from_witness(
-            cs,
-            proof_witness,
-            &verifier,
-            &config.vk_fixed_parameters,
-            &config.proof_config,
-        );
+        let mut eip4844_linear_hashes = [[zero_u8; 32]; MAX_4844_BLOBS_PER_BLOCK];
+        let mut eip4844_output_commitment_hashes = [[zero_u8; 32]; MAX_4844_BLOBS_PER_BLOCK];
+        for i in 0..MAX_4844_BLOBS_PER_BLOCK {
+            let observable_output_data_witness = witness
+                .eip4844_witnesses
+                .as_ref()
+                .expect("if EIP 4844 is used then witness must be provided")
+                .get(i)
+                .cloned()
+                .unwrap_or(EIP4844OutputData::placeholder_witness());
+            let observable_output_data =
+                EIP4844OutputData::allocate(cs, observable_output_data_witness);
+            let zeroes = observable_output_data.linear_hash.map(|el| el.is_zero(cs));
+            let skip_verification = Boolean::multi_and(cs, &zeroes);
+            let should_verify = skip_verification.negated(cs);
 
-        let (is_valid, _inputs) = verifier.verify::<H, TR, CTR, POW>(
-            cs,
-            transcript_params.clone(),
-            &proof,
-            &config.vk_fixed_parameters,
-            &config.proof_config,
-            &eip4844_vk,
-        );
+            let proof_witness = witness.eip4844_proofs.pop_front();
 
-        is_valid.conditionally_enforce_true(cs, should_verify);
-        eip4844_linear_hashes.push(output_data.linear_hash);
-        eip4844_output_commitment_hashes.push(output_data.output_hash);
-    }
+            let proof = AllocatedProof::allocate_from_witness(
+                cs,
+                proof_witness,
+                &verifier,
+                &vk_fixed_parameters,
+                &proof_config,
+            );
+
+            let (is_valid, _inputs) = verifier.verify::<H, TR, CTR, POW>(
+                cs,
+                transcript_params.clone(),
+                &proof,
+                &vk_fixed_parameters,
+                &proof_config,
+                &eip4844_vk,
+            );
+
+            is_valid.conditionally_enforce_true(cs, should_verify);
+            eip4844_linear_hashes[i] = observable_output_data.linear_hash;
+            eip4844_output_commitment_hashes[i] = observable_output_data.output_hash;
+        }
+
+        (eip4844_linear_hashes, eip4844_output_commitment_hashes)
+    } else {
+        (
+            [[zero_u8; 32]; MAX_4844_BLOBS_PER_BLOCK],
+            [[zero_u8; 32]; MAX_4844_BLOBS_PER_BLOCK],
+        )
+    };
 
     let aux_data = BlockAuxilaryOutput {
         rollup_state_diff_for_compression: storage_application_observable_output
@@ -999,12 +1076,8 @@ pub fn scheduler_function<
         bootloader_heap_initial_content,
         events_queue_state,
         l1_messages_linear_hash: l1messages_linear_hasher_observable_output.keccak256_hash,
-        eip4844_linear_hashes: eip4844_linear_hashes
-            .try_into()
-            .expect("should be able to create array from vec"),
-        eip4844_output_commitment_hashes: eip4844_output_commitment_hashes
-            .try_into()
-            .expect("should be able to create array from vec"),
+        eip4844_linear_hashes: eip4844_linear_hashes,
+        eip4844_output_commitment_hashes: eip4844_output_commitment_hashes,
     };
 
     let block_content_header = BlockContentHeader {
