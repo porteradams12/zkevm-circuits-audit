@@ -327,57 +327,54 @@ where
             let (keys_are_equal, new_key_is_smaller) =
                 unpacked_long_comparison(cs, &[previous_key], &[sorting_key]);
 
-            // keys are always ordered no matter what, and are never equal unless it's padding
+            // keys are always ordered as >= unless is padding
             new_key_is_smaller.conditionally_enforce_false(cs, should_pop);
+
+            let same_log = keys_are_equal;
+            let same_nontrivial_log = Boolean::multi_and(cs, &[should_pop, same_log]);
+            let may_be_different_log = same_log.negated(cs);
+            let different_nontrivial_log =
+                Boolean::multi_and(cs, &[should_pop, may_be_different_log]);
+
+            // if we pop an item and it's not trivial, then it MUST be non-rollback
+            let this_item_is_not_rollback = sorted_item.rollback.negated(cs);
+            this_item_is_not_rollback.conditionally_enforce_true(cs, different_nontrivial_log);
 
             // there are only two cases when keys are equal:
             // - it's a padding element
             // - it's a rollback
 
-            // it's enough to compare timestamps as VM circuit guarantees uniqueness of the if it's not a padding
-            let previous_is_not_rollback = previous_item.rollback.negated(cs);
-            let enforce_sequential_rollback = Boolean::multi_and(
-                cs,
-                &[previous_is_not_rollback, sorted_item.rollback, should_pop],
-            );
-            keys_are_equal.conditionally_enforce_true(cs, enforce_sequential_rollback);
+            // if it's same non-trivial log, then previous one is always guaranteed to be not-rollback by line above,
+            // and so this one should be rollback
+            sorted_item
+                .rollback
+                .conditionally_enforce_true(cs, same_nontrivial_log);
 
-            let same_log = UInt32::equals(cs, &sorted_item.timestamp, &previous_item.timestamp);
-
+            // we self-check ourselves over the content of the log, even though by the construction
+            // of the queue it's a guaranteed permutation
+            let keys_are_equal = UInt256::equals(cs, &sorted_item.key, &previous_item.key);
             let values_are_equal =
                 UInt256::equals(cs, &sorted_item.written_value, &previous_item.written_value);
+            let same_body = Boolean::multi_and(cs, &[keys_are_equal, values_are_equal]);
 
-            let negate_previous_is_trivial = previous_is_trivial.negated(cs);
-            let should_enforce = Boolean::multi_and(cs, &[same_log, negate_previous_is_trivial]);
+            // if previous is not trivial then we always have equal content
+            let previous_is_non_trivial = previous_is_trivial.negated(cs);
+            let should_enforce = Boolean::multi_and(cs, &[same_log, previous_is_non_trivial]);
 
-            values_are_equal.conditionally_enforce_true(cs, should_enforce);
+            same_body.conditionally_enforce_true(cs, should_enforce);
 
-            let this_item_is_non_trivial_rollback =
-                Boolean::multi_and(cs, &[sorted_item.rollback, should_pop]);
-            let negate_previous_item_rollback = previous_item.rollback.negated(cs);
-            let prevous_item_is_non_trivial_write = Boolean::multi_and(
-                cs,
-                &[negate_previous_item_rollback, negate_previous_is_trivial],
-            );
-            let is_sequential_rollback = Boolean::multi_and(
-                cs,
-                &[
-                    this_item_is_non_trivial_rollback,
-                    prevous_item_is_non_trivial_write,
-                ],
-            );
-            same_log.conditionally_enforce_true(cs, is_sequential_rollback);
+            let previous_item_is_not_rollback = previous_item.rollback.negated(cs);
 
             // decide if we should add the PREVIOUS into the queue
             // We add only if previous one is not trivial,
             // and it had a different key, and it wasn't rolled back
-            let negate_same_log = same_log.and(cs, should_pop).negated(cs);
+
             let add_to_the_queue = Boolean::multi_and(
                 cs,
                 &[
-                    negate_previous_is_trivial,
-                    negate_same_log,
-                    negate_previous_item_rollback,
+                    previous_is_non_trivial,
+                    may_be_different_log,
+                    previous_item_is_not_rollback,
                 ],
             );
             let boolean_false = Boolean::allocated_constant(cs, false);
