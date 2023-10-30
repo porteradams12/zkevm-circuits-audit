@@ -1,15 +1,11 @@
 use super::*;
-use crate::boojum::serde_utils::BigArraySerde;
 use crate::boojum::gadgets::traits::auxiliary::PrettyComparison;
+use crate::boojum::serde_utils::BigArraySerde;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]
-pub struct ByteBuffer<
-    F: SmallField,
-    const BUFFER_SIZE: usize,
->
-{
+pub struct ByteBuffer<F: SmallField, const BUFFER_SIZE: usize> {
     pub bytes: [UInt8<F>; BUFFER_SIZE],
     pub filled: UInt8<F>, // assume that it's enough
 }
@@ -25,13 +21,14 @@ impl<F: SmallField, const BUFFER_SIZE: usize> CSPlaceholder<F> for ByteBuffer<F,
 }
 
 // we map a set of offset + current fill factor into "start from here" bit for 0-th byte of the buffer of length N
-pub type BufferMappingFunction<F, CS, const N: usize, const M: usize> = fn(&mut CS, UInt8<F>, UInt8<F>, [(); N]) -> [Boolean<F>; M];
+pub type BufferMappingFunction<F, CS, const N: usize, const M: usize> =
+    fn(&mut CS, UInt8<F>, UInt8<F>, [(); N]) -> [Boolean<F>; M];
 
-impl<
-    F: SmallField,
-    const BUFFER_SIZE: usize,
-> ByteBuffer<F, BUFFER_SIZE> {
-    pub fn can_fill_fixed_bytes<CS: ConstraintSystem<F>, const N: usize>(&self, cs: &mut CS) -> Boolean<F> {
+impl<F: SmallField, const BUFFER_SIZE: usize> ByteBuffer<F, BUFFER_SIZE> {
+    pub fn can_fill_fixed_bytes<CS: ConstraintSystem<F>, const N: usize>(
+        &self,
+        cs: &mut CS,
+    ) -> Boolean<F> {
         let max_filled = BUFFER_SIZE - N;
         let max_filled = u8::try_from(max_filled).expect("must fit into u8");
         let upper_bound = UInt8::allocate_constant(cs, max_filled);
@@ -42,7 +39,11 @@ impl<
         can_fill
     }
 
-    pub fn can_fill_bytes<CS: ConstraintSystem<F>>(&self, cs: &mut CS, bytes_to_fill: UInt8<F>) -> Boolean<F> {
+    pub fn can_fill_bytes<CS: ConstraintSystem<F>>(
+        &self,
+        cs: &mut CS,
+        bytes_to_fill: UInt8<F>,
+    ) -> Boolean<F> {
         let next_filled = self.filled.add_no_overflow(cs, bytes_to_fill);
         let max_filled = BUFFER_SIZE;
         let max_filled = u8::try_from(max_filled).expect("must fit into u8");
@@ -54,7 +55,10 @@ impl<
         can_fill
     }
 
-    pub fn can_consume_n_bytes<CS: ConstraintSystem<F>, const N: usize>(&self, cs: &mut CS) -> Boolean<F> {
+    pub fn can_consume_n_bytes<CS: ConstraintSystem<F>, const N: usize>(
+        &self,
+        cs: &mut CS,
+    ) -> Boolean<F> {
         let bytes_to_consume = N;
         let bytes_to_consume = u8::try_from(bytes_to_consume).expect("must fit into u8");
         let bytes_to_consume = UInt8::allocate_constant(cs, bytes_to_consume);
@@ -85,7 +89,7 @@ impl<
             let use_form_here = offset.is_zero(cs);
             offset = offset.sub(cs, &one_num);
             let mut candidate = [zero_u8; N];
-            candidate[0..(N-i)].copy_from_slice(&input[i..]);
+            candidate[0..(N - i)].copy_from_slice(&input[i..]);
             shifted_input = <[UInt8<F>; N]>::conditionally_select(
                 cs,
                 use_form_here,
@@ -105,7 +109,7 @@ impl<
             // buffer above is shifted all the way to the left, so if byte number 0 can use any of 0..BUFFER_SIZE markers,
             // then for byte number 1 we can only use markers 1..BUFFER_SIZE markers, and so on, and byte number 1 can never go into
             // buffer position 0
-            let markers = &use_byte_for_place_mask[..(BUFFER_SIZE-idx)];
+            let markers = &use_byte_for_place_mask[..(BUFFER_SIZE - idx)];
             let dsts = &mut self.bytes[idx..];
             assert_eq!(markers.len(), dsts.len());
 
@@ -122,7 +126,7 @@ impl<
     pub fn consume<CS: ConstraintSystem<F>, const N: usize>(
         &mut self,
         cs: &mut CS,
-        allow_partial: Boolean<F>
+        allow_partial: Boolean<F>,
     ) -> [UInt8<F>; N] {
         let bytes_to_take = u8::try_from(N).expect("must fit");
         let bytes_to_take = UInt8::allocated_constant(cs, bytes_to_take);
@@ -139,7 +143,7 @@ impl<
         result.copy_from_slice(&self.bytes[..N]);
 
         let mut new_bytes = [zero_u8; BUFFER_SIZE];
-        new_bytes[..(BUFFER_SIZE-N)].copy_from_slice(&self.bytes[N..]);
+        new_bytes[..(BUFFER_SIZE - N)].copy_from_slice(&self.bytes[N..]);
 
         self.bytes = new_bytes;
 
