@@ -262,9 +262,11 @@ where
     // we can recreate it here, there are two cases:
     // - we are 100% empty, but it's the only circuit in this case
     // - otherwise we continue, and then it's not trivial
+
+    // NOTE: scheduler guarantees that only 1 - the first - circuit will have "is_start",
+    // so to take a shortcut we can only need to test if there is nothing in the queue
     let no_work = unsorted_queue.is_empty(cs);
-    is_start.conditionally_enforce_true(cs, no_work);
-    let mut previous_is_trivial = is_start;
+    let mut previous_is_trivial = Boolean::multi_or(cs, &[no_work, is_start]);
 
     let unsorted_queue_lenght = Num::from_variable(unsorted_queue.length.get_variable());
     let intermediate_sorted_queue_lenght =
@@ -341,10 +343,6 @@ where
             let this_item_is_not_rollback = sorted_item.rollback.negated(cs);
             this_item_is_not_rollback.conditionally_enforce_true(cs, different_nontrivial_log);
 
-            // there are only two cases when keys are equal:
-            // - it's a padding element
-            // - it's a rollback
-
             // if it's same non-trivial log, then previous one is always guaranteed to be not-rollback by line above,
             // and so this one should be rollback
             sorted_item
@@ -367,16 +365,16 @@ where
             let previous_item_is_not_rollback = previous_item.rollback.negated(cs);
 
             // decide if we should add the PREVIOUS into the queue
-            // We add only if previous one is not trivial,
-            // and it wasn't rolled back, and it isn't rollback
+            // We add only if previous one is not trivial, and current one doesn't rollback it due to different timestamp,
+            // OR if current one is trivial
 
-            let previous_not_rolled_back = may_be_different_log.or(cs, is_trivial);
+            let maybe_add_to_queue = may_be_different_log.or(cs, is_trivial);
 
             let add_to_the_queue = Boolean::multi_and(
                 cs,
                 &[
                     previous_is_non_trivial,
-                    previous_not_rolled_back,
+                    maybe_add_to_queue,
                     previous_item_is_not_rollback,
                 ],
             );
