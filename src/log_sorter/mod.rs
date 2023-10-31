@@ -263,7 +263,8 @@ where
     // - we are 100% empty, but it's the only circuit in this case
     // - otherwise we continue, and then it's not trivial
     let no_work = unsorted_queue.is_empty(cs);
-    let mut previous_is_trivial = Boolean::multi_or(cs, &[no_work, is_start]);
+    is_start.conditionally_enforce_true(cs, no_work);
+    let mut previous_is_trivial = is_start;
 
     let unsorted_queue_lenght = Num::from_variable(unsorted_queue.length.get_variable());
     let intermediate_sorted_queue_lenght =
@@ -336,7 +337,7 @@ where
             let different_nontrivial_log =
                 Boolean::multi_and(cs, &[should_pop, may_be_different_log]);
 
-            // if we pop an item and it's not trivial, then it MUST be non-rollback
+            // if we pop an item and it's not trivial with different log, then it MUST be non-rollback
             let this_item_is_not_rollback = sorted_item.rollback.negated(cs);
             this_item_is_not_rollback.conditionally_enforce_true(cs, different_nontrivial_log);
 
@@ -367,13 +368,15 @@ where
 
             // decide if we should add the PREVIOUS into the queue
             // We add only if previous one is not trivial,
-            // and it had a different key, and it wasn't rolled back
+            // and it wasn't rolled back, and it isn't rollback
+
+            let previous_not_rolled_back = may_be_different_log.or(cs, is_trivial);
 
             let add_to_the_queue = Boolean::multi_and(
                 cs,
                 &[
                     previous_is_non_trivial,
-                    may_be_different_log,
+                    previous_not_rolled_back,
                     previous_item_is_not_rollback,
                 ],
             );
@@ -405,13 +408,13 @@ where
     {
         let now_empty = unsorted_queue.is_empty(cs);
 
-        let negate_previous_is_trivial = previous_is_trivial.negated(cs);
-        let negate_previous_item_rollback = previous_item.rollback.negated(cs);
+        let previous_is_non_trivial = previous_is_trivial.negated(cs);
+        let previous_item_is_not_rollback = previous_item.rollback.negated(cs);
         let add_to_the_queue = Boolean::multi_and(
             cs,
             &[
-                negate_previous_is_trivial,
-                negate_previous_item_rollback,
+                previous_is_non_trivial,
+                previous_item_is_not_rollback,
                 now_empty,
             ],
         );
