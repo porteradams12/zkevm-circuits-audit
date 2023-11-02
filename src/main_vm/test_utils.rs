@@ -3,7 +3,10 @@
 use boojum::{
     cs::traits::cs::ConstraintSystem,
     field::goldilocks::GoldilocksField,
-    gadgets::{boolean::Boolean, num::Num, u16::UInt16, u32::UInt32},
+    gadgets::{
+        boolean::Boolean, num::Num, traits::witnessable::CSWitnessable, u16::UInt16, u32::UInt32,
+    },
+    worker::Worker,
 };
 use zkevm_opcode_defs::{
     OPCODE_INPUT_VARIANT_FLAGS, OPCODE_OUTPUT_VARIANT_FLAGS, OPCODE_TYPE_BITS,
@@ -19,6 +22,7 @@ use super::{
     opcode_bitmask::{OpcodeBitmask, OPCODE_FLAGS_BITS, OPCODE_VARIANT_BITS},
     pre_state::{AfterDecodingCarryParts, CommonOpcodeState, MemoryLocation, PendingSponge},
     register_input_view::RegisterInputView,
+    state_diffs::StateDiffsAccumulator,
 };
 
 pub trait Testable {
@@ -99,7 +103,11 @@ pub fn opcode_properties_for_opcode<CS: ConstraintSystem<GoldilocksField>>(
         }
         zkevm_opcode_defs::Opcode::Jump(_) => todo!(),
         zkevm_opcode_defs::Opcode::Context(_) => todo!(),
-        zkevm_opcode_defs::Opcode::Shift(_) => todo!(),
+        zkevm_opcode_defs::Opcode::Shift(_) => {
+            opcode_bitmask.opcode_type_booleans[opcode.variant_idx()] = boolean_true;
+            opcode_bitmask.opcode_variant_booleans[opcode.materialize_subvariant_idx()] =
+                boolean_true;
+        }
         zkevm_opcode_defs::Opcode::Binop(_) => todo!(),
         zkevm_opcode_defs::Opcode::Ptr(_) => todo!(),
         zkevm_opcode_defs::Opcode::NearCall(_) => todo!(),
@@ -146,4 +154,26 @@ pub fn common_opcode_state_with_values<CS: ConstraintSystem<GoldilocksField>>(
         timestamp_for_second_decommit_or_precompile_write: zero_u32,
         timestamp_for_dst_write: zero_u32,
     }
+}
+
+pub fn get_dst0_value<CS: ConstraintSystem<GoldilocksField>>(
+    cs: &mut CS,
+    diffs_accumulator: &StateDiffsAccumulator<GoldilocksField>,
+) -> u64 {
+    let (_, should_apply, dst0) = diffs_accumulator.dst_0_values[0];
+
+    assert_eq!(true, should_apply.get_witness(cs).wait().unwrap());
+
+    dst0.value.get_witness(cs).wait().unwrap().as_u64()
+}
+
+pub fn get_dst1_value<CS: ConstraintSystem<GoldilocksField>>(
+    cs: &mut CS,
+    diffs_accumulator: &StateDiffsAccumulator<GoldilocksField>,
+) -> u64 {
+    let (should_apply, dst1) = diffs_accumulator.dst_1_values[0];
+
+    assert_eq!(true, should_apply.get_witness(cs).wait().unwrap());
+
+    dst1.value.get_witness(cs).wait().unwrap().as_u64()
 }

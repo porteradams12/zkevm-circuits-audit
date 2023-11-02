@@ -219,3 +219,64 @@ pub(crate) fn get_shift_constant<F: SmallField, CS: ConstraintSystem<F>>(
 
     full_shift_limbs
 }
+
+#[cfg(test)]
+mod tests {
+    use boojum::{
+        field::goldilocks::GoldilocksField, gadgets::traits::witnessable::CSWitnessable,
+        worker::Worker,
+    };
+
+    use crate::{
+        main_vm::test_utils::{
+            common_opcode_state_with_values, get_dst0_value, get_dst1_value,
+            opcode_properties_for_opcode, Testable,
+        },
+        test_utils::{add_some_table, check_circuit_satisfied, create_test_cs},
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_apply_right_shift() {
+        let mut owned_cs = create_test_cs();
+        // add tables
+        let shifts_table = create_shift_to_num_converter_table();
+        owned_cs.add_lookup_table::<BitshiftTable, 3>(shifts_table);
+
+        let cs = &mut owned_cs;
+
+        let local_vm_state = VmLocalState::uninitialized(cs);
+
+        let decoded_opcode = opcode_properties_for_opcode(
+            cs,
+            zkevm_opcode_defs::Opcode::Shift(zkevm_opcode_defs::ShiftOpcode::Shr),
+        );
+        let common_opcode_state = common_opcode_state_with_values(cs, 11, 2, decoded_opcode);
+
+        let opcode_carry_parts = AfterDecodingCarryParts::test_default(cs);
+
+        let mut diffs_accumulator = StateDiffsAccumulator::<GoldilocksField>::default();
+
+        apply_shifts(
+            cs,
+            &local_vm_state,
+            &common_opcode_state,
+            &opcode_carry_parts,
+            &mut diffs_accumulator,
+        );
+        let (should_apply, mut divs) = diffs_accumulator.mul_div_relations.pop().unwrap();
+        assert_eq!(true, should_apply.get_witness(cs).wait().unwrap());
+        let div0 = divs.pop().unwrap();
+        enforce_mul_relation(cs, div0);
+        let (should_apply, mut adds) = diffs_accumulator.add_sub_relations.pop().unwrap();
+        assert_eq!(true, should_apply.get_witness(cs).wait().unwrap());
+        let adds0 = adds.pop().unwrap();
+        enforce_addition_relation(cs, adds0);
+
+        // 11 >> 2 == 2
+        assert_eq!(2, get_dst0_value(cs, &diffs_accumulator));
+
+        check_circuit_satisfied(owned_cs);
+    }
+}

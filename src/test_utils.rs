@@ -133,3 +133,22 @@ pub fn add_some_table<CS: ConstraintSystem<GoldilocksField>>(cs: &mut CS) {
     // And we need to do SOMETHING with the table.
     cs.perform_lookup::<1, 2>(table_id, &[key.get_variable()]);
 }
+
+/// Checks that the given circuit is satisfied (for a given mapping of witnesses).
+pub fn check_circuit_satisfied(
+    mut owned_cs: CSReferenceImplementation<
+        GoldilocksField,
+        GoldilocksField,
+        DevCSConfig,
+        impl GateConfigurationHolder<GoldilocksField>,
+        impl StaticToolboxHolder,
+    >,
+) {
+    owned_cs.pad_and_shrink();
+
+    let worker = Worker::new();
+    let mut owned_cs = owned_cs.into_assembly();
+    owned_cs.print_gate_stats();
+
+    assert!(owned_cs.check_if_satisfied(&worker));
+}
