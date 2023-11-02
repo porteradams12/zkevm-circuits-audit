@@ -23,6 +23,8 @@ pub mod opcodes;
 pub mod pre_state;
 pub mod register_input_view;
 pub mod state_diffs;
+#[cfg(test)]
+mod test_utils;
 pub mod utils;
 pub mod witness_oracle;
 
