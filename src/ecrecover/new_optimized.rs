@@ -141,6 +141,7 @@ where
 
     let (overflows, rem) = max_value.div_rem(&params.modulus_u1024);
 
+    assert!(overflows.lt(&U1024::from_word(1u64 << 32)));
     let mut max_moduluses = overflows.as_words()[0] as u32;
     if rem.is_zero().unwrap_u8() != 1 {
         max_moduluses += 1;
@@ -187,6 +188,7 @@ fn convert_uint256_to_field_element<
     max_value = max_value.saturating_sub(&U1024::from_word(1u64));
 
     let (overflows, rem) = max_value.div_rem(&params.modulus_u1024);
+    assert!(overflows.lt(&U1024::from_word(1u64 << 32)));
     let mut max_moduluses = overflows.as_words()[0] as u32;
     if rem.is_zero().unwrap_u8() != 1 {
         max_moduluses += 1;
@@ -454,7 +456,14 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
                     cs.perform_lookup::<1, 2>(naf_abs_div2_table_id, &[naf.get_variable()])[0],
                 )
             };
-            let coords = &table[index.witness_hook(cs)().unwrap() as usize];
+            let mut coords = table[0].clone();
+            table.iter().enumerate().skip(1).for_each(|(i, v)| {
+                assert!((i as u8) < u8::MAX);
+                let const_idx = UInt8::allocated_constant(cs, i as u8);
+                let correct_idx = UInt8::equals(cs, &index, &const_idx);
+                coords.0 = Selectable::conditionally_select(cs, correct_idx, &v.0, &coords.0);
+                coords.1 = Selectable::conditionally_select(cs, correct_idx, &v.1, &coords.1);
+            });
             let mut p_1 =
                 SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(
                     cs,
@@ -605,8 +614,6 @@ fn ecrecover_precompile_inner_routine<
 
     let mut curve_b_nn =
         Secp256BaseNNField::<F>::allocated_constant(cs, curve_b, &base_field_params);
-    let mut minus_one_nn =
-        Secp256BaseNNField::<F>::allocated_constant(cs, minus_one, &base_field_params);
 
     let secp_n_u256 = U256([
         scalar_field_params.modulus_u1024.as_ref().as_words()[0],
@@ -670,15 +677,6 @@ fn ecrecover_precompile_inner_routine<
     };
     exception_flags.push(message_hash_is_zero);
 
-    // curve equation is y^2 = x^3 + b
-    // we compute t = r^3 + b and check if t is a quadratic residue or not.
-    // we do this by computing Legendre symbol (t, p) = t^[(p-1)/2] (mod p)
-    //           p = 2^256 - 2^32 - 2^9 - 2^8 - 2^7 - 2^6 - 2^4 - 1
-    // n = (p-1)/2 = 2^255 - 2^31 - 2^8 - 2^7 - 2^6 - 2^5 - 2^3 - 1
-    // we have to compute t^b = t^{2^255} / ( t^{2^31} * t^{2^8} * t^{2^7} * t^{2^6} * t^{2^5} * t^{2^3} * t)
-    // if t is not a quadratic residue we return error and replace x by another value that will make
-    // t = x^3 + b a quadratic residue
-
     let mut t = x_fe.square(cs);
     t = t.mul(cs, &mut x_fe);
     t = t.add(cs, &mut curve_b_nn);
@@ -687,62 +685,84 @@ fn ecrecover_precompile_inner_routine<
     exception_flags.push(t_is_zero);
 
     // if t is zero then just mask
-    let t = Selectable::conditionally_select(cs, t_is_zero, &valid_t_in_external_field, &t);
+    let mut t = Selectable::conditionally_select(cs, t_is_zero, &valid_t_in_external_field, &t);
 
-    // array of powers of t of the form t^{2^i} starting from i = 0 to 255
-    let mut t_powers = Vec::with_capacity(X_POWERS_ARR_LEN);
-    t_powers.push(t);
+    let w_wit = t.witness_hook(cs)()
+        .map(|t| {
+            // computes a sqrt in a field with p == 3 mod 4
+            fn sqrt<F: Field>(v: F) -> Option<F> {
+                let mut cur = v.clone();
+                let mut pows = vec![cur];
+                for _ in 0..255 {
+                    cur.mul_assign(&cur.clone());
+                    pows.push(cur);
+                }
+                let mut denom = F::one();
+                for idx in [2, 4, 5, 6, 7, 30] {
+                    denom.mul_assign(&pows[idx]);
+                }
+                let mut s = pows[254].clone();
+                s.mul_assign(&denom.inverse().unwrap());
 
-    for _ in 1..X_POWERS_ARR_LEN {
-        let prev = t_powers.last_mut().unwrap();
-        let next = prev.square(cs);
-        t_powers.push(next);
-    }
+                // check if the result is a valid sqrt, otherwise return None
+                let mut test = s.clone();
+                test.mul_assign(&s);
+                if test == v {
+                    Some(s)
+                } else {
+                    None
+                }
+            }
 
-    let mut acc = t_powers[0].clone();
-    for idx in [3, 5, 6, 7, 8, 31].into_iter() {
-        let other = &mut t_powers[idx];
-        acc = acc.mul(cs, other);
-    }
-    let mut legendre_symbol = t_powers[255].div_unchecked(cs, &mut acc);
+            let mut w = if let Some(y) = sqrt(t.get()) {
+                // if `t` has a sqrt, return it
+                y
+            } else {
+                // otherwise return sqrt(-t)
+                let mut tmp = t.get();
+                tmp.negate();
+                sqrt(tmp).unwrap()
+            };
+            // make sure we return the correct parity
+            let is_odd = w.into_repr().0[0] % 2 == 1;
+            if y_is_odd.witness_hook(cs)().unwrap() != is_odd {
+                w.negate();
+            }
+            w
+        })
+        .unwrap_or(Field::zero());
+    let mut w = NonNativeFieldOverU16::allocate_checked(cs, w_wit, base_field_params);
+    let mut w_squared = w.square(cs);
+    let t_residue_verified = w_squared.equals(cs, &mut t);
 
-    // we can also reuse the same values to compute square root in case of p = 3 mod 4
-    //           p = 2^256 - 2^32 - 2^9 - 2^8 - 2^7 - 2^6 - 2^4 - 1
-    // n = (p+1)/4 = 2^254 - 2^30 - 2^7 - 2^6 - 2^5 - 2^4 - 2^2
+    let mut negative_t = t.negated(cs);
+    let t_nonresidue_verified = w_squared.equals(cs, &mut negative_t);
+    exception_flags.push(t_nonresidue_verified);
 
-    let mut acc_2 = t_powers[2].clone();
-    for idx in [4, 5, 6, 7, 30].into_iter() {
-        let other = &mut t_powers[idx];
-        acc_2 = acc_2.mul(cs, other);
-    }
+    // enforce that (w^2 == t) XOR (w^2 == -t)
+    let negated = t_residue_verified.negated(cs);
+    Boolean::enforce_equal(cs, &negated, &t_nonresidue_verified);
 
-    let mut may_be_recovered_y = t_powers[254].div_unchecked(cs, &mut acc_2);
+    let mut may_be_recovered_y = w;
     may_be_recovered_y.normalize(cs);
-    let may_be_recovered_y_negated = may_be_recovered_y.negated(cs);
 
     let [lowest_bit, ..] =
         Num::<F>::from_variable(may_be_recovered_y.limbs[0]).spread_into_bits::<_, 16>(cs);
+    // check that lowest bit == parity bit
+    lowest_bit.conditionally_enforce_true(cs, y_is_odd);
 
-    // if lowest bit != parity bit, then we need conditionally select
-    let should_swap = lowest_bit.xor(cs, y_is_odd);
-    let may_be_recovered_y = Selectable::conditionally_select(
-        cs,
-        should_swap,
-        &may_be_recovered_y_negated,
-        &may_be_recovered_y,
-    );
-
-    let t_is_nonresidue =
-        Secp256BaseNNField::<F>::equals(cs, &mut legendre_symbol, &mut minus_one_nn);
-    exception_flags.push(t_is_nonresidue);
     // unfortunately, if t is found to be a quadratic nonresidue, we can't simply let x to be zero,
     // because then t_new = 7 is again a quadratic nonresidue. So, in this case we let x to be 9, then
     // t = 16 is a quadratic residue
-    let x =
-        Selectable::conditionally_select(cs, t_is_nonresidue, &valid_x_in_external_field, &x_fe);
+    let x = Selectable::conditionally_select(
+        cs,
+        t_nonresidue_verified,
+        &valid_x_in_external_field,
+        &x_fe,
+    );
     let y = Selectable::conditionally_select(
         cs,
-        t_is_nonresidue,
+        t_nonresidue_verified,
         &valid_y_in_external_field,
         &may_be_recovered_y,
     );
