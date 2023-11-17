@@ -3,9 +3,7 @@ use crate::base_structures::vm_state::VmLocalState;
 use crate::main_vm::opcode_bitmask::SUPPORTED_ISA_VERSION;
 use crate::main_vm::pre_state::AfterDecodingCarryParts;
 use crate::main_vm::pre_state::CommonOpcodeState;
-use crate::main_vm::state_diffs::{
-    StateDiffsAccumulator,
-};
+use crate::main_vm::state_diffs::StateDiffsAccumulator;
 use boojum::cs::gates::U8x4FMAGate;
 use zkevm_opcode_defs::*;
 

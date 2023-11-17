@@ -396,19 +396,18 @@ mod tests {
     use super::*;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
     use boojum::cs::gates::*;
-    
+
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::tables::*;
-    
-    
+
     use boojum::gadgets::u256::UInt256;
-    
+
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;
-    use ethereum_types::{U256};
+    use ethereum_types::U256;
     type F = GoldilocksField;
     type P = GoldilocksField;
 

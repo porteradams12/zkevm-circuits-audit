@@ -1,6 +1,5 @@
 pub mod input;
 
-
 use input::*;
 
 use crate::ethereum_types::U256;
@@ -11,7 +10,6 @@ use boojum::cs::Variable;
 use boojum::gadgets::traits::castable::WitnessCastable;
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
-
 
 use crate::base_structures::{decommit_query::*, memory_query::*};
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -649,23 +647,22 @@ fn decompose_uint32_to_uint16s<F: SmallField, CS: ConstraintSystem<F>>(
 
 #[cfg(test)]
 mod tests {
-    
 
     use super::*;
     use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
-    use crate::ethereum_types::{U256};
+    use crate::ethereum_types::U256;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
-    
+
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
-    
+
     use boojum::gadgets::tables::*;
     use boojum::gadgets::traits::allocatable::{CSAllocatable, CSPlaceholder};
-    
+
     use boojum::gadgets::u256::UInt256;
-    
+
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;
 

@@ -1,6 +1,5 @@
 use super::*;
 
-
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
 use crate::demux_log_queue::StorageLogQueue;
 use crate::ethereum_types::U256;
@@ -34,8 +33,6 @@ use std::sync::{Arc, RwLock};
 use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 
 pub const MEMORY_QUERIES_PER_CALL: usize = 4;
-
-
 
 #[derive(Derivative, CSSelectable)]
 #[derivative(Clone, Debug)]

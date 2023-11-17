@@ -9,8 +9,6 @@ use self::input::*;
 pub mod auxiliary;
 pub use auxiliary as aux;
 
-
-
 use boojum::cs::implementations::verifier::VerificationKey;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::field::SmallField;

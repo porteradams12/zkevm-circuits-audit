@@ -16,7 +16,6 @@ use boojum::gadgets::{
 use boojum::serde_utils::BigArraySerde;
 use cs_derive::*;
 
-
 pub const PACKED_KEY_LENGTH: usize = 8 + 1;
 
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]

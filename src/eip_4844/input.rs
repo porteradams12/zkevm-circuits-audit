@@ -7,19 +7,15 @@ use boojum::field::SmallField;
 use boojum::gadgets::keccak256;
 use boojum::gadgets::traits::auxiliary::PrettyComparison;
 
-
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::{
     boolean::Boolean,
     traits::{
-        encodable::{CircuitVarLengthEncodable},
-        selectable::Selectable,
-        witnessable::WitnessHookable,
+        encodable::CircuitVarLengthEncodable, selectable::Selectable, witnessable::WitnessHookable,
     },
 };
 use boojum::serde_utils::BigArraySerde;
 use cs_derive::*;
-
 
 pub const BLOB_CHUNK_SIZE: usize = 31;
 pub const ELEMENTS_PER_4844_BLOCK: usize = 4096;

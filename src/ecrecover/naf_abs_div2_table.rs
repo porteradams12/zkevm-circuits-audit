@@ -3,8 +3,6 @@ use super::*;
 use boojum::cs::implementations::lookup_table::LookupTable;
 use boojum::field::SmallField;
 
-
-
 const TABLE_NAME: &'static str = "NAFABSDIV2 table";
 
 #[derive(Derivative)]

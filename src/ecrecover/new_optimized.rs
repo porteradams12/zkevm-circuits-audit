@@ -1,6 +1,5 @@
 use super::*;
 
-
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
 use crate::demux_log_queue::StorageLogQueue;
 use crate::ecrecover::secp256k1::fixed_base_mul_table::FixedBaseMulTable;
@@ -44,7 +43,6 @@ use std::sync::{Arc, RwLock};
 use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 
 pub use self::input::*;
-
 
 pub const MEMORY_QUERIES_PER_CALL: usize = 4;
 pub const ALLOW_ZERO_MESSAGE: bool = false;
@@ -1475,7 +1473,6 @@ mod test {
     // https://ethresear.ch/t/you-can-kinda-abuse-ecrecover-to-do-ecmul-in-secp256k1-today/2384
     #[test]
     fn test_ecrecover_scalar_mul_trick() {
-        
         let mut owned_cs = create_cs(1 << 20);
         let cs = &mut owned_cs;
 

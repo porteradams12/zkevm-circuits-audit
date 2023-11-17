@@ -20,7 +20,6 @@ use boojum::serde_utils::BigArraySerde;
 use cs_derive::*;
 use derivative::*;
 
-
 #[derive(Derivative, CSAllocatable, CSSelectable, CSVarLengthEncodable, WitnessHookable)]
 #[derivative(Clone, Copy, Debug)]
 #[DerivePrettyComparison("true")]

@@ -1,6 +1,3 @@
-
-
-
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -14,12 +11,9 @@ use boojum::gadgets::keccak256;
 use boojum::gadgets::non_native_field::implementations::*;
 use boojum::gadgets::num::Num;
 
-
-
 use boojum::gadgets::traits::allocatable::{CSAllocatable, CSAllocatableExt, CSPlaceholder};
 
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-
 
 use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u256::UInt256;
@@ -425,10 +419,8 @@ mod tests {
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
-    use boojum::field::traits::field_like::PrimeFieldLike;
-    use boojum::field::Field;
     use boojum::field::SmallField;
-    
+
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::gadgets::tables::*;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
@@ -436,8 +428,8 @@ mod tests {
     use boojum::pairing::ff::PrimeFieldRepr;
     use boojum::pairing::ff::{Field as PairingField, PrimeField};
     use boojum::worker::Worker;
+    use rand::Rand;
     use rand::SeedableRng;
-    use rand::{Rand};
 
     type F = GoldilocksField;
     type P = GoldilocksField;
@@ -621,7 +613,6 @@ mod tests {
         let evaluation_point_fr = Bls12_381Fr::from_repr(evaluation_point_repr).unwrap();
         dbg!(evaluation_point_fr);
 
-        
         // evaluate polynomial
         let mut evaluation_result = Bls12_381Fr::zero();
         let mut power = Bls12_381Fr::one();

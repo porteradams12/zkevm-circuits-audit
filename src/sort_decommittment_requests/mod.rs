@@ -17,11 +17,9 @@ use boojum::gadgets::{
     u32::UInt32,
 };
 
+use crate::base_structures::decommit_query::DecommitQuery;
 use crate::base_structures::decommit_query::{DecommitQueue, DECOMMIT_QUERY_PACKED_WIDTH};
 use crate::base_structures::vm_state::*;
-use crate::base_structures::{
-    decommit_query::DecommitQuery,
-};
 use crate::fsm_input_output::{circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH, *};
 use crate::sort_decommittment_requests::input::*;
 use crate::storage_validity_by_grand_product::unpacked_long_comparison;
@@ -401,7 +399,7 @@ mod tests {
     use super::*;
     use crate::ethereum_types::U256;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
-    
+
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;

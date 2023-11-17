@@ -1,4 +1,3 @@
-
 use std::mem::MaybeUninit;
 
 use crate::base_structures::log_query::LogQuery;
@@ -9,7 +8,7 @@ use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 
-use boojum::cs::traits::cs::{ConstraintSystem};
+use boojum::cs::traits::cs::ConstraintSystem;
 
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
@@ -24,8 +23,7 @@ use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::u256::UInt256;
 
 use boojum::gadgets::u8::UInt8;
-use std::sync::{Arc};
-
+use std::sync::Arc;
 
 use super::*;
 
@@ -81,7 +79,6 @@ where
     let mut keccak_accumulator_state =
         keccak_accumulator_state.map(|el| el.map(|el| el.map(|el| el.get_variable())));
 
-    
     // we do not serialize length because it's recalculatable in L1
 
     let empty_hash = {
