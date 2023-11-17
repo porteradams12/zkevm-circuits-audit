@@ -36,8 +36,8 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
     const SET_CONTEXT_U128_OPCODE: zkevm_opcode_defs::Opcode = zkevm_opcode_defs::Opcode::Context(
         zkevm_opcode_defs::definitions::context::ContextOpcode::SetContextU128,
     );
-    const SET_PUBDATA_ERGS_OPCODE: zkevm_opcode_defs::Opcode = zkevm_opcode_defs::Opcode::Context(
-        zkevm_opcode_defs::definitions::context::ContextOpcode::SetErgsPerPubdataByte,
+    const AUX_MUTATING_0_OPCODE: zkevm_opcode_defs::Opcode = zkevm_opcode_defs::Opcode::Context(
+        zkevm_opcode_defs::definitions::context::ContextOpcode::AuxMutating0,
     );
     const INCREMENT_TX_NUMBER_OPCODE: zkevm_opcode_defs::Opcode =
         zkevm_opcode_defs::Opcode::Context(
@@ -103,8 +103,9 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
         common_opcode_state
             .decoded_opcode
             .properties_bits
-            .boolean_for_variant(SET_PUBDATA_ERGS_OPCODE)
+            .boolean_for_variant(AUX_MUTATING_0_OPCODE)
     };
+    todo!();
     let is_inc_tx_num = {
         common_opcode_state
             .decoded_opcode
