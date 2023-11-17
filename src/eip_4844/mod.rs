@@ -5,9 +5,8 @@ use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::config::*;
-use boojum::crypto_bigint::{Zero};
 use boojum::cs::gates::ConstantAllocatableCS;
-use boojum::cs::traits::cs::{ConstraintSystem};
+use boojum::cs::traits::cs::ConstraintSystem;
 
 use boojum::field::SmallField;
 use boojum::gadgets::boolean::Boolean;
@@ -28,7 +27,7 @@ use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u8::UInt8;
 use boojum::pairing::ff::{Field, PrimeField};
 
-use std::sync::{Arc};
+use std::sync::Arc;
 
 use super::*;
 
@@ -429,16 +428,16 @@ mod tests {
     use boojum::field::traits::field_like::PrimeFieldLike;
     use boojum::field::Field;
     use boojum::field::SmallField;
-    use boojum::gadgets::queue::CircuitQueueRawWitness;
+    
     use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::gadgets::tables::*;
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::pairing::bls12_381::G1;
     use boojum::pairing::ff::PrimeFieldRepr;
-    use boojum::pairing::ff::{Field as PairingField, PrimeField, SqrtField};
+    use boojum::pairing::ff::{Field as PairingField, PrimeField};
     use boojum::worker::Worker;
     use rand::SeedableRng;
-    use rand::{Rand, Rng};
+    use rand::{Rand};
 
     type F = GoldilocksField;
     type P = GoldilocksField;
@@ -622,7 +621,7 @@ mod tests {
         let evaluation_point_fr = Bls12_381Fr::from_repr(evaluation_point_repr).unwrap();
         dbg!(evaluation_point_fr);
 
-        use boojum::pairing::bls12_381::FrRepr;
+        
         // evaluate polynomial
         let mut evaluation_result = Bls12_381Fr::zero();
         let mut power = Bls12_381Fr::one();

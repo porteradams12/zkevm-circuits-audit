@@ -677,7 +677,7 @@ where
 mod test {
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::traits::allocatable::CSAllocatable;
-    use boojum::pairing::ff::{Field, PrimeField, SqrtField};
+    use boojum::pairing::ff::{Field, PrimeField};
     use boojum::worker::Worker;
 
     use super::*;

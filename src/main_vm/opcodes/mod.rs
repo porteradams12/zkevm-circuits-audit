@@ -24,16 +24,15 @@ pub mod uma;
 pub(crate) mod call_ret_impl;
 
 pub use self::add_sub::*;
-pub use self::binop::*;
-pub use self::call_ret::*;
-pub use self::context::*;
-pub use self::jump::*;
-pub use self::log::*;
+pub(crate) use self::binop::*;
+pub(crate) use self::call_ret::*;
+pub(crate) use self::context::*;
+pub(crate) use self::jump::*;
+pub(crate) use self::log::*;
 pub use self::mul_div::*;
-pub use self::nop::*;
-pub use self::ptr::*;
-pub use self::ptr::*;
-pub use self::shifts::*;
+pub(crate) use self::nop::*;
+pub(crate) use self::ptr::*;
+pub(crate) use self::shifts::*;
 pub use self::uma::*;
 
 pub struct AddSubRelation<F: SmallField> {

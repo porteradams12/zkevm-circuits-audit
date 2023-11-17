@@ -38,11 +38,8 @@ use boojum::gadgets::u512::UInt512;
 use boojum::gadgets::u8::UInt8;
 use boojum::pairing::ff::PrimeField;
 use boojum::pairing::GenericCurveAffine;
-use boojum::pairing::{CurveAffine, GenericCurveProjective};
-
 
 use std::collections::VecDeque;
-use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 
@@ -851,8 +848,6 @@ where
     let scalar_params = Arc::new(secp256k1_scalar_field_params());
     let base_params = Arc::new(secp256k1_base_field_params());
 
-    use boojum::pairing::ff::PrimeField;
-
     let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
         cs,
         Secp256Fq::from_str(&VALID_X_CUBED_IN_EXTERNAL_FIELD.to_string()).unwrap(),
@@ -1061,7 +1056,7 @@ where
 mod test {
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::traits::allocatable::CSAllocatable;
-    use boojum::pairing::ff::{Field, PrimeField, SqrtField};
+    use boojum::pairing::ff::{Field, PrimeField};
     use boojum::worker::Worker;
 
     use super::*;
@@ -1480,7 +1475,7 @@ mod test {
     // https://ethresear.ch/t/you-can-kinda-abuse-ecrecover-to-do-ecmul-in-secp256k1-today/2384
     #[test]
     fn test_ecrecover_scalar_mul_trick() {
-        use rand::Rand;
+        
         let mut owned_cs = create_cs(1 << 20);
         let cs = &mut owned_cs;
 

@@ -1,6 +1,5 @@
 use arrayvec::ArrayVec;
 
-use super::opcodes::context::apply_context;
 use super::pre_state::{create_prestate, PendingSponge};
 use super::state_diffs::{
     StateDiffsAccumulator, MAX_ADD_SUB_RELATIONS_PER_CYCLE, MAX_MUL_DIV_RELATIONS_PER_CYCLE,

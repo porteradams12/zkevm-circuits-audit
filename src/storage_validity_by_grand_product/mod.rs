@@ -946,9 +946,7 @@ pub fn unpacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>, const N:
 mod tests {
     use super::*;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
-    use boojum::cs::implementations::reference_cs::{
-        CSDevelopmentAssembly, CSReferenceImplementation,
-    };
+    
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     // use boojum::cs::EmptyToolbox;
@@ -962,7 +960,7 @@ mod tests {
     type F = GoldilocksField;
     type P = GoldilocksField;
 
-    use boojum::config::*;
+    
     use boojum::cs::cs_builder::*;
 
     fn configure<

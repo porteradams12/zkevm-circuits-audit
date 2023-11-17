@@ -472,7 +472,7 @@ pub fn prepacked_long_comparison<F: SmallField, CS: ConstraintSystem<F>>(
 mod tests {
     use super::*;
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
-    use boojum::cs::implementations::reference_cs::CSDevelopmentAssembly;
+    
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;

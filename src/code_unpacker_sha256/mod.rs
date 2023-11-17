@@ -649,23 +649,23 @@ fn decompose_uint32_to_uint16s<F: SmallField, CS: ConstraintSystem<F>>(
 
 #[cfg(test)]
 mod tests {
-    use crate::base_structures::decommit_query;
+    
 
     use super::*;
     use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
-    use crate::ethereum_types::{Address, U256};
+    use crate::ethereum_types::{U256};
     use boojum::algebraic_props::poseidon2_parameters::Poseidon2GoldilocksExternalMatrix;
-    use boojum::cs::implementations::reference_cs::CSDevelopmentAssembly;
+    
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
     use boojum::field::goldilocks::GoldilocksField;
-    use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
+    
     use boojum::gadgets::tables::*;
     use boojum::gadgets::traits::allocatable::{CSAllocatable, CSPlaceholder};
-    use boojum::gadgets::u160::UInt160;
+    
     use boojum::gadgets::u256::UInt256;
-    use boojum::gadgets::u8::UInt8;
+    
     use boojum::implementations::poseidon2::Poseidon2Goldilocks;
     use boojum::worker::Worker;
 
