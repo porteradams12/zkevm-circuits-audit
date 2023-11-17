@@ -105,7 +105,6 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
             .properties_bits
             .boolean_for_variant(AUX_MUTATING_0_OPCODE)
     };
-    todo!();
     let is_inc_tx_num = {
         common_opcode_state
             .decoded_opcode

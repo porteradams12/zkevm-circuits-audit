@@ -1,6 +1,6 @@
 pub mod input;
 
-use boojum::gadgets::traits::witnessable::WitnessHookable;
+
 use input::*;
 
 use crate::ethereum_types::U256;
@@ -12,7 +12,7 @@ use boojum::gadgets::traits::castable::WitnessCastable;
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
-use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;
+
 use crate::base_structures::{decommit_query::*, memory_query::*};
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem};

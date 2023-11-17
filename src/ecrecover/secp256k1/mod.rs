@@ -9,7 +9,7 @@ pub mod fixed_base_mul_table;
 pub mod fq;
 pub mod fr;
 
-use fixed_base_mul_table::*;
+
 use fq::*;
 use fr::*;
 

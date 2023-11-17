@@ -1,12 +1,12 @@
 use super::*;
-use crate::base_structures::log_query::*;
-use crate::base_structures::memory_query::*;
+
+
 use crate::base_structures::precompile_input_outputs::PrecompileFunctionOutputData;
 use crate::demux_log_queue::StorageLogQueue;
 use crate::ecrecover::secp256k1::fixed_base_mul_table::FixedBaseMulTable;
 use crate::ethereum_types::U256;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
-use crate::fsm_input_output::*;
+
 use arrayvec::ArrayVec;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::crypto_bigint::{Zero, U1024};
@@ -17,19 +17,19 @@ use boojum::field::SmallField;
 use boojum::gadgets::blake2s::mixing_function::merge_byte_using_table;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::curves::sw_projective::SWProjectivePoint;
-use boojum::gadgets::curves::zeroable_affine::ZeroableAffinePoint;
+
 use boojum::gadgets::keccak256::keccak256;
-use boojum::gadgets::non_native_field::implementations::*;
+
 use boojum::gadgets::non_native_field::traits::NonNativeField;
 use boojum::gadgets::num::Num;
 use boojum::gadgets::queue::CircuitQueueWitness;
 use boojum::gadgets::queue::QueueState;
-use boojum::gadgets::tables::And8Table;
+
 use boojum::gadgets::tables::ByteSplitTable;
 use boojum::gadgets::traits::allocatable::{CSAllocatableExt, CSPlaceholder};
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::traits::selectable::Selectable;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
+
 use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u160::UInt160;
 use boojum::gadgets::u256::UInt256;
@@ -39,15 +39,15 @@ use boojum::gadgets::u8::UInt8;
 use boojum::pairing::ff::PrimeField;
 use boojum::pairing::GenericCurveAffine;
 use boojum::pairing::{CurveAffine, GenericCurveProjective};
-use boojum::sha3::digest::typenum::private::IsGreaterPrivate;
-use cs_derive::*;
+
+
 use std::collections::VecDeque;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use zkevm_opcode_defs::system_params::PRECOMPILE_AUX_BYTE;
 
 pub use self::input::*;
-use super::input::*;
+
 
 pub const MEMORY_QUERIES_PER_CALL: usize = 4;
 pub const ALLOW_ZERO_MESSAGE: bool = false;

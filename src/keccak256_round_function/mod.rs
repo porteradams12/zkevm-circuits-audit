@@ -6,7 +6,7 @@ use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::traits::selectable::Selectable;
 use boojum::gadgets::traits::witnessable::WitnessHookable;
-use boojum::gadgets::u16::UInt16;
+
 use boojum::gadgets::u256::UInt256;
 use boojum::gadgets::u32::UInt32;
 use cs_derive::*;

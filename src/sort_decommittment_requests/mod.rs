@@ -8,7 +8,7 @@ use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
 use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
+
 use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
@@ -20,7 +20,7 @@ use boojum::gadgets::{
 use crate::base_structures::decommit_query::{DecommitQueue, DECOMMIT_QUERY_PACKED_WIDTH};
 use crate::base_structures::vm_state::*;
 use crate::base_structures::{
-    decommit_query::DecommitQuery, memory_query::MEMORY_QUERY_PACKED_WIDTH,
+    decommit_query::DecommitQuery,
 };
 use crate::fsm_input_output::{circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH, *};
 use crate::sort_decommittment_requests::input::*;
@@ -527,7 +527,7 @@ mod tests {
             _,
             Poseidon2Goldilocks,
             FULL_SPONGE_QUEUE_STATE_WIDTH,
-            { MEMORY_QUERY_PACKED_WIDTH + 1 },
+            { DECOMMIT_QUERY_PACKED_WIDTH + 1 },
             DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS,
         >(
             cs,

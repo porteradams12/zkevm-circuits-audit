@@ -10,7 +10,7 @@ use crate::fsm_input_output::ClosedFormInputCompactForm;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
-use boojum::gadgets::queue::queue_optimizer::SpongeOptimizer;
+
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::u32::UInt32;
 use boojum::gadgets::u8::UInt8;

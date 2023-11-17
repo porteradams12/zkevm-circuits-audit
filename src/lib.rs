@@ -1,7 +1,6 @@
 #![allow(clippy::drop_ref)]
 #![allow(dead_code)]
 #![allow(dropping_references)]
-#![allow(unused_imports)]
 #![feature(generic_const_exprs)]
 #![feature(array_chunks)]
 #![feature(more_qualified_paths)]

@@ -1,6 +1,6 @@
 use crate::base_structures::recursion_query::RecursionQuery;
 use crate::fsm_input_output::commit_variable_length_encodable_item;
-use boojum::cs::implementations::proof::Proof;
+
 use boojum::cs::implementations::prover::ProofConfig;
 
 use crate::base_structures::recursion_query::RecursionQueue;
@@ -8,17 +8,16 @@ use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 use boojum::gadgets::recursion::recursive_transcript::RecursiveTranscript;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
-use boojum::gadgets::traits::witnessable::WitnessHookable;
+
 
 use std::collections::VecDeque;
 
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
+use boojum::cs::{traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::{
-    boolean::Boolean,
     num::Num,
     queue::*,
     traits::{allocatable::CSAllocatable, allocatable::CSAllocatableExt, selectable::Selectable},
