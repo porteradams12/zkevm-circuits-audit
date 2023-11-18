@@ -4,6 +4,7 @@ pub mod bitshift;
 pub mod conditional;
 pub mod integer_to_boolean_mask;
 pub mod opcodes_decoding;
+pub mod test_bit;
 pub mod uma_ptr_read_cleanup;
 
 pub use self::bitshift::*;

@@ -99,7 +99,7 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
             .properties_bits
             .boolean_for_variant(SET_CONTEXT_U128_OPCODE)
     };
-    let is_set_pubdata_ergs = {
+    let _is_aux_mutating_0 = {
         common_opcode_state
             .decoded_opcode
             .properties_bits
@@ -113,19 +113,13 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
     };
 
     let write_to_context = Boolean::multi_and(cs, &[should_apply, is_set_context_u128]);
-    let set_pubdata_ergs = Boolean::multi_and(cs, &[should_apply, is_set_pubdata_ergs]);
     let increment_tx_counter = Boolean::multi_and(cs, &[should_apply, is_inc_tx_num]);
 
     // write in regards of dst0 register
-    let read_only = Boolean::multi_or(
-        cs,
-        &[is_set_context_u128, is_set_pubdata_ergs, is_inc_tx_num],
-    );
+    let read_only = Boolean::multi_or(cs, &[is_set_context_u128, is_inc_tx_num]);
     let write_like = read_only.negated(cs);
 
     let write_to_dst0 = Boolean::multi_and(cs, &[should_apply, write_like]);
-
-    let potentially_new_ergs_for_pubdata = common_opcode_state.src0_view.u32x8_view[0];
 
     let one_u32 = UInt32::allocated_constant(cs, 1u32);
     let (incremented_tx_number, _of) = draft_vm_state
@@ -164,9 +158,23 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
         ],
     );
 
+    let total_pubdata_spent_counter = draft_vm_state
+        .callstack
+        .current_context
+        .saved_context
+        .total_pubdata_spent
+        .mask(
+            cs,
+            draft_vm_state
+                .callstack
+                .current_context
+                .saved_context
+                .is_kernel_mode,
+        );
+
     let meta_as_register = UInt256 {
         inner: [
-            draft_vm_state.ergs_per_pubdata_byte,
+            total_pubdata_spent_counter,
             zero_u32, // reserved
             draft_vm_state
                 .callstack
@@ -301,7 +309,4 @@ pub(crate) fn apply_context<F: SmallField, CS: ConstraintSystem<F>>(
         .push((write_to_context, context_composite_to_set));
     debug_assert!(diffs_accumulator.new_tx_number.is_none());
     diffs_accumulator.new_tx_number = Some((increment_tx_counter, incremented_tx_number));
-    debug_assert!(diffs_accumulator.new_ergs_per_pubdata.is_none());
-    diffs_accumulator.new_ergs_per_pubdata =
-        Some((set_pubdata_ergs, potentially_new_ergs_for_pubdata));
 }

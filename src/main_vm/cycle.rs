@@ -461,10 +461,10 @@ where
         );
     }
 
-    // Ergs per pubdata
-    for (flag, value) in diffs_accumulator.new_ergs_per_pubdata.into_iter() {
-        new_state.ergs_per_pubdata_byte =
-            UInt32::conditionally_select(cs, flag, &value, &new_state.ergs_per_pubdata_byte);
+    // Pubdata revert counter at the global state
+    for (flag, value) in diffs_accumulator.new_pubdata_revert_counter.into_iter() {
+        new_state.pubdata_revert_counter =
+            UInt32::conditionally_select(cs, flag, &value, &new_state.pubdata_revert_counter);
     }
 
     // Tx number in block

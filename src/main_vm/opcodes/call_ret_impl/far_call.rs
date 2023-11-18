@@ -1522,12 +1522,60 @@ where
     // kind of refund if we didn't decommit
 
     let was_decommitted_before = is_first.negated(cs);
-
     let refund = Boolean::multi_and(cs, &[should_decommit, was_decommitted_before]);
-
     let ergs_remaining_after_decommit =
         UInt32::conditionally_select(cs, refund, &ergs_remaining, &ergs_remaining_after_decommit);
 
+    // we use `should_decommit` as a marker that we did actually execute both read and decommittment (whether fresh or not)
+
+    // actually modify queue
+    let (new_decommittment_queue_tail, new_decommittment_queue_len) =
+        add_to_decommittment_queue_inner(
+            cs,
+            relations_buffer,
+            &should_decommit,
+            current_decommittment_queue_tail,
+            current_decommittment_queue_len,
+            &decommittment_request,
+            _round_function,
+        );
+
+    let target_memory_page = decommittment_request.page;
+    let unmapped_page = UInt32::allocated_constant(cs, UNMAPPED_PAGE);
+    let target_memory_page =
+        UInt32::conditionally_select(cs, should_decommit, &target_memory_page, &unmapped_page);
+
+    (
+        not_enough_ergs_to_decommit,
+        target_memory_page,
+        (new_decommittment_queue_tail, new_decommittment_queue_len),
+        ergs_remaining_after_decommit,
+    )
+}
+
+pub(crate) fn add_to_decommittment_queue_inner<
+    F: SmallField,
+    CS: ConstraintSystem<F>,
+    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
+>(
+    cs: &mut CS,
+    relations_buffer: &mut ArrayVec<
+        (
+            Boolean<F>,
+            [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
+            [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
+        ),
+        MAX_SPONGES_PER_CYCLE,
+    >,
+    should_add: &Boolean<F>,
+    current_decommittment_queue_tail: &[Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
+    current_decommittment_queue_len: &UInt32<F>,
+    decommittment_request: &DecommitQuery<F>,
+    _round_function: &R,
+) -> ([Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH], UInt32<F>)
+where
+    [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
+{
     use boojum::gadgets::traits::encodable::CircuitEncodable;
 
     let encoded_request = decommittment_request.encode(cs);
@@ -1552,11 +1600,10 @@ where
     // NOTE: since we do merged call/ret, we simulate proper relations here always,
     // because we will do join enforcement on call/ret
 
-    let final_state =
-        simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, should_decommit);
+    let final_state = simulate_round_function::<_, _, 8, 12, 4, R>(cs, initial_state, *should_add);
 
     relations_buffer.push((
-        should_decommit,
+        *should_add,
         initial_state.map(|el| Num::from_variable(el)),
         final_state.map(|el| Num::from_variable(el)),
     ));
@@ -1565,7 +1612,7 @@ where
 
     let new_decommittment_queue_tail = Num::parallel_select(
         cs,
-        should_decommit,
+        *should_add,
         &final_state,
         &current_decommittment_queue_tail,
     );
@@ -1574,21 +1621,10 @@ where
         unsafe { current_decommittment_queue_len.increment_unchecked(cs) };
     let new_decommittment_queue_len = UInt32::conditionally_select(
         cs,
-        should_decommit,
+        *should_add,
         &new_decommittment_queue_len_candidate,
         &current_decommittment_queue_len,
     );
-    // we use `should_decommit` as a marker that we did actually execute both read and decommittment (whether fresh or not)
 
-    let target_memory_page = decommittment_request.page;
-    let unmapped_page = UInt32::allocated_constant(cs, UNMAPPED_PAGE);
-    let target_memory_page =
-        UInt32::conditionally_select(cs, should_decommit, &target_memory_page, &unmapped_page);
-
-    (
-        not_enough_ergs_to_decommit,
-        target_memory_page,
-        (new_decommittment_queue_tail, new_decommittment_queue_len),
-        ergs_remaining_after_decommit,
-    )
+    (new_decommittment_queue_tail, new_decommittment_queue_len)
 }
