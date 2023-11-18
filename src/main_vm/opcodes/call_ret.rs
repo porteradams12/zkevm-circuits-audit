@@ -503,8 +503,7 @@ pub(crate) fn apply_calls_and_ret<
         .context_u128_candidates
         .push((reset_context_value, empty_context_value));
 
-    debug_assert!(diffs_accumulator.decommitment_queue_candidates.is_none());
-    diffs_accumulator.decommitment_queue_candidates = Some((
+    diffs_accumulator.decommitment_queue_candidates.push((
         apply_far_call,
         new_decommittment_queue_len,
         new_decommittment_queue_tail,

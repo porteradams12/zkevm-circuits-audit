@@ -17,6 +17,7 @@ pub(crate) const MAX_SPONGES_PER_CYCLE: usize = 9;
 pub(crate) const MAX_U32_CONDITIONAL_RANGE_CHECKS_PER_CYCLE: usize = 8;
 pub(crate) const MAX_ADD_SUB_RELATIONS_PER_CYCLE: usize = 1;
 pub(crate) const MAX_MUL_DIV_RELATIONS_PER_CYCLE: usize = 1;
+pub(crate) const MAX_DECOMMIT_QUEUE_CANDIDATES: usize = 2;
 
 #[derive(Derivative)]
 #[derivative(Default(bound = ""))]
@@ -53,11 +54,14 @@ pub struct StateDiffsAccumulator<F: SmallField> {
     // memory page counter
     pub memory_page_counters: Option<UInt32<F>>,
     // decommittment queue
-    pub decommitment_queue_candidates: Option<(
-        Boolean<F>,
-        UInt32<F>,
-        [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
-    )>,
+    pub decommitment_queue_candidates: ArrayVec<
+        (
+            Boolean<F>,
+            UInt32<F>,
+            [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
+        ),
+        MAX_DECOMMIT_QUEUE_CANDIDATES,
+    >,
     // memory queue
     pub memory_queue_candidates: Vec<(
         Boolean<F>,

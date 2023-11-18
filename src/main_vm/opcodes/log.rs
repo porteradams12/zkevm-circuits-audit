@@ -5,6 +5,7 @@ use crate::{
         log_query::{self, LogQuery, LOG_QUERY_PACKED_WIDTH, ROLLBACK_PACKING_FLAG_VARIABLE_IDX},
         register::VMRegister,
     },
+    main_vm::opcodes::call_ret_impl::add_to_decommittment_queue_inner,
     tables::test_bit::TestBitTable,
 };
 
@@ -486,7 +487,7 @@ pub(crate) fn apply_log<
         &dependencies,
     );
 
-    let (new_forward_queue_tail, new_rollback_queue_head, relations) =
+    let (new_forward_queue_tail, new_rollback_queue_head, sponge_relations_for_io_like_ops) =
         construct_hash_relations_for_log_and_new_queue_states(
             cs,
             &packed_log_forward,
@@ -557,8 +558,23 @@ pub(crate) fn apply_log<
     decommittment_request.page = suggested_page;
 
     // form new candidate of decommit queue
-
-    // TODO
+    let mut sponge_relations_for_decommit = ArrayVec::<
+        (
+            Boolean<F>,
+            [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
+            [Num<F>; FULL_SPONGE_QUEUE_STATE_WIDTH],
+        ),
+        MAX_SPONGES_PER_CYCLE,
+    >::new();
+    let (new_decommit_queue_tail, new_decommit_queue_len) = add_to_decommittment_queue_inner(
+        cs,
+        &mut sponge_relations_for_decommit,
+        &should_decommit,
+        &draft_vm_state.code_decommittment_queue_state,
+        &draft_vm_state.code_decommittment_queue_length,
+        &decommittment_request,
+        round_function,
+    );
 
     // we can refund a full cost if it's repeated, and only if we did decommit indeed,
     // otherwise there was out of ergs above and
@@ -678,12 +694,27 @@ pub(crate) fn apply_log<
     assert!(STORAGE_READ_OPCODE.can_have_src0_from_mem(SUPPORTED_ISA_VERSION) == false);
     assert!(STORAGE_READ_OPCODE.can_write_dst0_into_memory(SUPPORTED_ISA_VERSION) == false);
 
-    diffs_accumulator
-        .sponge_candidates_to_run
-        .push((false, false, should_apply, relations));
+    diffs_accumulator.sponge_candidates_to_run.push((
+        false,
+        false,
+        should_apply_io,
+        sponge_relations_for_io_like_ops,
+    ));
+    diffs_accumulator.sponge_candidates_to_run.push((
+        false,
+        false,
+        should_decommit,
+        sponge_relations_for_decommit,
+    ));
 
     let exception = Boolean::multi_and(cs, &[decommit_versioned_hash_exception, should_apply]);
     diffs_accumulator.pending_exceptions.push(exception);
+
+    diffs_accumulator.decommitment_queue_candidates.push((
+        should_apply,
+        new_decommit_queue_len,
+        new_decommit_queue_tail,
+    ));
 }
 
 use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;

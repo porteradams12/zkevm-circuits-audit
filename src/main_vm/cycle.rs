@@ -529,7 +529,7 @@ where
             Num::parallel_select(cs, flag, &state, &new_state.memory_queue_state);
     }
 
-    // decommittment due to far call
+    // decommittment due to far call or log.decommit
     for (flag, length, state) in diffs_accumulator.decommitment_queue_candidates.into_iter() {
         new_state.code_decommittment_queue_length = UInt32::conditionally_select(
             cs,
