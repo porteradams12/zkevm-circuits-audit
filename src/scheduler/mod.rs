@@ -72,8 +72,9 @@ pub const NUM_SCHEDULER_PUBLIC_INPUTS: usize = 4;
 pub const LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH: usize = 4;
 pub const QUEUE_FINAL_STATE_COMMITMENT_LENGTH: usize = 4;
 pub const IMPLEMENT_4844_FUNCTIONALITY: bool = false;
+pub const NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING: usize = NUM_CIRCUIT_TYPES_TO_SCHEDULE - 1;
 
-pub const SEQUENCE_OF_CIRCUIT_TYPES: [BaseLayerCircuitType; NUM_CIRCUIT_TYPES_TO_SCHEDULE] = [
+pub const SEQUENCE_OF_CIRCUIT_TYPES: [BaseLayerCircuitType; NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING] = [
     BaseLayerCircuitType::VM,
     BaseLayerCircuitType::DecommitmentsFilter,
     BaseLayerCircuitType::Decommiter,
@@ -87,6 +88,8 @@ pub const SEQUENCE_OF_CIRCUIT_TYPES: [BaseLayerCircuitType; NUM_CIRCUIT_TYPES_TO
     BaseLayerCircuitType::EventsRevertsFilter,
     BaseLayerCircuitType::L1MessagesRevertsFilter,
     BaseLayerCircuitType::L1MessagesHasher,
+    BaseLayerCircuitType::TransientStorageChecker,
+    BaseLayerCircuitType::Secp256r1Verify,
 ];
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]

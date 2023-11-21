@@ -1,29 +1,29 @@
-use crate::base_structures::recursion_query::{RecursionQuery, RecursionQueue};
+use crate::base_structures::recursion_query::RecursionQuery;
 use crate::fsm_input_output::commit_variable_length_encodable_item;
 
 use boojum::cs::implementations::prover::ProofConfig;
+
+
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 use boojum::gadgets::recursion::recursive_transcript::RecursiveTranscript;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
 
 use std::collections::VecDeque;
-use std::sync::Arc;
-
+use crate::boojum::cs::gates::PublicInputGate;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-
-use boojum::cs::traits::circuit::ErasedBuilderForRecursiveVerifier;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::field::SmallField;
-use boojum::gadgets::queue::full_state_queue::FullStateCircuitQueueWitness;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::{
-    boolean::Boolean,
     num::Num,
     queue::*,
     traits::{allocatable::CSAllocatable, allocatable::CSAllocatableExt},
 };
+
+
+
 
 use super::*;
 
@@ -41,19 +41,19 @@ use boojum::gadgets::recursion::recursive_tree_hasher::CircuitTreeHasher;
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug(bound = ""))]
 #[serde(bound = "H::Output: serde::Serialize + serde::de::DeserializeOwned")]
-pub struct LeafLayerRecursionConfig<
+pub struct RecursionTipConfig<
     F: SmallField,
     H: TreeHasher<F>,
     EXT: FieldExtension<2, BaseField = F>,
 > {
     pub proof_config: ProofConfig,
     pub vk_fixed_parameters: VerificationKeyCircuitGeometry,
-    pub capacity: usize,
     pub _marker: std::marker::PhantomData<(F, H, EXT)>,
 }
 
-// NOTE: does NOT allocate public inputs! we will deal with locations of public inputs being the same at the "outer" stage
-pub fn leaf_layer_recursion_entry_point<
+use boojum::cs::traits::circuit::*;
+
+pub fn recursion_tip_entry_point<
     F: SmallField,
     CS: ConstraintSystem<F> + 'static,
     R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
@@ -72,74 +72,53 @@ pub fn leaf_layer_recursion_entry_point<
     POW: RecursivePoWRunner<F>,
 >(
     cs: &mut CS,
-    witness: RecursionLeafInstanceWitness<F, H, EXT>,
+    witness: RecursionTipInstanceWitness<F, H, EXT>,
     round_function: &R,
-    config: LeafLayerRecursionConfig<F, H::NonCircuitSimulator, EXT>,
+    config: RecursionTipConfig<F, H::NonCircuitSimulator, EXT>,
     verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
     transcript_params: TR::TransciptParameters,
 ) -> [Num<F>; INPUT_OUTPUT_COMMITMENT_LENGTH]
 where
     [(); <RecursionQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
-    let RecursionLeafInstanceWitness {
+    let RecursionTipInstanceWitness {
         input,
         vk_witness,
-        queue_witness,
         proof_witnesses,
     } = witness;
 
-    let input = RecursionLeafInput::allocate(cs, input);
-    let RecursionLeafInput {
-        params,
-        queue_state,
+    let input = RecursionTipInput::allocate(cs, input);
+    let RecursionTipInput {
+        node_layer_vk_commitment,
+        leaf_layer_parameters,
+        branch_circuit_type_set,
+        queue_set,
     } = input;
-    let mut queue = RecursionQueue::<F, R>::from_state(cs, queue_state);
 
-    let RecursionLeafParameters {
-        circuit_type,
-        leaf_layer_vk_commitment: _,
-        basic_circuit_vk_commitment,
-    } = params;
-
-    queue.witness = Arc::new(FullStateCircuitQueueWitness::from_inner_witness(
-        queue_witness,
-    ));
-
-    queue.enforce_consistency(cs);
-
-    // small trick to simplify setup. If we have nothing to verify, we do not care about VK
-    // being one that we want
-    let is_meaningful = queue.is_empty(cs).negated(cs);
+    assert_eq!(config.vk_fixed_parameters, vk_witness.fixed_parameters,);
 
     let vk = AllocatedVerificationKey::<F, H>::allocate(cs, vk_witness);
     assert_eq!(
         vk.setup_merkle_tree_cap.len(),
         config.vk_fixed_parameters.cap_size
     );
-    let vk_commitment_computed: [_; VK_COMMITMENT_LENGTH] =
+    let _vk_commitment_computed: [_; VK_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &vk, round_function);
 
-    for (a, b) in basic_circuit_vk_commitment
-        .iter()
-        .zip(vk_commitment_computed.iter())
-    {
-        Num::conditionally_enforce_equal(cs, is_meaningful, a, b);
-    }
+    // We expect to see a NODE, and propagate to it
 
-    let mut proof_witnesses = proof_witnesses;
-
-    let LeafLayerRecursionConfig {
+    let RecursionTipConfig {
         proof_config,
         vk_fixed_parameters,
-        capacity,
         ..
     } = config;
 
-    assert_eq!(vk_fixed_parameters.parameters, verifier_builder.geometry());
+    let mut proof_witnesses = proof_witnesses;
 
+    assert_eq!(vk_fixed_parameters.parameters, verifier_builder.geometry());
     let verifier = verifier_builder.create_recursive_verifier(cs);
 
-    for _ in 0..capacity {
+    for (branch_type, initial_queue) in branch_circuit_type_set.into_iter().zip(queue_set.into_iter()) {
         let proof_witness = proof_witnesses.pop_front();
 
         let proof = AllocatedProof::allocate_from_witness(
@@ -150,18 +129,8 @@ where
             &proof_config,
         );
 
-        let queue_is_empty = queue.is_empty(cs);
-        let can_pop = queue_is_empty.negated(cs);
-
-        let (recursive_request, _) = queue.pop_front(cs, can_pop);
-
-        // ensure that it's an expected type
-        Num::conditionally_enforce_equal(
-            cs,
-            can_pop,
-            &recursive_request.circuit_type,
-            &circuit_type,
-        );
+        let chunk_is_empty = initial_queue.tail.length.is_zero(cs);
+        let chunk_is_meaningful = chunk_is_empty.negated(cs);
 
         // verify the proof
         let (is_valid, public_inputs) = verifier.verify::<H, TR, CTR, POW>(
@@ -173,34 +142,30 @@ where
             &vk,
         );
 
+        is_valid.conditionally_enforce_true(cs, chunk_is_meaningful);
+
+        use crate::recursion::node_layer::input::RecursionNodeInput;
+        let input = RecursionNodeInput {
+            branch_circuit_type: branch_type,
+            leaf_layer_parameters: leaf_layer_parameters,
+            node_layer_vk_commitment: node_layer_vk_commitment,
+            queue_state: initial_queue,
+        };
+        let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
+            commit_variable_length_encodable_item(cs, &input, round_function);
+
         assert_eq!(public_inputs.len(), INPUT_OUTPUT_COMMITMENT_LENGTH);
-
-        // expected proof should be valid
-        is_valid.conditionally_enforce_true(cs, can_pop);
-
-        // enforce publici inputs
-
-        for (a, b) in recursive_request
-            .input_commitment
-            .iter()
-            .zip(public_inputs.iter())
-        {
-            Num::conditionally_enforce_equal(cs, can_pop, a, b);
+        for (a, b) in input_commitment.iter().zip(public_inputs.into_iter()) {
+            Num::conditionally_enforce_equal(cs, chunk_is_meaningful, a, &b);
         }
     }
 
-    queue.enforce_consistency(cs);
-
-    let queue_is_empty = queue.is_empty(cs);
-    let boolean_true = Boolean::allocated_constant(cs, true);
-    Boolean::enforce_equal(cs, &queue_is_empty, &boolean_true);
-
     let input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
         commit_variable_length_encodable_item(cs, &input, round_function);
-    // for el in input_commitment.iter() {
-    //     let gate = PublicInputGate::new(el.get_variable());
-    //     gate.add_to_cs(cs);
-    // }
+    for el in input_commitment.iter() {
+        let gate = PublicInputGate::new(el.get_variable());
+        gate.add_to_cs(cs);
+    }
 
     input_commitment
 }

@@ -41,6 +41,9 @@ pub enum BaseLayerCircuitType {
     EventsRevertsFilter = 11,
     L1MessagesRevertsFilter = 12,
     L1MessagesHasher = 13,
+    TransientStorageChecker = 14,
+    Secp256r1Verify = 15,
+    EIP4844Repack = 255,
 }
 
 impl BaseLayerCircuitType {
@@ -59,6 +62,9 @@ impl BaseLayerCircuitType {
             a if a == Self::EventsRevertsFilter as u8 => Self::EventsRevertsFilter,
             a if a == Self::L1MessagesRevertsFilter as u8 => Self::L1MessagesRevertsFilter,
             a if a == Self::L1MessagesHasher as u8 => Self::L1MessagesHasher,
+            a if a == Self::TransientStorageChecker as u8 => Self::TransientStorageChecker,
+            a if a == Self::Secp256r1Verify as u8 => Self::Secp256r1Verify,
+            a if a == Self::EIP4844Repack as u8 => Self::EIP4844Repack,
             _ => {
                 panic!("unknown circuit type {}", value)
             }
