@@ -482,6 +482,42 @@ where
             UInt32::parallel_select(cs, flag, &value, &new_state.context_composite_u128);
     }
 
+    // pubdata counters
+    for (flag, cost) in diffs_accumulator.pubdata_cost.into_iter() {
+        let new_pubdata_revert_counter =
+            i32_add_no_overflow(cs, &new_state.pubdata_revert_counter, &cost);
+        let new_current_frame_pubdata_counter = i32_add_no_overflow(
+            cs,
+            &new_state
+                .callstack
+                .current_context
+                .saved_context
+                .total_pubdata_spent,
+            &cost,
+        );
+
+        new_state.pubdata_revert_counter = UInt32::conditionally_select(
+            cs,
+            flag,
+            &new_pubdata_revert_counter,
+            &new_state.pubdata_revert_counter,
+        );
+        new_state
+            .callstack
+            .current_context
+            .saved_context
+            .total_pubdata_spent = UInt32::conditionally_select(
+            cs,
+            flag,
+            &new_current_frame_pubdata_counter,
+            &new_state
+                .callstack
+                .current_context
+                .saved_context
+                .total_pubdata_spent,
+        );
+    }
+
     // Heap limit
     for (flag, value) in diffs_accumulator.new_heap_bounds.drain(..) {
         new_state

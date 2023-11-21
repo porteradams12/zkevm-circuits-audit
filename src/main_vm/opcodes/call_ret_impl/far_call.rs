@@ -18,6 +18,7 @@ use crate::main_vm::opcodes::call_ret_impl::far_call::log_query::LogQueryWitness
 use crate::main_vm::state_diffs::MAX_SPONGES_PER_CYCLE;
 use crate::main_vm::witness_oracle::SynchronizedWitnessOracle;
 use crate::main_vm::witness_oracle::WitnessOracle;
+use crate::tables::CallCostsAndStipendsTable;
 use arrayvec::ArrayVec;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::cs::traits::cs::DstBuffer;
@@ -506,7 +507,17 @@ where
     let version_byte = bytecode_hash_upper_decomposition[3];
     let code_hash_version_byte =
         UInt8::allocated_constant(cs, zkevm_opcode_defs::ContractCodeSha256::VERSION_BYTE);
-    let versioned_byte_is_valid = UInt8::equals(cs, &version_byte, &code_hash_version_byte);
+    let blob_version_byte =
+        UInt8::allocated_constant(cs, zkevm_opcode_defs::BlobSha256::VERSION_BYTE);
+    let versioned_byte_is_native_code = UInt8::equals(cs, &version_byte, &code_hash_version_byte);
+    let versioned_byte_is_evm_bytecode = UInt8::equals(cs, &version_byte, &blob_version_byte);
+    let versioned_byte_is_valid = Boolean::multi_or(
+        cs,
+        &[
+            versioned_byte_is_native_code,
+            versioned_byte_is_evm_bytecode,
+        ],
+    );
     let versioned_byte_is_invalid = versioned_byte_is_valid.negated(cs);
 
     let marker_byte = bytecode_hash_upper_decomposition[2];
@@ -519,12 +530,12 @@ where
         UInt8::equals(cs, &marker_byte, &now_in_construction_marker_byte);
     let unknown_marker =
         Boolean::multi_or(cs, &[is_normal_call_marker, is_constructor_call_marker]).negated(cs);
+    let unknown_marker = unknown_marker.mask(cs, versioned_byte_is_native_code);
 
     // NOTE: if bytecode hash is trivial then it's 0, so version byte is not valid!
     let code_format_exception = Boolean::multi_or(cs, &[versioned_byte_is_invalid, unknown_marker]);
 
     // we do not remask right away yet
-
     let normal_call_code = far_call_abi.constructor_call.negated(cs);
 
     let can_call_normally = Boolean::multi_and(cs, &[is_normal_call_marker, normal_call_code]);
@@ -532,25 +543,18 @@ where
         cs,
         &[is_constructor_call_marker, far_call_abi.constructor_call],
     );
-    let can_call_code = Boolean::multi_or(cs, &[can_call_normally, can_call_constructor]);
-
-    let marker_byte_masked = UInt8::allocated_constant(
+    let can_call_code = Boolean::multi_or(
         cs,
-        zkevm_opcode_defs::ContractCodeSha256::CODE_AT_REST_MARKER,
-    );
-
-    let bytecode_at_rest_top_word = UInt32::from_le_bytes(
-        cs,
-        [
-            bytecode_hash_upper_decomposition[0],
-            bytecode_hash_upper_decomposition[1],
-            marker_byte_masked,
-            code_hash_version_byte,
+        &[
+            can_call_normally,
+            can_call_constructor,
+            versioned_byte_is_evm_bytecode,
         ],
     );
 
+    // our canonical decommitment hash format has upper 4 bytes zeroed out
     let mut bytecode_at_storage_format = bytecode_hash;
-    bytecode_at_storage_format.inner[7] = bytecode_at_rest_top_word;
+    bytecode_at_storage_format.inner[7] = zero_u32;
 
     let zero_u256 = UInt256::zero(cs);
 
@@ -568,11 +572,19 @@ where
         &masked_value_if_mask,
     );
 
+    let masked_bytecode_hash = UInt256::conditionally_select(
+        cs,
+        versioned_byte_is_evm_bytecode,
+        &global_context.evm_simulator_code_hash,
+        &masked_bytecode_hash,
+    );
+
     // at the end of the day all our exceptions will lead to memory page being 0
+    let code_len_encoding_word = masked_bytecode_hash.inner[7];
+    let code_len_encoding_word =
+        code_len_encoding_word.mask_negated(cs, versioned_byte_is_evm_bytecode);
 
-    let masked_bytecode_hash_upper_decomposition =
-        masked_bytecode_hash.inner[7].decompose_into_bytes(cs);
-
+    let masked_bytecode_hash_upper_decomposition = code_len_encoding_word.to_le_bytes(cs);
     let mut code_hash_length_in_words = UInt16::from_le_bytes(
         cs,
         [
@@ -730,43 +742,34 @@ where
         &current_callstack_entry.aux_heap_upper_bound,
     );
 
-    // now any extra cost
-    let callee_stipend = if FORCED_ERGS_FOR_MSG_VALUE_SIMUALTOR == false {
-        zero_u32
-    } else {
-        let is_msg_value_simulator_address_low =
-            UInt32::allocated_constant(cs, zkevm_opcode_defs::ADDRESS_MSG_VALUE as u32);
-        let target_low_is_msg_value_simulator = UInt32::equals(
-            cs,
-            &destination_address.inner[0],
-            &is_msg_value_simulator_address_low,
-        );
-        // we know that that msg.value simulator is kernel, so we test equality of low address segment and test for kernel
-        let target_is_msg_value =
-            Boolean::multi_and(cs, &[target_is_kernel, target_low_is_msg_value_simulator]);
-        let is_system_abi = far_call_abi.system_call;
-        let require_extra = Boolean::multi_and(cs, &[target_is_msg_value, is_system_abi]);
+    // we have a separate table that says:
+    // - how much we force-take from caller and give to callee
+    // - how much we just give to callee out of thin air
+    // this is only true for system contracts, so we mask an efficient address
 
-        let additive_cost = UInt32::allocated_constant(
-            cs,
-            zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_ADDITIVE_COST,
-        );
-        let max_pubdata_bytes = UInt32::allocated_constant(
-            cs,
-            zkevm_opcode_defs::system_params::MSG_VALUE_SIMULATOR_PUBDATA_BYTES_TO_PREPAY,
-        );
+    let address_low_masked = common_opcode_state.src1_view.u32x8_view[1].mask(cs, target_is_kernel);
+    let table_id = cs
+        .get_table_id_for_marker::<CallCostsAndStipendsTable>()
+        .expect("table of costs and stipends must exist");
+    let [extra_ergs_from_caller_to_callee, callee_stipend] =
+        cs.perform_lookup::<1, 2>(table_id, &[address_low_masked.get_variable()]);
+    let extra_ergs_from_caller_to_callee =
+        unsafe { UInt32::from_variable_unchecked(extra_ergs_from_caller_to_callee) };
+    let callee_stipend = unsafe { UInt32::from_variable_unchecked(callee_stipend) };
 
-        let pubdata_cost =
-            max_pubdata_bytes.non_widening_mul(cs, &draft_vm_state.ergs_per_pubdata_byte);
-        let cost = pubdata_cost.add_no_overflow(cs, additive_cost);
-
-        cost.mask(cs, require_extra)
-    };
+    let evm_simulator_stipend =
+        UInt32::allocated_constant(cs, zkevm_opcode_defs::system_params::EVM_SIMULATOR_STIPEND);
+    let callee_stipend = UInt32::conditionally_select(
+        cs,
+        versioned_byte_is_evm_bytecode,
+        &evm_simulator_stipend,
+        &callee_stipend,
+    );
 
     let (ergs_left_after_extra_costs, uf) =
-        ergs_left_after_growth.overflowing_sub(cs, callee_stipend);
+        ergs_left_after_growth.overflowing_sub(cs, extra_ergs_from_caller_to_callee);
     let ergs_left_after_extra_costs = ergs_left_after_extra_costs.mask_negated(cs, uf); // if not enough - set to 0
-    let callee_stipend = callee_stipend.mask_negated(cs, uf); // also set to 0 if we were not able to take it
+    let extra_ergs_from_caller_to_callee = extra_ergs_from_caller_to_callee.mask_negated(cs, uf); // also set to 0 if we were not able to take it
     exceptions.push(uf);
 
     // now we can indeed decommit
@@ -884,6 +887,18 @@ where
 
     let remaining_ergs_if_pass = remaining_for_this_context;
     let passed_ergs_if_pass = ergs_to_pass;
+    // this can not overflow by construction
+    let passed_ergs_if_pass = unsafe {
+        UInt32::from_variable_unchecked(
+            Num::from_variable(passed_ergs_if_pass.get_variable())
+                .add(
+                    cs,
+                    &Num::from_variable(extra_ergs_from_caller_to_callee.get_variable()),
+                )
+                .get_variable(),
+        )
+    };
+    // but out of thin air stipend must not overflow
     let passed_ergs_if_pass = passed_ergs_if_pass.add_no_overflow(cs, callee_stipend);
 
     current_callstack_entry.ergs_remaining = remaining_ergs_if_pass;

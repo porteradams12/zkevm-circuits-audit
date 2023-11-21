@@ -38,6 +38,63 @@ pub(crate) fn test_if_bit_is_set<F: SmallField, CS: ConstraintSystem<F>>(
     res
 }
 
+pub(crate) fn i32_add_no_overflow<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    a: &UInt32<F>,
+    b: &UInt32<F>,
+) -> UInt32<F> {
+    // condition for overflow is if we add two number >0 and get one <0 (by highest bit),
+    // or add two <0 and get one >0
+
+    let a_bytes = a.to_le_bytes(cs);
+    let a_is_negative = test_if_bit_is_set(cs, &a_bytes[3], 7);
+    let b_bytes = b.to_le_bytes(cs);
+    let b_is_negative = test_if_bit_is_set(cs, &b_bytes[3], 7);
+    let (result, _of) = a.overflowing_add(cs, *b);
+    let result_bytes = result.to_le_bytes(cs);
+    let result_is_negative = test_if_bit_is_set(cs, &result_bytes[3], 7);
+
+    let a_is_positive = a_is_negative.negated(cs);
+    let b_is_positive = b_is_negative.negated(cs);
+    let result_is_positive = result_is_negative.negated(cs);
+
+    let of_0 = Boolean::multi_and(cs, &[a_is_positive, b_is_positive, result_is_negative]);
+    let of_1 = Boolean::multi_and(cs, &[a_is_negative, b_is_negative, result_is_positive]);
+    let of = Boolean::multi_or(cs, &[of_0, of_1]);
+    let boolean_false = Boolean::allocated_constant(cs, false);
+    Boolean::enforce_equal(cs, &of, &boolean_false);
+
+    result
+}
+
+pub(crate) fn i32_sub_no_underflow<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    a: &UInt32<F>,
+    b: &UInt32<F>,
+) -> UInt32<F> {
+    // exception is when a > 0, b < 0, and result is <0,
+    // or if a < 0, b > 0, and result >0
+    let a_bytes = a.to_le_bytes(cs);
+    let a_is_negative = test_if_bit_is_set(cs, &a_bytes[3], 7);
+    let b_bytes = b.to_le_bytes(cs);
+    let b_is_negative = test_if_bit_is_set(cs, &b_bytes[3], 7);
+    let (result, _of) = a.overflowing_sub(cs, *b);
+    let result_bytes = result.to_le_bytes(cs);
+    let result_is_negative = test_if_bit_is_set(cs, &result_bytes[3], 7);
+
+    let a_is_positive = a_is_negative.negated(cs);
+    let b_is_positive = b_is_negative.negated(cs);
+    let result_is_positive = result_is_negative.negated(cs);
+
+    let of_0 = Boolean::multi_and(cs, &[a_is_positive, b_is_negative, result_is_negative]);
+    let of_1 = Boolean::multi_and(cs, &[a_is_negative, b_is_positive, result_is_positive]);
+    let of = Boolean::multi_or(cs, &[of_0, of_1]);
+    let boolean_false = Boolean::allocated_constant(cs, false);
+    Boolean::enforce_equal(cs, &of, &boolean_false);
+
+    result
+}
+
 pub(crate) fn normalize_bytecode_hash_for_decommit<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     bytecode_hash: &mut UInt256<F>,
@@ -194,18 +251,6 @@ pub(crate) fn apply_log<
         &key.inner[5],
     );
 
-    let is_rollup = draft_vm_state
-        .callstack
-        .current_context
-        .saved_context
-        .this_shard_id
-        .is_zero(cs);
-    let write_to_rollup = Boolean::multi_and(cs, &[is_rollup, is_storage_write]);
-
-    let emit_l1_message = is_l1_message;
-
-    let l1_message_pubdata_bytes_constant =
-        UInt32::allocated_constant(cs, L1_MESSAGE_PUBDATA_BYTES as u32);
     let precompile_call_ergs_cost = common_opcode_state.src1_view.u32x8_view[0];
     let precompile_call_pubdata_cost = common_opcode_state.src1_view.u32x8_view[1];
     // check inplace that pubdata cost is signed, but >0
@@ -214,7 +259,7 @@ pub(crate) fn apply_log<
     let top_byte = common_opcode_state.src1_view.u8x32_view[7];
     let is_negative = test_if_bit_is_set(cs, &top_byte, 7);
     let should_enforce = Boolean::multi_and(cs, &[is_precompile, should_apply]);
-    should_enforce.conditionally_enforce_false(cs, should_enforce);
+    is_negative.conditionally_enforce_false(cs, should_enforce);
 
     let is_state_storage_access: Boolean<F> =
         Boolean::multi_or(cs, &[is_storage_read, is_storage_write]);
@@ -225,7 +270,7 @@ pub(crate) fn apply_log<
     let is_storage_like_access =
         Boolean::multi_or(cs, &[is_state_storage_access, is_transient_storage_access]);
     let is_nonrevertable_io = Boolean::multi_or(cs, &[is_io_read_like, is_precompile]);
-    let is_revertable_io = is_io_read_like;
+    let is_revertable_io = is_io_write_like;
     let is_io_like_operation = Boolean::multi_or(cs, &[is_nonrevertable_io, is_revertable_io]);
 
     let aux_byte_variable = Num::linear_combination(
@@ -303,7 +348,7 @@ pub(crate) fn apply_log<
     dependencies.push(should_apply.get_variable().into());
     dependencies.extend(Place::from_variables(log.flatten_as_variables()));
 
-    let pubdata_cost = UInt32::allocate_from_closure_and_dependencies(
+    let io_pubdata_cost = UInt32::allocate_from_closure_and_dependencies(
         cs,
         move |inputs: &[F]| {
             let is_write = <bool as WitnessCastable<F, F>>::cast_from_source(inputs[0]);
@@ -325,12 +370,13 @@ pub(crate) fn apply_log<
     // NOTE: it's possible to have cost negative, if it's e.g. 2nd write in a sequence of 0 -> X -> 0
 
     // we should nevertheless ensure that it's 0 if it's not rollup access, and not write in general
-    let pubdata_cost = pubdata_cost.mask(cs, is_storage_write);
+    let io_pubdata_cost = io_pubdata_cost.mask(cs, is_storage_write);
     let is_zk_rollup_access = shard_id.is_zero(cs);
     let is_zk_porter_access = is_zk_rollup_access.negated(cs);
-    let pubdata_cost_is_zero = pubdata_cost.is_zero(cs);
-    pubdata_cost_is_zero.conditionally_enforce_true(cs, is_zk_porter_access);
+    let io_pubdata_cost_is_zero = io_pubdata_cost.is_zero(cs);
+    io_pubdata_cost_is_zero.conditionally_enforce_true(cs, is_zk_porter_access);
 
+    let oracle = witness_oracle.clone();
     let cold_warm_access_ergs_refund = UInt32::allocate_from_closure_and_dependencies(
         cs,
         move |inputs: &[F]| {
@@ -350,6 +396,7 @@ pub(crate) fn apply_log<
         },
         &dependencies,
     );
+
     // we only refund storage
     let cold_warm_access_ergs_refund =
         cold_warm_access_ergs_refund.mask(cs, is_state_storage_access);
@@ -405,6 +452,24 @@ pub(crate) fn apply_log<
     // and we do not execute any ops in practice
     let should_apply = Boolean::multi_and(cs, &[should_apply, have_enough_ergs]);
     let should_apply_io = Boolean::multi_and(cs, &[should_apply, is_io_like_operation]);
+
+    // we right away compute final cost of the operation here, and we will merge it into state when we do final diffs processing
+    let final_pubdata_cost =
+        UInt32::conditionally_select(cs, is_storage_write, &io_pubdata_cost, &zero_u32);
+    let final_pubdata_cost = UInt32::conditionally_select(
+        cs,
+        is_precompile,
+        &precompile_call_pubdata_cost,
+        &final_pubdata_cost,
+    );
+    let l1_message_pubdata_bytes_constant =
+        UInt32::allocated_constant(cs, L1_MESSAGE_PUBDATA_BYTES as u32);
+    let final_pubdata_cost = UInt32::conditionally_select(
+        cs,
+        is_l1_message,
+        &l1_message_pubdata_bytes_constant,
+        &final_pubdata_cost,
+    );
 
     let oracle = witness_oracle.clone();
     // we should assemble all the dependencies here, and we will use AllocateExt here
@@ -715,6 +780,9 @@ pub(crate) fn apply_log<
         new_decommit_queue_len,
         new_decommit_queue_tail,
     ));
+
+    assert!(diffs_accumulator.pubdata_cost.is_none());
+    diffs_accumulator.pubdata_cost = Some((should_apply, final_pubdata_cost));
 }
 
 use crate::base_structures::vm_state::FULL_SPONGE_QUEUE_STATE_WIDTH;

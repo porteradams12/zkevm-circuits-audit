@@ -101,4 +101,6 @@ pub struct StateDiffsAccumulator<F: SmallField> {
         Boolean<F>,
         ArrayVec<MulDivRelation<F>, MAX_MUL_DIV_RELATIONS_PER_CYCLE>,
     )>,
+    // pubdata cost of case if we do not modify callstack entry in full
+    pub pubdata_cost: Option<(Boolean<F>, UInt32<F>)>, // signed in practice
 }
