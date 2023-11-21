@@ -30,6 +30,7 @@ pub mod sort_decommittment_requests;
 pub mod storage_application;
 pub mod storage_validity_by_grand_product;
 pub mod tables;
+pub mod transient_storage_validity_by_grand_product;
 pub mod utils;
 
 use boojum::pairing::ff;
