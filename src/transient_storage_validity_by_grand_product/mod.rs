@@ -5,19 +5,19 @@ pub mod input;
 // #[cfg(test)]
 // mod test_input;
 
-use crate::base_structures::log_query::log_query_witness_from_values;
+
 use crate::storage_validity_by_grand_product::unpacked_long_comparison;
 use crate::fsm_input_output::ClosedFormInputCompactForm;
 
 use crate::base_structures::{
-    log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
+    log_query::{LogQuery},
     vm_state::*,
 };
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
-use boojum::cs::traits::cs::DstBuffer;
-use boojum::cs::{gates::*, traits::cs::ConstraintSystem, Variable};
+
+use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
 use boojum::field::SmallField;
-use boojum::gadgets::traits::castable::WitnessCastable;
+
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
 use boojum::gadgets::{
     boolean::Boolean,
@@ -25,9 +25,7 @@ use boojum::gadgets::{
     queue::*,
     traits::{
         allocatable::*,
-        encodable::{CircuitEncodable, CircuitEncodableExt},
         selectable::Selectable,
-        witnessable::*,
     },
     u160::*,
     u256::*,

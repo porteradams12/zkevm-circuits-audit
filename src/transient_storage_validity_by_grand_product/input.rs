@@ -18,7 +18,6 @@ use boojum::{
         u160::*,
         u256::*,
         u32::*,
-        u8::*,
     },
     serde_utils::BigArraySerde,
 };
