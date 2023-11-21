@@ -43,6 +43,7 @@ pub struct StateDiffsAccumulator<F: SmallField> {
     pub new_pc_candidates: Vec<(Boolean<F>, UInt16<F>)>,
     // other meta parameters of VM
     pub new_tx_number: Option<(Boolean<F>, UInt32<F>)>,
+    // pubdata revert counter for state
     pub new_pubdata_revert_counter: Option<(Boolean<F>, UInt32<F>)>,
     // memory bouds
     pub new_heap_bounds: Vec<(Boolean<F>, UInt32<F>)>,

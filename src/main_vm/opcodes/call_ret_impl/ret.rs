@@ -24,6 +24,7 @@ pub(crate) struct RetData<F: SmallField> {
     pub(crate) specific_registers_updates: [Option<(Boolean<F>, VMRegister<F>)>; REGISTERS_COUNT],
     pub(crate) specific_registers_zeroing: [Option<Boolean<F>>; REGISTERS_COUNT],
     pub(crate) remove_ptr_on_specific_registers: [Option<Boolean<F>>; REGISTERS_COUNT],
+    pub(crate) new_pubdata_revert_counter: UInt32<F>,
 }
 
 pub(crate) fn callstack_candidate_for_ret<
@@ -266,7 +267,6 @@ where
     growth_cost = UInt32::conditionally_select(cs, grow_aux_heap, &aux_heap_growth, &growth_cost);
 
     // subtract
-
     let (ergs_left_after_growth, uf) = preliminary_ergs_left.overflowing_sub(cs, growth_cost);
 
     let mut non_local_frame_exceptions = ArrayVec::<Boolean<F>, 4>::new();
@@ -457,6 +457,24 @@ where
         erase_ptr_markers[reg_idx as usize] = Some(update_specific_registers_on_ret);
     }
 
+    // update global counter. Both in theory must not overflow/underflow
+    let pubdata_counter_if_ok = i32_add_no_overflow(
+        cs,
+        &draft_vm_state.pubdata_revert_counter,
+        &current_callstack_entry.total_pubdata_spent,
+    );
+    let pubdata_counter_if_panic = i32_sub_no_underflow(
+        cs,
+        &draft_vm_state.pubdata_revert_counter,
+        &current_callstack_entry.total_pubdata_spent,
+    );
+    let new_pubdata_revert_counter = UInt32::conditionally_select(
+        cs,
+        is_panic,
+        &pubdata_counter_if_panic,
+        &pubdata_counter_if_ok,
+    );
+
     let full_data = RetData {
         apply_ret: execute,
         is_panic: is_panic,
@@ -469,6 +487,7 @@ where
         specific_registers_updates,
         specific_registers_zeroing: register_zero_out,
         remove_ptr_on_specific_registers: erase_ptr_markers,
+        new_pubdata_revert_counter,
     };
 
     full_data

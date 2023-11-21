@@ -748,9 +748,14 @@ where
     // this is only true for system contracts, so we mask an efficient address
 
     let address_low_masked = common_opcode_state.src1_view.u32x8_view[1].mask(cs, target_is_kernel);
+    let address_low_masked = address_low_masked.mask(cs, far_call_abi.system_call);
     let table_id = cs
         .get_table_id_for_marker::<CallCostsAndStipendsTable>()
         .expect("table of costs and stipends must exist");
+    let (default_extra_cost, default_stipend) =
+        zkevm_opcode_defs::STIPENDS_AND_EXTRA_COSTS_TABLE[0];
+    assert_eq!(default_extra_cost, 0);
+    assert_eq!(default_stipend, 0);
     let [extra_ergs_from_caller_to_callee, callee_stipend] =
         cs.perform_lookup::<1, 2>(table_id, &[address_low_masked.get_variable()]);
     let extra_ergs_from_caller_to_callee =

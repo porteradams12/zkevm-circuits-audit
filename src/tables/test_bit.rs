@@ -1,5 +1,4 @@
 use super::*;
-use crate::ethereum_types::U256;
 use boojum::cs::implementations::lookup_table::LookupTable;
 use boojum::field::SmallField;
 

@@ -138,9 +138,9 @@ impl<F: SmallField> WitnessOracle<F> for DummyOracle<F> {
     }
     fn get_pubdata_cost_for_query(
         &mut self,
-        query: &LogQueryWitness<F>,
-        is_write: bool,
-        execute: bool,
+        _query: &LogQueryWitness<F>,
+        _is_write: bool,
+        _execute: bool,
     ) -> u32 {
         todo!()
     }

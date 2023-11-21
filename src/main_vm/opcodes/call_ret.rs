@@ -114,6 +114,7 @@ pub(crate) fn apply_calls_and_ret<
         specific_registers_updates: specific_registers_updates_for_ret,
         specific_registers_zeroing: specific_registers_zeroing_for_ret,
         remove_ptr_on_specific_registers: remove_ptr_on_specific_registers_for_ret,
+        new_pubdata_revert_counter: new_pubdata_revert_counter_for_ret,
     } = ret_data;
 
     let is_call_like = Boolean::multi_or(cs, &[apply_near_call, apply_far_call]);
@@ -508,4 +509,13 @@ pub(crate) fn apply_calls_and_ret<
         new_decommittment_queue_len,
         new_decommittment_queue_tail,
     ));
+
+    let new_pubdata_revert_counter = UInt32::conditionally_select(
+        cs,
+        apply_ret,
+        &new_pubdata_revert_counter_for_ret,
+        &draft_vm_state.pubdata_revert_counter,
+    );
+    assert!(diffs_accumulator.new_pubdata_revert_counter.is_none());
+    diffs_accumulator.new_pubdata_revert_counter = Some((apply_any, new_pubdata_revert_counter));
 }

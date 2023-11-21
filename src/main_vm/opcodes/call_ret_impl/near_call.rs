@@ -96,6 +96,7 @@ where
     new_callstack_entry.reverted_queue_tail = potential_rollback_queue_segment_tail;
     new_callstack_entry.reverted_queue_head = potential_rollback_queue_segment_tail;
     new_callstack_entry.reverted_queue_segment_len = zero_u32;
+    new_callstack_entry.total_pubdata_spent = zero_u32;
 
     let dst_pc = common_opcode_state.decoded_opcode.imm0;
     let eh_pc = common_opcode_state.decoded_opcode.imm1;
