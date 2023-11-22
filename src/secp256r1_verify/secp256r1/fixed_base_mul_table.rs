@@ -1,11 +1,11 @@
 use super::*;
-use crate::ecrecover::{secp256k1::fr::Fr, Secp256Affine};
+use crate::secp256r1_verify::{secp256r1::fr::Fr, Secp256Affine};
 use boojum::cs::implementations::lookup_table::LookupTable;
 use boojum::field::SmallField;
 use boojum::pairing::ff::PrimeField;
 use derivative::*;
 
-const TABLE_NAME: &'static str = "Secp256k1 FIXEDBASEMUL table";
+const TABLE_NAME: &'static str = "Secp256r1 FIXEDBASEMUL table";
 
 #[derive(Derivative)]
 #[derivative(Clone, Copy, Debug, PartialEq, Eq)]

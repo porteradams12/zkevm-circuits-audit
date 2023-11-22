@@ -676,7 +676,11 @@ pub(crate) fn apply_log<
         is_pointer: boolean_true,
     };
     // or it's empty if decommit didn't work
-    dst_0_for_decommit.conditionally_erase(cs, decommit_versioned_hash_exception);
+    let decommit_failed = Boolean::multi_or(
+        cs,
+        &[decommit_versioned_hash_exception, not_enough_ergs_for_op],
+    );
+    dst_0_for_decommit.conditionally_erase(cs, decommit_failed);
 
     let selected_dst_0_value = VMRegister::conditionally_select(
         cs,
