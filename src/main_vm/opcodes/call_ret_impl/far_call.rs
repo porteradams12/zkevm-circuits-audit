@@ -945,12 +945,14 @@ where
         cs,
         &[is_static_call, current_callstack_entry.is_static_execution],
     );
+    // if we call EVM simulator we actually reset static flag
+    let next_is_static_masked = next_is_static.mask_negated(cs, versioned_byte_is_evm_bytecode);
 
     // actually parts to the new one
     new_callstack_entry.ergs_remaining = passed_ergs_if_pass;
     new_callstack_entry.pc = dst_pc;
     new_callstack_entry.exception_handler_loc = eh_pc;
-    new_callstack_entry.is_static_execution = next_is_static;
+    new_callstack_entry.is_static_execution = next_is_static_masked;
 
     // we need to decide whether new frame is kernel or not for degelatecall
     let new_frame_is_kernel = Boolean::conditionally_select(
@@ -1027,15 +1029,28 @@ where
 
     let new_r1 = final_fat_ptr.into_register(cs);
 
-    let one = Num::allocated_constant(cs, F::ONE);
+    // we put markers of:
+    // - constructor call
+    // - system call
+    // - if EVM simulator - if original code was static
 
-    let r2_low = Num::fma(
+    let original_call_was_static = next_is_static.mask(cs, versioned_byte_is_evm_bytecode);
+    let r2_low = Num::linear_combination(
         cs,
-        &Num::from_variable(far_call_abi.constructor_call.get_variable()),
-        &one,
-        &F::ONE,
-        &Num::from_variable(far_call_abi.system_call.get_variable()),
-        &F::TWO,
+        &[
+            (
+                far_call_abi.constructor_call.get_variable(),
+                F::from_u64_unchecked(1u64 << 0),
+            ),
+            (
+                far_call_abi.system_call.get_variable(),
+                F::from_u64_unchecked(1u64 << 1),
+            ),
+            (
+                original_call_was_static.get_variable(),
+                F::from_u64_unchecked(1u64 << 2),
+            ),
+        ],
     );
 
     let r2_low = unsafe { UInt32::from_variable_unchecked(r2_low.get_variable()) };

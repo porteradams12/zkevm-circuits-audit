@@ -3,13 +3,11 @@ use crate::fsm_input_output::commit_variable_length_encodable_item;
 
 use boojum::cs::implementations::prover::ProofConfig;
 
-
 use boojum::gadgets::recursion::allocated_proof::AllocatedProof;
 use boojum::gadgets::recursion::allocated_vk::AllocatedVerificationKey;
 use boojum::gadgets::recursion::recursive_transcript::RecursiveTranscript;
 use boojum::gadgets::recursion::recursive_tree_hasher::RecursiveTreeHasher;
 
-use std::collections::VecDeque;
 use crate::boojum::cs::gates::PublicInputGate;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
@@ -21,9 +19,7 @@ use boojum::gadgets::{
     queue::*,
     traits::{allocatable::CSAllocatable, allocatable::CSAllocatableExt},
 };
-
-
-
+use std::collections::VecDeque;
 
 use super::*;
 
@@ -118,7 +114,10 @@ where
     assert_eq!(vk_fixed_parameters.parameters, verifier_builder.geometry());
     let verifier = verifier_builder.create_recursive_verifier(cs);
 
-    for (branch_type, initial_queue) in branch_circuit_type_set.into_iter().zip(queue_set.into_iter()) {
+    for (branch_type, initial_queue) in branch_circuit_type_set
+        .into_iter()
+        .zip(queue_set.into_iter())
+    {
         let proof_witness = proof_witnesses.pop_front();
 
         let proof = AllocatedProof::allocate_from_witness(

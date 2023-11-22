@@ -2,6 +2,7 @@ use crate::base_structures::{
     log_query::{LogQuery, LOG_QUERY_PACKED_WIDTH},
     vm_state::*,
 };
+use crate::transient_storage_validity_by_grand_product::StorageDeduplicatorInputData;
 use crate::DEFAULT_NUM_PERMUTATION_ARGUMENT_REPETITIONS;
 use boojum::cs::{traits::cs::ConstraintSystem, Variable};
 use boojum::field::SmallField;
@@ -21,7 +22,6 @@ use boojum::{
     },
     serde_utils::BigArraySerde,
 };
-use crate::transient_storage_validity_by_grand_product::StorageDeduplicatorInputData;
 use cs_derive::*;
 use derivative::*;
 
@@ -80,12 +80,13 @@ pub type TransientStorageDeduplicatorInputOutput<F> = crate::fsm_input_output::C
     StorageDeduplicatorInputData<F>,
     (),
 >;
-pub type TransientStorageDeduplicatorInputOutputWitness<F> = crate::fsm_input_output::ClosedFormInputWitness<
-    F,
-    TransientStorageDeduplicatorFSMInputOutput<F>,
-    StorageDeduplicatorInputData<F>,
-    (),
->;
+pub type TransientStorageDeduplicatorInputOutputWitness<F> =
+    crate::fsm_input_output::ClosedFormInputWitness<
+        F,
+        TransientStorageDeduplicatorFSMInputOutput<F>,
+        StorageDeduplicatorInputData<F>,
+        (),
+    >;
 
 #[derive(Derivative, serde::Serialize, serde::Deserialize)]
 #[derivative(Clone, Debug, Default)]

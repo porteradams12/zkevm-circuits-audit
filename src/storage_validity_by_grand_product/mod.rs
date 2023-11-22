@@ -372,12 +372,13 @@ where
     let zero_u32: UInt32<F> = UInt32::zero(cs);
 
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
-    let previous_packed_key = <[UInt32<F>; STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &[zero_u32; STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH],
-        &structured_input.hidden_fsm_input.previous_packed_key,
-    );
+    let previous_packed_key =
+        <[UInt32<F>; STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH]>::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &[zero_u32; STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH],
+            &structured_input.hidden_fsm_input.previous_packed_key,
+        );
 
     let cycle_idx = UInt32::conditionally_select(
         cs,
@@ -1087,7 +1088,8 @@ mod tests {
             intermediate_sorted_queue.into_state().tail,
             &round_function,
         );
-        let previous_packed_key = [UInt32::allocated_constant(cs, 0); STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH];
+        let previous_packed_key =
+            [UInt32::allocated_constant(cs, 0); STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH];
         let previous_key = UInt256::allocated_constant(cs, U256::default());
         let previous_address = UInt160::allocated_constant(cs, Address::default());
         let previous_timestamp = UInt32::allocated_constant(cs, 0);

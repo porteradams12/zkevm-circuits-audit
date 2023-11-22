@@ -41,7 +41,8 @@ impl<F: SmallField> CSPlaceholder<F> for RecursionTipInput<F> {
             leaf_layer_parameters: [leaf_layer_param; NUM_BASE_LAYER_CIRCUITS],
             node_layer_vk_commitment: [zero; VK_COMMITMENT_LENGTH],
             branch_circuit_type_set: [zero; RECURSION_TIP_ARITY],
-            queue_set: [QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs); RECURSION_TIP_ARITY],
+            queue_set: [QueueState::<F, FULL_SPONGE_QUEUE_STATE_WIDTH>::placeholder(cs);
+                RECURSION_TIP_ARITY],
         }
     }
 }

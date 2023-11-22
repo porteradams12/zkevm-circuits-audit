@@ -411,24 +411,16 @@ pub(crate) fn apply_log<
     let decommit_versioned_hash_exception =
         Boolean::multi_and(cs, &[unknown_version_byte, is_decommit]);
     let can_decommit = decommit_versioned_hash_exception.negated(cs);
-    // now we can compute number of words in preimage
-    let preimage_len = UInt16::from_le_bytes(
+    // now we can compute number of words in preimage, or
+    let preimage_len_in_bytes = UInt16::from_le_bytes(
         cs,
         [
             common_opcode_state.src0_view.u8x32_view[28],
             common_opcode_state.src0_view.u8x32_view[29],
         ],
     );
-    let num_words_to_decommit = UInt16::zero(cs); // TODO
-                                                  // by convention we do not require payments if decommit can not be executed
-    let num_words_to_decommit = num_words_to_decommit.mask(cs, can_decommit);
-    let cost_of_decommit_per_word =
-        UInt32::allocated_constant(cs, zkevm_opcode_defs::ERGS_PER_CODE_WORD_DECOMMITTMENT);
-    let num_words_to_decommit =
-        unsafe { UInt32::from_variable_unchecked(num_words_to_decommit.get_variable()) };
-    // this multiplication can not overflow
-    let cost_of_decommit_call =
-        cost_of_decommit_per_word.non_widening_mul(cs, &num_words_to_decommit);
+
+    let cost_of_decommit_call = common_opcode_state.src0_view.u32x8_view[0];
 
     // and check if decommit would end up a repeated one
     let boolean_false = Boolean::allocated_constant(cs, false);
@@ -677,7 +669,7 @@ pub(crate) fn apply_log<
     register_value.inner[1] = suggested_page;
     // length
     register_value.inner[3] =
-        unsafe { UInt32::from_variable_unchecked(preimage_len.get_variable()) };
+        unsafe { UInt32::from_variable_unchecked(preimage_len_in_bytes.get_variable()) };
 
     let mut dst_0_for_decommit = VMRegister {
         value: register_value,

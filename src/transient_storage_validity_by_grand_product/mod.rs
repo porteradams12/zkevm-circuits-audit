@@ -5,14 +5,10 @@ pub mod input;
 // #[cfg(test)]
 // mod test_input;
 
-
-use crate::storage_validity_by_grand_product::unpacked_long_comparison;
 use crate::fsm_input_output::ClosedFormInputCompactForm;
+use crate::storage_validity_by_grand_product::unpacked_long_comparison;
 
-use crate::base_structures::{
-    log_query::{LogQuery},
-    vm_state::*,
-};
+use crate::base_structures::{log_query::LogQuery, vm_state::*};
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 
 use boojum::cs::{gates::*, traits::cs::ConstraintSystem};
@@ -23,24 +19,21 @@ use boojum::gadgets::{
     boolean::Boolean,
     num::Num,
     queue::*,
-    traits::{
-        allocatable::*,
-        selectable::Selectable,
-    },
+    traits::{allocatable::*, selectable::Selectable},
     u160::*,
     u256::*,
     u32::UInt32,
     u8::UInt8,
 };
 
+use self::input::*;
+use crate::storage_validity_by_grand_product::TIMESTAMPED_STORAGE_LOG_ENCODING_LEN;
+use crate::utils::accumulate_grand_products;
 use crate::{
     demux_log_queue::StorageLogQueue,
     fsm_input_output::{circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH, *},
     storage_validity_by_grand_product::input::*,
 };
-use crate::storage_validity_by_grand_product::TIMESTAMPED_STORAGE_LOG_ENCODING_LEN;
-use self::input::*;
-use crate::utils::accumulate_grand_products;
 
 // we make a generation aware memory that store all the old and new values
 // for a current storage cell. There are largely 3 possible sequences that we must be aware of
@@ -236,12 +229,13 @@ where
     let zero_u32: UInt32<F> = UInt32::zero(cs);
 
     // there is no code at address 0 in our case, so we can formally use it for all the purposes
-    let previous_packed_key = <[UInt32<F>; TRANSIENT_STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH]>::conditionally_select(
-        cs,
-        structured_input.start_flag,
-        &[zero_u32; TRANSIENT_STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH],
-        &structured_input.hidden_fsm_input.previous_packed_key,
-    );
+    let previous_packed_key =
+        <[UInt32<F>; TRANSIENT_STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH]>::conditionally_select(
+            cs,
+            structured_input.start_flag,
+            &[zero_u32; TRANSIENT_STORAGE_VALIDITY_CHECK_PACKED_KEY_LENGTH],
+            &structured_input.hidden_fsm_input.previous_packed_key,
+        );
 
     let cycle_idx = UInt32::conditionally_select(
         cs,
@@ -473,12 +467,12 @@ where
         // else we just update parameters
 
         let not_keys_are_equal = keys_are_equal.negated(cs);
-        let new_non_trivial_cell = Boolean::multi_and(cs, &[not_keys_are_equal, item_is_non_trivial]);
+        let new_non_trivial_cell =
+            Boolean::multi_and(cs, &[not_keys_are_equal, item_is_non_trivial]);
         let read_value_is_zero = record.read_value.is_zero(cs);
 
         // if new cell
         {
-
             if _cycle == 0 {
                 // it must always be true if we start
                 let should_enforce = Boolean::multi_and(cs, &[is_start, should_pop]);
@@ -489,7 +483,7 @@ where
 
             // enforce that we read 0 always for new cell
             read_value_is_zero.conditionally_enforce_true(cs, new_non_trivial_cell);
-            
+
             // and update as we switch to the new cell with extra logic
             let meaningful_value = UInt256::conditionally_select(
                 cs,
@@ -575,7 +569,13 @@ where
                 current_rollback_depth_is_zero.and(cs, non_trivial_read_of_same_cell);
 
             // we rolled back all the way - check if read value is 0 again
-            let should_enforce = Boolean::multi_and(cs, &[item_is_non_trivial, read_at_rollback_depth_zero_of_same_cell]);
+            let should_enforce = Boolean::multi_and(
+                cs,
+                &[
+                    item_is_non_trivial,
+                    read_at_rollback_depth_zero_of_same_cell,
+                ],
+            );
             read_value_is_zero.conditionally_enforce_true(cs, should_enforce);
         }
 
