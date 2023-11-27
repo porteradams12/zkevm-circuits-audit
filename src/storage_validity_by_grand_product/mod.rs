@@ -181,6 +181,8 @@ where
     let unsorted_queue_witness = closed_form_input.unsorted_queue_witness;
     let intermediate_sorted_queue_witness = closed_form_input.intermediate_sorted_queue_witness;
 
+    let queue_is_empty = structured_input_witness.hidden_fsm_input.cycle_idx == 0;
+
     let mut structured_input = StorageDeduplicatorInputOutput::alloc_ignoring_outputs(
         cs,
         structured_input_witness.clone(),
@@ -489,7 +491,13 @@ where
         .hidden_fsm_output
         .current_final_sorted_queue_state = final_sorted_queue.into_state();
 
-    structured_input.hook_compare_witness(cs, &structured_input_witness);
+    // it should be ok to put this in a branch since this call does not incur any constraints
+    // NOTE: this circuit should be turned off in the scheduler if it doesn't need to be invoked,
+    // this is purely here to avoid errors when attempting to verify a log sorter circuit with only
+    // placeholder inputs
+    if !queue_is_empty {
+        structured_input.hook_compare_witness(cs, &structured_input_witness);
+    }
 
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
@@ -655,8 +663,9 @@ where
         {
             let not_keys_are_equal = keys_are_equal.negated(cs);
             if _cycle == 0 {
-                // it must always be true if we start
-                not_keys_are_equal.conditionally_enforce_true(cs, is_start);
+                // it must always be true if we start and if we have items to work with
+                let enforce = is_start.and(cs, should_pop);
+                not_keys_are_equal.conditionally_enforce_true(cs, enforce);
             }
             // finish with the old one
             // if somewhere along the way we did encounter a read at rollback depth zero (not important if there were such),
