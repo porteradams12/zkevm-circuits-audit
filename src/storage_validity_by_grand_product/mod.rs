@@ -181,8 +181,6 @@ where
     let unsorted_queue_witness = closed_form_input.unsorted_queue_witness;
     let intermediate_sorted_queue_witness = closed_form_input.intermediate_sorted_queue_witness;
 
-    let queue_is_empty = structured_input_witness.hidden_fsm_input.cycle_idx == 0;
-
     let mut structured_input = StorageDeduplicatorInputOutput::alloc_ignoring_outputs(
         cs,
         structured_input_witness.clone(),
@@ -491,13 +489,7 @@ where
         .hidden_fsm_output
         .current_final_sorted_queue_state = final_sorted_queue.into_state();
 
-    // it should be ok to put this in a branch since this call does not incur any constraints
-    // NOTE: this circuit should be turned off in the scheduler if it doesn't need to be invoked,
-    // this is purely here to avoid errors when attempting to verify a log sorter circuit with only
-    // placeholder inputs
-    if !queue_is_empty {
-        structured_input.hook_compare_witness(cs, &structured_input_witness);
-    }
+    structured_input.hook_compare_witness(cs, &structured_input_witness);
 
     let compact_form =
         ClosedFormInputCompactForm::from_full_form(cs, &structured_input, round_function);
