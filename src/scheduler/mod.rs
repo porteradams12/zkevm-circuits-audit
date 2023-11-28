@@ -118,49 +118,6 @@ pub fn scheduler_function<
         TransciptParameters = TR::TransciptParameters,
     >,
     POW: RecursivePoWRunner<F>,
->(
-    cs: &mut CS,
-    witness: SchedulerCircuitInstanceWitness<F, H, EXT>,
-    round_function: &R,
-    config: SchedulerConfig<F, H::NonCircuitSimulator, EXT>,
-    verifier_builder: Box<dyn ErasedBuilderForRecursiveVerifier<F, EXT, CS>>,
-    transcript_params: TR::TransciptParameters,
-) where
-    [(); <RecursionQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-    [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-    [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
-{
-    scheduler_function_inner::<F, CS, R, H, EXT, TR, CTR, POW, IMPLEMENT_4844_FUNCTIONALITY>(
-        cs,
-        witness,
-        round_function,
-        config,
-        verifier_builder,
-        None,
-        None,
-        None,
-        None,
-        transcript_params,
-    )
-}
-
-pub fn scheduler_function_inner<
-    F: SmallField,
-    CS: ConstraintSystem<F> + 'static,
-    R: CircuitRoundFunction<F, 8, 12, 4> + AlgebraicRoundFunction<F, 8, 12, 4>,
-    H: RecursiveTreeHasher<F, Num<F>>,
-    EXT: FieldExtension<2, BaseField = F>,
-    TR: RecursiveTranscript<
-        F,
-        CompatibleCap = <H::NonCircuitSimulator as TreeHasher<F>>::Output,
-        CircuitReflection = CTR,
-    >,
-    CTR: CircuitTranscript<
-        F,
-        CircuitCompatibleCap = <H as CircuitTreeHasher<F, Num<F>>>::CircuitOutput,
-        TransciptParameters = TR::TransciptParameters,
-    >,
-    POW: RecursivePoWRunner<F>,
     const USE_4844: bool,
 >(
     cs: &mut CS,
