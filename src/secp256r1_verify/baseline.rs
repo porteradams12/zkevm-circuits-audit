@@ -195,8 +195,10 @@ fn secp256r1_verify_function_inner<F: SmallField, CS: ConstraintSystem<F>>(
     let mut q_acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
 
+    assert_eq!(r_by_s_inv_normalized_lsb_bits.len(), message_hash_by_s_inv_lsb_bits.len());
+
     // we should start from MSB, double the accumulator, then conditionally add
-    for (cycle, (x_bit, hash_bit)) in r_by_s_inv_normalized_lsb_bits
+    for (cycle, (pubkey_bit, generator_bit)) in r_by_s_inv_normalized_lsb_bits
         .into_iter()
         .rev()
         .zip(message_hash_by_s_inv_lsb_bits.into_iter().rev())
@@ -207,10 +209,11 @@ fn secp256r1_verify_function_inner<F: SmallField, CS: ConstraintSystem<F>>(
         }
         let q_plus_x = q_acc.add_mixed(cs, &mut public_key);
         let mut q_0: SWProjectivePoint<F, Secp256Affine, NonNativeFieldOverU16<F, Secp256Fq, 17>> =
-            Selectable::conditionally_select(cs, x_bit, &q_plus_x, &q_acc);
+            Selectable::conditionally_select(cs, pubkey_bit, &q_plus_x, &q_acc);
 
-        let q_plux_gen = q_0.add_mixed(cs, &mut generator_point);
-        let q_1 = Selectable::conditionally_select(cs, hash_bit, &q_plux_gen, &q_0);
+        // let q_plus_gen = q_acc.add_mixed(cs, &mut generator_point);
+        let q_plus_gen = q_0.add_mixed(cs, &mut generator_point);
+        let q_1 = Selectable::conditionally_select(cs, generator_bit, &q_plus_gen, &q_0);
 
         q_acc = q_1;
     }
@@ -469,7 +472,6 @@ where
 mod test {
     use boojum::field::goldilocks::GoldilocksField;
     use boojum::gadgets::traits::allocatable::CSAllocatable;
-    use boojum::pairing::ff::{Field, PrimeField};
     use boojum::worker::Worker;
 
     use super::*;
@@ -479,89 +481,16 @@ mod test {
 
     use boojum::config::DevCSConfig;
 
-    use boojum::pairing::ff::PrimeFieldRepr;
-    use boojum::pairing::{GenericCurveAffine, GenericCurveProjective};
-    use rand::Rng;
-    use rand::SeedableRng;
-    use rand::XorShiftRng;
-
-    pub fn deterministic_rng() -> XorShiftRng {
-        XorShiftRng::from_seed([0x5dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654])
-    }
-
-    fn simulate_signature() -> (Secp256Fr, Secp256Fr, Secp256Affine, Secp256Fr) {
-        let mut rng = deterministic_rng();
-        let sk: Secp256Fr = rng.gen();
-
-        simulate_signature_for_sk(sk)
-    }
-
-    fn transmute_representation<T: PrimeFieldRepr, U: PrimeFieldRepr>(repr: T) -> U {
-        assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<U>());
-
-        unsafe { std::mem::transmute_copy::<T, U>(&repr) }
-    }
-
-    fn simulate_signature_for_sk(
-        sk: Secp256Fr,
-    ) -> (Secp256Fr, Secp256Fr, Secp256Affine, Secp256Fr) {
-        let mut rng = deterministic_rng();
-        let pk = Secp256Affine::one().mul(sk.into_repr()).into_affine();
-        let digest: Secp256Fr = rng.gen();
-        let k: Secp256Fr = rng.gen();
-        let r_point = Secp256Affine::one().mul(k.into_repr()).into_affine();
-
-        let r_x = r_point.into_xy_unchecked().0;
-        let r = transmute_representation::<_, <Secp256Fr as PrimeField>::Repr>(r_x.into_repr());
-        let r = Secp256Fr::from_repr(r).unwrap();
-
-        let k_inv = k.inverse().unwrap();
-        let mut s = r;
-        s.mul_assign(&sk);
-        s.add_assign(&digest);
-        s.mul_assign(&k_inv);
-
-        {
-            let mut mul_by_generator = digest;
-            mul_by_generator.mul_assign(&r.inverse().unwrap());
-            mul_by_generator.negate();
-
-            let mut mul_by_r = s;
-            mul_by_r.mul_assign(&r.inverse().unwrap());
-
-            let res_1 = Secp256Affine::one().mul(mul_by_generator.into_repr());
-            let res_2 = r_point.mul(mul_by_r.into_repr());
-
-            let mut tmp = res_1;
-            tmp.add_assign(&res_2);
-
-            let tmp = tmp.into_affine();
-
-            let x = tmp.into_xy_unchecked().0;
-            assert_eq!(x, pk.into_xy_unchecked().0);
-        }
-
-        (r, s, pk, digest)
-    }
-
-    fn repr_into_u256<T: PrimeFieldRepr>(repr: T) -> U256 {
-        let mut u256 = U256::zero();
-        u256.0.copy_from_slice(&repr.as_ref()[..4]);
-
-        u256
-    }
-
     use boojum::cs::cs_builder::*;
     use boojum::cs::cs_builder_reference::CsReferenceImplementationBuilder;
     use boojum::cs::gates::*;
     use boojum::cs::traits::gate::GatePlacementStrategy;
     use boojum::cs::CSGeometry;
     use boojum::cs::*;
-    use boojum::gadgets::tables::byte_split::ByteSplitTable;
     use boojum::gadgets::tables::*;
 
     #[test]
-    fn test_signature_for_address_verification() {
+    fn test_secp256r1_verification() {
         let geometry = CSGeometry {
             num_columns_under_copy_permutation: 100,
             num_witness_columns: 0,
@@ -581,8 +510,8 @@ mod test {
         ) -> CsBuilder<T, F, impl GateConfigurationHolder<F>, impl StaticToolboxHolder> {
             let builder = builder.allow_lookup(
                 LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
-                    width: 3,
-                    num_repetitions: 8,
+                    width: 1,
+                    num_repetitions: 24,
                     share_table_id: true,
                 },
             );
@@ -644,38 +573,31 @@ mod test {
         let mut owned_cs = builder.build(());
 
         // add tables
-        let table = create_xor8_table();
-        owned_cs.add_lookup_table::<Xor8Table, 3>(table);
+        let table = create_range_check_table::<F, 8>();
+        owned_cs.add_lookup_table::<RangeCheckTable<8>, 1>(table);
 
-        let table = create_and8_table();
-        owned_cs.add_lookup_table::<And8Table, 3>(table);
-
-        let table = create_byte_split_table::<F, 1>();
-        owned_cs.add_lookup_table::<ByteSplitTable<1>, 3>(table);
-        let table = create_byte_split_table::<F, 2>();
-        owned_cs.add_lookup_table::<ByteSplitTable<2>, 3>(table);
-        let table = create_byte_split_table::<F, 3>();
-        owned_cs.add_lookup_table::<ByteSplitTable<3>, 3>(table);
-        let table = create_byte_split_table::<F, 4>();
-        owned_cs.add_lookup_table::<ByteSplitTable<4>, 3>(table);
+        let table = create_range_check_16_bits_table::<F>();
+        owned_cs.add_lookup_table::<RangeCheck16BitsTable, 1>(table);
 
         let cs = &mut owned_cs;
 
-        let sk = crate::ff::from_hex::<Secp256Fr>(
-            "b5b1870957d373ef0eeffecc6e4812c0fd08f554b37b233526acc331bf1544f7",
-        )
-        .unwrap();
-        let eth_address = hex::decode("12890d2cce102216644c59dae5baed380d84830c").unwrap();
-        let (r, s, _pk, digest) = simulate_signature_for_sk(sk);
+        let digest = hex::decode("3fec5769b5cf4e310a7d150508e82fb8e3eda1c2c94c61492d3bd8aea99e06c9").unwrap();
+        let pk_x = hex::decode("31a80482dadf89de6302b1988c82c29544c9c07bb910596158f6062517eb089a").unwrap();
+        let pk_y = hex::decode("2f54c9a0f348752950094d3228d3b940258c75fe2a413cb70baa21dc2e352fc5").unwrap();
+        let r = hex::decode("e22466e928fdccef0de49e3503d2657d00494a00e764fd437bdafa05f5922b1f").unwrap();
+        let s = hex::decode("bbb77c6817ccf50748419477e843d5bac67e6a70e97dde5a57e0c983b777e1ad").unwrap();
 
         let scalar_params = secp256r1_scalar_field_params();
         let base_params = secp256r1_base_field_params();
 
-        let digest_u256 = repr_into_u256(digest.into_repr());
-        let r_u256 = repr_into_u256(r.into_repr());
-        let s_u256 = repr_into_u256(s.into_repr());
+        let digest_u256 = U256::from_big_endian(&digest);
+        let pk_x_u256 = U256::from_big_endian(&pk_x);
+        let pk_y_u256 = U256::from_big_endian(&pk_y);
+        let r_u256 = U256::from_big_endian(&r);
+        let s_u256 = U256::from_big_endian(&s);
 
-        let rec_id = UInt8::allocate_checked(cs, 0);
+        let pk_x = UInt256::allocate(cs, pk_x_u256);
+        let pk_y = UInt256::allocate(cs, pk_y_u256);
         let r = UInt256::allocate(cs, r_u256);
         let s = UInt256::allocate(cs, s_u256);
         let digest = UInt256::allocate(cs, digest_u256);
@@ -683,39 +605,19 @@ mod test {
         let scalar_params = Arc::new(scalar_params);
         let base_params = Arc::new(base_params);
 
-        let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
+        let (no_error, is_valid) = secp256r1_verify_function_inner(
             cs,
-            Secp256Fq::from_str("9").unwrap(),
-            &base_params,
-        );
-        let valid_t_in_external_field = Secp256BaseNNField::allocated_constant(
-            cs,
-            Secp256Fq::from_str("16").unwrap(),
-            &base_params,
-        );
-        let valid_y_in_external_field = Secp256BaseNNField::allocated_constant(
-            cs,
-            Secp256Fq::from_str("4").unwrap(),
-            &base_params,
-        );
-
-        let (no_error, digest) = secp25(
-            cs,
-            &rec_id,
             &r,
             &s,
             &digest,
-            valid_x_in_external_field.clone(),
-            valid_y_in_external_field.clone(),
-            valid_t_in_external_field.clone(),
+            &pk_x,
+            &pk_y,
             &base_params,
             &scalar_params,
         );
 
         assert!(no_error.witness_hook(&*cs)().unwrap() == true);
-        let recovered_address = digest.to_be_bytes(cs);
-        let recovered_address = recovered_address.witness_hook(cs)().unwrap();
-        assert_eq!(&recovered_address[12..], &eth_address[..]);
+        assert!(is_valid.witness_hook(&*cs)().unwrap() == U256::one());
 
         dbg!(cs.next_available_row());
 
