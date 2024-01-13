@@ -50,7 +50,7 @@ pub use self::input::*;
 use super::input::*;
 
 pub const MEMORY_QUERIES_PER_CALL: usize = 4;
-pub const ALLOW_ZERO_MESSAGE: bool = false;
+pub const ALLOW_ZERO_MESSAGE: bool = true;
 
 #[derive(Derivative, CSSelectable)]
 #[derivative(Clone, Debug)]
@@ -340,31 +340,37 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
 
     let modulus_minus_one_div_two = bigint_from_hex_str(cs, MODULUS_MINUS_ONE_DIV_TWO);
 
+    let u256_from_hex_str = |cs: &mut CS, s: &str| -> UInt256<F> {
+        let v = U256::from_str_radix(s, 16).unwrap();
+        UInt256::allocated_constant(cs, v)
+    };
+
+    let a1 = u256_from_hex_str(cs, A1);
+    let b1 = u256_from_hex_str(cs, B1);
+    let a2 = u256_from_hex_str(cs, A2);
+    let b2 = a1.clone();
+
+    let boolean_false = Boolean::allocated_constant(cs, false);
+
     // Scalar decomposition
     let (k1_neg, k1, k2_neg, k2) = {
-        let u256_from_hex_str = |cs: &mut CS, s: &str| -> UInt256<F> {
-            let v = U256::from_str_radix(s, 16).unwrap();
-            UInt256::allocated_constant(cs, v)
-        };
-
-        let a1 = u256_from_hex_str(cs, A1);
-        let b1 = u256_from_hex_str(cs, B1);
-        let a2 = u256_from_hex_str(cs, A2);
-        let b2 = a1.clone();
-
         let k = convert_field_element_to_uint256(cs, scalar.clone());
 
         // We take 8 non-zero limbs for the scalar (since it could be of any size), and 4 for B2
         // (since it fits in 128 bits).
         let b2_times_k = k.widening_mul(cs, &b2, 8, 4);
-        let b2_times_k = b2_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
-        let c1 = b2_times_k.0.to_high();
+        // can not overflow u512
+        let (b2_times_k, of) = b2_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
+        Boolean::enforce_equal(cs, &of, &boolean_false);
+        let c1 = b2_times_k.to_high();
 
         // We take 8 non-zero limbs for the scalar (since it could be of any size), and 4 for B1
         // (since it fits in 128 bits).
         let b1_times_k = k.widening_mul(cs, &b1, 8, 4);
-        let b1_times_k = b1_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
-        let c2 = b1_times_k.0.to_high();
+        // can not overflow u512
+        let (b1_times_k, of) = b1_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
+        Boolean::enforce_equal(cs, &of, &boolean_false);
+        let c2 = b1_times_k.to_high();
 
         let mut a1 = convert_uint256_to_field_element(cs, &a1, &scalar_field_params);
         let mut b1 = convert_uint256_to_field_element(cs, &b1, &scalar_field_params);
@@ -406,10 +412,10 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
 
     // WNAF
     // The scalar multiplication window size.
-    const GLV_WINDOW_SIZE: usize = 2;
+    use super::decomp_table::WNAF_WINDOW_SIZE;
 
-    // The GLV table length.
-    const L: usize = 1 << (GLV_WINDOW_SIZE - 1);
+    // The WNAF precomputation table length
+    const L: usize = 1 << (WNAF_WINDOW_SIZE - 1);
 
     let mut t1 = Vec::with_capacity(L);
     // We use `convert_to_affine_or_default`, but we don't need to worry about returning 1, since
@@ -418,23 +424,26 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
         .double(cs)
         .convert_to_affine_or_default(cs, Secp256Affine::one());
     t1.push(point.clone());
+    // we need 1P, 3P, 5P, ...
     for i in 1..L {
         let next = t1[i - 1].add_mixed(cs, &mut double);
         t1.push(next);
     }
 
+    // (x, y)
     let t1 = t1
         .iter_mut()
         .map(|el| el.convert_to_affine_or_default(cs, Secp256Affine::one()).0)
         .collect::<Vec<_>>();
 
+    // (x*beta, y)
     let t2 = t1
         .clone()
         .into_iter()
         .map(|mut el| (el.0.mul(cs, &mut beta), el.1))
         .collect::<Vec<_>>();
 
-    let overflow_checker = UInt8::allocated_constant(cs, 2u8.pow(7));
+    let overflow_checker = UInt8::allocated_constant(cs, 1 << 7);
     let decomp_id = cs
         .get_table_id_for_marker::<WnafDecompTable>()
         .expect("table should exist");
@@ -458,14 +467,20 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
             };
             // We assume that only one of the values in the table will be selected (since the index
             // <= table.len()) and so we can iteratively conditionally select over all elements.
+            let mut sanity_checks = vec![index.is_zero(cs)];
             let mut coords = table[0].clone();
-            table.iter().enumerate().skip(1).for_each(|(i, v)| {
+            for (i, v) in table.iter().enumerate().skip(1) {
                 assert!((i as u8) < u8::MAX);
-                let const_idx = UInt8::allocated_constant(cs, i as u8);
+                let const_idx: UInt8<F> = UInt8::allocated_constant(cs, i as u8);
                 let correct_idx = UInt8::equals(cs, &index, &const_idx);
+                sanity_checks.push(correct_idx);
                 coords.0 = Selectable::conditionally_select(cs, correct_idx, &v.0, &coords.0);
                 coords.1 = Selectable::conditionally_select(cs, correct_idx, &v.1, &coords.1);
-            });
+            }
+            let matched = Boolean::multi_or(cs, &sanity_checks);
+            let boolean_true = Boolean::allocated_constant(cs, true);
+            Boolean::enforce_equal(cs, &matched, &boolean_true);
+
             let mut p_1 =
                 SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(
                     cs,
@@ -514,7 +529,7 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
     let mut full_table_ids = vec![];
     seq_macro::seq!(C in 0..32 {
-        let ids = vec![
+        let ids = [
             cs.get_table_id_for_marker::<FixedBaseMulTable<0, C>>()
                 .expect("table must exist"),
             cs.get_table_id_for_marker::<FixedBaseMulTable<1, C>>()
@@ -540,11 +555,6 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
         .zip(bytes)
         .rev()
         .for_each(|(ids, byte)| {
-            // let chunks = ids
-            //     .iter()
-            //     .map(|id| cs.perform_lookup::<1, 2>(*id, &[byte.get_variable()]))
-            //     .collect::<Vec<[Variable; 2]>>();
-
             let (x, y): (Vec<Variable>, Vec<Variable>) = ids
                 .iter()
                 .flat_map(|id| {
@@ -586,7 +596,9 @@ fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
                 params: base_field_params.clone(),
                 _marker: std::marker::PhantomData,
             };
-            acc = acc.add_mixed(cs, &mut (x, y));
+            let new_acc = acc.add_mixed(cs, &mut (x, y));
+            let should_not_update = byte.is_zero(cs);
+            acc = Selectable::conditionally_select(cs, should_not_update, &acc, &new_acc);
         });
     acc = Selectable::conditionally_select(cs, is_zero, &zero_point, &acc);
     acc
@@ -731,6 +743,11 @@ fn ecrecover_precompile_inner_routine<
     may_be_recovered_y.normalize(cs);
     let may_be_recovered_y_negated = may_be_recovered_y.negated(cs);
 
+    if crate::config::CIRCUIT_VERSOBE {
+        dbg!(may_be_recovered_y.witness_hook(cs)());
+        dbg!(may_be_recovered_y_negated.witness_hook(cs)());
+    }
+
     let [lowest_bit, ..] =
         Num::<F>::from_variable(may_be_recovered_y.limbs[0]).spread_into_bits::<_, 16>(cs);
 
@@ -764,13 +781,22 @@ fn ecrecover_precompile_inner_routine<
     let mut message_hash_by_r_inv = message_hash_fe.mul(cs, &mut r_fe_inversed);
 
     s_by_r_inv.normalize(cs);
-    message_hash_by_r_inv.normalize(cs);
+    let mut message_hash_by_r_inv_negated = message_hash_by_r_inv.negated(cs);
+    message_hash_by_r_inv_negated.normalize(cs);
 
     // now we are going to compute the public key Q = (x, y) determined by the formula:
     // Q = (s * X - hash * G) / r which is equivalent to r * Q = s * X - hash * G
 
+    if crate::config::CIRCUIT_VERSOBE {
+        dbg!(x.witness_hook(cs)());
+        dbg!(y.witness_hook(cs)());
+        dbg!(s_by_r_inv.witness_hook(cs)());
+        dbg!(message_hash_by_r_inv_negated.witness_hook(cs)());
+    }
+
     let recovered_point =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(cs, x, y);
+
     // now we do multiplication
     let mut s_times_x = wnaf_scalar_mul(
         cs,
@@ -780,7 +806,8 @@ fn ecrecover_precompile_inner_routine<
         &scalar_field_params,
     );
 
-    let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv, &base_field_params);
+    let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv_negated, &base_field_params);
+    // let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv, &base_field_params);
 
     let (mut q_acc, is_infinity) =
         hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
@@ -792,6 +819,11 @@ fn ecrecover_precompile_inner_routine<
     let any_exception = Boolean::multi_or(cs, &exception_flags[..]);
 
     let zero_u8 = UInt8::zero(cs);
+
+    if crate::config::CIRCUIT_VERSOBE {
+        dbg!(q_x.witness_hook(cs)());
+        dbg!(q_y.witness_hook(cs)());
+    }
 
     let mut bytes_to_hash = [zero_u8; 64];
     let it = q_x.limbs[..16]
@@ -977,6 +1009,15 @@ where
         let [message_hash_as_u256, v_as_u256, r_as_u256, s_as_u256] = read_values;
         let rec_id = v_as_u256.inner[0].to_le_bytes(cs)[0];
 
+        if crate::config::CIRCUIT_VERSOBE {
+            if should_process.witness_hook(cs)().unwrap() == true {
+                dbg!(rec_id.witness_hook(cs)());
+                dbg!(r_as_u256.witness_hook(cs)());
+                dbg!(s_as_u256.witness_hook(cs)());
+                dbg!(message_hash_as_u256.witness_hook(cs)());
+            }
+        }
+
         let (success, written_value) = ecrecover_precompile_inner_routine::<_, _, ALLOW_ZERO_MESSAGE>(
             cs,
             &rec_id,
@@ -993,6 +1034,13 @@ where
         let success_as_u32 = unsafe { UInt32::from_variable_unchecked(success.get_variable()) };
         let mut success_as_u256 = zero_u256;
         success_as_u256.inner[0] = success_as_u32;
+
+        if crate::config::CIRCUIT_VERSOBE {
+            if should_process.witness_hook(cs)().unwrap() == true {
+                dbg!(success_as_u256.witness_hook(cs)());
+                dbg!(written_value.witness_hook(cs)());
+            }
+        }
 
         let success_query = MemoryQuery {
             timestamp: timestamp_to_use_for_write,
@@ -1060,6 +1108,7 @@ where
 #[cfg(test)]
 mod test {
     use boojum::field::goldilocks::GoldilocksField;
+    use boojum::gadgets::non_native_field::implementations::implementation_u16::FFProxyValue;
     use boojum::gadgets::traits::allocatable::CSAllocatable;
     use boojum::pairing::ff::{Field, PrimeField, SqrtField};
     use boojum::worker::Worker;
@@ -1298,6 +1347,81 @@ mod test {
     }
 
     #[test]
+    fn test_fixed_base_mul() {
+        let mut owned_cs = create_cs(1 << 21);
+        let cs = &mut owned_cs;
+        let scalar_params = Arc::new(secp256k1_scalar_field_params());
+        let base_params = Arc::new(secp256k1_base_field_params());
+
+        let mut seed = Secp256Fr::multiplicative_generator();
+        seed = seed.pow([1234]);
+
+        for _i in 0..16 {
+            let scalar = Secp256ScalarNNField::allocate_checked(cs, seed, &scalar_params);
+            let mut result = fixed_base_mul(cs, scalar, &base_params);
+            let ((result_x, result_y), _) =
+                result.convert_to_affine_or_default(cs, Secp256Affine::one());
+
+            let expected = Secp256Affine::one().mul(seed).into_affine();
+            dbg!(_i);
+            dbg!(seed);
+            assert_eq!(
+                result_x.witness_hook(cs)().unwrap().get(),
+                *expected.as_xy().0
+            );
+            assert_eq!(
+                result_y.witness_hook(cs)().unwrap().get(),
+                *expected.as_xy().1
+            );
+
+            seed.square();
+        }
+    }
+
+    #[test]
+    fn test_variable_base_mul() {
+        let mut owned_cs = create_cs(1 << 21);
+        let cs = &mut owned_cs;
+        let scalar_params = Arc::new(secp256k1_scalar_field_params());
+        let base_params = Arc::new(secp256k1_base_field_params());
+
+        let mut seed = Secp256Fr::multiplicative_generator();
+        seed = seed.pow([1234]);
+
+        let mut seed_2 = Secp256Fr::multiplicative_generator();
+        seed_2 = seed_2.pow([987654]);
+
+        for _i in 0..16 {
+            dbg!(_i);
+            dbg!(seed);
+
+            let base = Secp256Affine::one().mul(seed_2).into_affine();
+
+            let scalar = Secp256ScalarNNField::allocate_checked(cs, seed, &scalar_params);
+            let x = Secp256BaseNNField::allocate_checked(cs, *base.as_xy().0, &base_params);
+            let y = Secp256BaseNNField::allocate_checked(cs, *base.as_xy().1, &base_params);
+            let point = SWProjectivePoint::from_xy_unchecked(cs, x, y);
+
+            let mut result = wnaf_scalar_mul(cs, point, scalar, &base_params, &scalar_params);
+            let ((result_x, result_y), _) =
+                result.convert_to_affine_or_default(cs, Secp256Affine::one());
+
+            let expected = base.mul(seed).into_affine();
+            assert_eq!(
+                result_x.witness_hook(cs)().unwrap().get(),
+                *expected.as_xy().0
+            );
+            assert_eq!(
+                result_y.witness_hook(cs)().unwrap().get(),
+                *expected.as_xy().1
+            );
+
+            seed.square();
+            seed_2.square();
+        }
+    }
+
+    #[test]
     fn test_signature_for_address_verification() {
         let mut owned_cs = create_cs(1 << 20);
         let cs = &mut owned_cs;
@@ -1308,6 +1432,7 @@ mod test {
         .unwrap();
         let eth_address = hex::decode("12890d2cce102216644c59dae5baed380d84830c").unwrap();
         let (r, s, _pk, digest) = simulate_signature_for_sk(sk);
+        dbg!(_pk);
 
         let scalar_params = secp256k1_scalar_field_params();
         let base_params = secp256k1_base_field_params();
@@ -1341,7 +1466,159 @@ mod test {
         );
 
         for _ in 0..5 {
-            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, false>(
+            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, true>(
+                cs,
+                &rec_id,
+                &r,
+                &s,
+                &digest,
+                valid_x_in_external_field.clone(),
+                valid_y_in_external_field.clone(),
+                valid_t_in_external_field.clone(),
+                &base_params,
+                &scalar_params,
+            );
+
+            assert!(no_error.witness_hook(&*cs)().unwrap() == true);
+            let recovered_address = digest.to_be_bytes(cs);
+            let recovered_address = recovered_address.witness_hook(cs)().unwrap();
+            assert_eq!(&recovered_address[12..], &eth_address[..]);
+        }
+
+        dbg!(cs.next_available_row());
+
+        cs.pad_and_shrink();
+
+        let mut cs = owned_cs.into_assembly();
+        cs.print_gate_stats();
+        let worker = Worker::new();
+        assert!(cs.check_if_satisfied(&worker));
+    }
+
+    #[test]
+    fn test_signature_from_reference_vector() {
+        let mut owned_cs = create_cs(1 << 20);
+        let cs = &mut owned_cs;
+
+        let digest =
+            hex::decode("38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e")
+                .unwrap();
+        let v = 0;
+        let r = hex::decode("38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e")
+            .unwrap();
+        let s = hex::decode("789d1dd423d25f0772d2748d60f7e4b81bb14d086eba8e8e8efb6dcff8a4ae02")
+            .unwrap();
+        let eth_address = hex::decode("ceaccac640adf55b2028469bd36ba501f28b699d").unwrap();
+
+        let scalar_params = secp256k1_scalar_field_params();
+        let base_params = secp256k1_base_field_params();
+
+        let digest_u256 = U256::from_big_endian(&digest);
+        let r_u256 = U256::from_big_endian(&r);
+        let s_u256 = U256::from_big_endian(&s);
+
+        let rec_id = UInt8::allocate_checked(cs, v);
+        let r = UInt256::allocate(cs, r_u256);
+        let s = UInt256::allocate(cs, s_u256);
+        let digest = UInt256::allocate(cs, digest_u256);
+
+        let scalar_params = Arc::new(scalar_params);
+        let base_params = Arc::new(base_params);
+
+        let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("9").unwrap(),
+            &base_params,
+        );
+        let valid_t_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("16").unwrap(),
+            &base_params,
+        );
+        let valid_y_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("4").unwrap(),
+            &base_params,
+        );
+
+        for _ in 0..1 {
+            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, true>(
+                cs,
+                &rec_id,
+                &r,
+                &s,
+                &digest,
+                valid_x_in_external_field.clone(),
+                valid_y_in_external_field.clone(),
+                valid_t_in_external_field.clone(),
+                &base_params,
+                &scalar_params,
+            );
+
+            assert!(no_error.witness_hook(&*cs)().unwrap() == true);
+            let recovered_address = digest.to_be_bytes(cs);
+            let recovered_address = recovered_address.witness_hook(cs)().unwrap();
+            assert_eq!(&recovered_address[12..], &eth_address[..]);
+        }
+
+        dbg!(cs.next_available_row());
+
+        cs.pad_and_shrink();
+
+        let mut cs = owned_cs.into_assembly();
+        cs.print_gate_stats();
+        let worker = Worker::new();
+        assert!(cs.check_if_satisfied(&worker));
+    }
+
+    #[test]
+    fn test_signature_from_reference_vector_2() {
+        let mut owned_cs = create_cs(1 << 20);
+        let cs = &mut owned_cs;
+
+        let digest =
+            hex::decode("14431339128bd25f2c7f93baa611e367472048757f4ad67f6d71a5ca0da550f5")
+                .unwrap();
+        let v = 1;
+        let r = hex::decode("51e4dbbbcebade695a3f0fdf10beb8b5f83fda161e1a3105a14c41168bf3dce0")
+            .unwrap();
+        let s = hex::decode("46eabf35680328e26ef4579caf8aeb2cf9ece05dbf67a4f3d1f28c7b1d0e3546")
+            .unwrap();
+        let eth_address = hex::decode("7f8b3b04bf34618f4a1723fba96b5db211279a2b").unwrap();
+
+        let scalar_params = secp256k1_scalar_field_params();
+        let base_params = secp256k1_base_field_params();
+
+        let digest_u256 = U256::from_big_endian(&digest);
+        let r_u256 = U256::from_big_endian(&r);
+        let s_u256 = U256::from_big_endian(&s);
+
+        let rec_id = UInt8::allocate_checked(cs, v);
+        let r = UInt256::allocate(cs, r_u256);
+        let s = UInt256::allocate(cs, s_u256);
+        let digest = UInt256::allocate(cs, digest_u256);
+
+        let scalar_params = Arc::new(scalar_params);
+        let base_params = Arc::new(base_params);
+
+        let valid_x_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("9").unwrap(),
+            &base_params,
+        );
+        let valid_t_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("16").unwrap(),
+            &base_params,
+        );
+        let valid_y_in_external_field = Secp256BaseNNField::allocated_constant(
+            cs,
+            Secp256Fq::from_str("4").unwrap(),
+            &base_params,
+        );
+
+        for _ in 0..1 {
+            let (no_error, digest) = ecrecover_precompile_inner_routine::<_, _, true>(
                 cs,
                 &rec_id,
                 &r,
