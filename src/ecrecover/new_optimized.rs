@@ -89,8 +89,8 @@ const VALID_X_CUBED_IN_EXTERNAL_FIELD: u64 = 9;
 
 // GLV consts
 
-// 2**128
-const TWO_POW_128: &'static str = "340282366920938463463374607431768211456";
+// Decomposition scalars can be a little more than 2^128 in practice, so we use 33 chunks of width 4 bits
+const MAX_DECOMPOSITION_VALUE: U256 = U256([u64::MAX, u64::MAX, 0x0f, 0]);
 // BETA s.t. for any curve point Q = (x,y):
 // lambda * Q = (beta*x mod p, y)
 const BETA: &'static str =
@@ -105,6 +105,10 @@ const MODULUS_MINUS_ONE_DIV_TWO: &'static str =
 const A1: &'static str = "0x3086d221a7d46bcde86c90e49284eb15";
 const B1: &'static str = "0xe4437ed6010e88286f547fa90abfe4c3";
 const A2: &'static str = "0x114ca50f7a8e2f3f657c1108d9d44cfd8";
+
+const WINDOW_WIDTH: usize = 4;
+const NUM_MULTIPLICATION_STEPS_FOR_WIDTH_4: usize = 33;
+const PRECOMPUTATION_TABLE_SIZE: usize = (1 << WINDOW_WIDTH) - 1;
 
 // assume that constructed field element is not zero
 // if this is not satisfied - set the result to be F::one
@@ -318,6 +322,267 @@ fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
     naf
 }
 
+fn width_4_windowed_multiplication<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    mut point: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>,
+    mut scalar: Secp256ScalarNNField<F>,
+    base_field_params: &Arc<Secp256BaseNNFieldParams>,
+    scalar_field_params: &Arc<Secp256ScalarNNFieldParams>,
+) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
+    scalar.enforce_reduced(cs);
+
+    let beta = Secp256Fq::from_str(BETA).unwrap();
+    let mut beta = Secp256BaseNNField::allocated_constant(cs, beta, &base_field_params);
+
+    let bigint_from_hex_str = |cs: &mut CS, s: &str| -> UInt512<F> {
+        let v = U256::from_str_radix(s, 16).unwrap();
+        UInt512::allocated_constant(cs, (v, U256::zero()))
+    };
+
+    let modulus_minus_one_div_two = bigint_from_hex_str(cs, MODULUS_MINUS_ONE_DIV_TWO);
+
+    let u256_from_hex_str = |cs: &mut CS, s: &str| -> UInt256<F> {
+        let v = U256::from_str_radix(s, 16).unwrap();
+        UInt256::allocated_constant(cs, v)
+    };
+
+    let a1 = u256_from_hex_str(cs, A1);
+    let b1 = u256_from_hex_str(cs, B1);
+    let a2 = u256_from_hex_str(cs, A2);
+    let b2 = a1.clone();
+
+    let boolean_false = Boolean::allocated_constant(cs, false);
+
+    // Scalar decomposition
+    let (k1_was_negated, k1, k2_was_negated, k2) = {
+        let k = convert_field_element_to_uint256(cs, scalar.clone());
+
+        // We take 8 non-zero limbs for the scalar (since it could be of any size), and 4 for B2
+        // (since it fits in 128 bits).
+        let b2_times_k = k.widening_mul(cs, &b2, 8, 4);
+        // can not overflow u512
+        let (b2_times_k, of) = b2_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
+        Boolean::enforce_equal(cs, &of, &boolean_false);
+        let c1 = b2_times_k.to_high();
+
+        // We take 8 non-zero limbs for the scalar (since it could be of any size), and 4 for B1
+        // (since it fits in 128 bits).
+        let b1_times_k = k.widening_mul(cs, &b1, 8, 4);
+        // can not overflow u512
+        let (b1_times_k, of) = b1_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
+        Boolean::enforce_equal(cs, &of, &boolean_false);
+        let c2 = b1_times_k.to_high();
+
+        let mut a1 = convert_uint256_to_field_element(cs, &a1, &scalar_field_params);
+        let mut b1 = convert_uint256_to_field_element(cs, &b1, &scalar_field_params);
+        let mut a2 = convert_uint256_to_field_element(cs, &a2, &scalar_field_params);
+        let mut b2 = a1.clone();
+        let mut c1 = convert_uint256_to_field_element(cs, &c1, &scalar_field_params);
+        let mut c2 = convert_uint256_to_field_element(cs, &c2, &scalar_field_params);
+
+        let mut c1_times_a1 = c1.mul(cs, &mut a1);
+        let mut c2_times_a2 = c2.mul(cs, &mut a2);
+        let mut k1 = scalar.sub(cs, &mut c1_times_a1).sub(cs, &mut c2_times_a2);
+        k1.normalize(cs);
+        let mut c2_times_b2 = c2.mul(cs, &mut b2);
+        let mut k2 = c1.mul(cs, &mut b1).sub(cs, &mut c2_times_b2);
+        k2.normalize(cs);
+
+        let k1_u256 = convert_field_element_to_uint256(cs, k1.clone());
+        let k2_u256 = convert_field_element_to_uint256(cs, k2.clone());
+        let max_k1_or_k2 = UInt256::allocated_constant(cs, MAX_DECOMPOSITION_VALUE);
+        // we will need k1 and k2 to be < 2^128, so we can compare via subtraction
+        let (_res, k1_out_of_range) = max_k1_or_k2.overflowing_sub(cs, &k1_u256);
+        let k1_negated = k1.negated(cs);
+        // dbg!(k1.witness_hook(cs)());
+        // dbg!(k1_negated.witness_hook(cs)());
+        let k1 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
+            cs,
+            k1_out_of_range,
+            &k1_negated,
+            &k1,
+        );
+        let (_res, k2_out_of_range) = max_k1_or_k2.overflowing_sub(cs, &k2_u256);
+        let k2_negated = k2.negated(cs);
+        // dbg!(k2.witness_hook(cs)());
+        // dbg!(k2_negated.witness_hook(cs)());
+        let k2 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
+            cs,
+            k2_out_of_range,
+            &k2_negated,
+            &k2,
+        );
+
+        (k1_out_of_range, k1, k2_out_of_range, k2)
+    };
+
+    // dbg!(k1.witness_hook(cs)());
+    // dbg!(k2.witness_hook(cs)());
+    // dbg!(k1_was_negated.witness_hook(cs)());
+    // dbg!(k2_was_negated.witness_hook(cs)());
+
+    // create precomputed table of size 1<<4 - 1
+    // there is no 0 * P in the table, we will handle it below
+    let mut table = Vec::with_capacity(PRECOMPUTATION_TABLE_SIZE);
+    let mut tmp = point.clone();
+    let (mut p_affine, _) = point.convert_to_affine_or_default(cs, Secp256Affine::one());
+    table.push(p_affine.clone());
+    for _ in 1..PRECOMPUTATION_TABLE_SIZE {
+        // 2P, 3P, ...
+        tmp = tmp.add_mixed(cs, &mut p_affine);
+        let (affine, _) = tmp.convert_to_affine_or_default(cs, Secp256Affine::one());
+        table.push(affine);
+    }
+    assert_eq!(table.len(), PRECOMPUTATION_TABLE_SIZE);
+
+    let mut endomorphisms_table = table.clone();
+    for (x, _) in endomorphisms_table.iter_mut() {
+        *x = x.mul(cs, &mut beta);
+    }
+
+    // we also know that we will multiply k1 by points, and k2 by their endomorphisms, and if they were
+    // negated above to fit into range, we negate bases here
+    for (_, y) in table.iter_mut() {
+        let negated = y.negated(cs);
+        *y = Selectable::conditionally_select(cs, k1_was_negated, &negated, &*y);
+    }
+
+    for (_, y) in endomorphisms_table.iter_mut() {
+        let negated = y.negated(cs);
+        *y = Selectable::conditionally_select(cs, k2_was_negated, &negated, &*y);
+    }
+
+    // now decompose every scalar we are interested in
+    let k1_msb_decomposition = to_width_4_window_form(cs, k1);
+    let k2_msb_decomposition = to_width_4_window_form(cs, k2);
+
+    let mut comparison_constants = Vec::with_capacity(PRECOMPUTATION_TABLE_SIZE);
+    for i in 1..=PRECOMPUTATION_TABLE_SIZE {
+        let constant = Num::allocated_constant(cs, F::from_u64_unchecked(i as u64));
+        comparison_constants.push(constant);
+    }
+
+    // now we do amortized double and add
+    let mut acc = SWProjectivePoint::zero(cs, base_field_params);
+    assert_eq!(
+        k1_msb_decomposition.len(),
+        NUM_MULTIPLICATION_STEPS_FOR_WIDTH_4
+    );
+    assert_eq!(
+        k2_msb_decomposition.len(),
+        NUM_MULTIPLICATION_STEPS_FOR_WIDTH_4
+    );
+
+    for (idx, (k1_window_idx, k2_window_idx)) in k1_msb_decomposition
+        .into_iter()
+        .zip(k2_msb_decomposition.into_iter())
+        .enumerate()
+    {
+        let ignore_k1_part = k1_window_idx.is_zero(cs);
+        let ignore_k2_part = k2_window_idx.is_zero(cs);
+
+        // dbg!(k1_window_idx.witness_hook(cs)());
+        // dbg!(k2_window_idx.witness_hook(cs)());
+        // dbg!(ignore_k1_part.witness_hook(cs)());
+        // dbg!(ignore_k2_part.witness_hook(cs)());
+
+        let (mut selected_k1_part_x, mut selected_k1_part_y) = table[0].clone();
+        let (mut selected_k2_part_x, mut selected_k2_part_y) = endomorphisms_table[0].clone();
+        for i in 1..PRECOMPUTATION_TABLE_SIZE {
+            let should_select_k1 = Num::equals(cs, &comparison_constants[i], &k1_window_idx);
+            let should_select_k2 = Num::equals(cs, &comparison_constants[i], &k2_window_idx);
+            selected_k1_part_x = Selectable::conditionally_select(
+                cs,
+                should_select_k1,
+                &table[i].0,
+                &selected_k1_part_x,
+            );
+            selected_k1_part_y = Selectable::conditionally_select(
+                cs,
+                should_select_k1,
+                &table[i].1,
+                &selected_k1_part_y,
+            );
+            selected_k2_part_x = Selectable::conditionally_select(
+                cs,
+                should_select_k2,
+                &endomorphisms_table[i].0,
+                &selected_k2_part_x,
+            );
+            selected_k2_part_y = Selectable::conditionally_select(
+                cs,
+                should_select_k2,
+                &endomorphisms_table[i].1,
+                &selected_k2_part_y,
+            );
+        }
+
+        // dbg!(selected_k1_part_x.witness_hook(cs)());
+        // dbg!(selected_k1_part_y.witness_hook(cs)());
+
+        let tmp_acc = acc.add_mixed(cs, &mut (selected_k1_part_x, selected_k1_part_y));
+        acc = Selectable::conditionally_select(cs, ignore_k1_part, &acc, &tmp_acc);
+        let tmp_acc = acc.add_mixed(cs, &mut (selected_k2_part_x, selected_k2_part_y));
+        acc = Selectable::conditionally_select(cs, ignore_k2_part, &acc, &tmp_acc);
+
+        // let ((x, y), _) = acc.convert_to_affine_or_default(cs, Secp256Affine::zero());
+        // dbg!(x.witness_hook(cs)());
+        // dbg!(y.witness_hook(cs)());
+
+        if idx != NUM_MULTIPLICATION_STEPS_FOR_WIDTH_4 - 1 {
+            for _ in 0..WINDOW_WIDTH {
+                acc = acc.double(cs);
+            }
+        }
+    }
+
+    acc
+}
+
+fn to_width_4_window_form<F: SmallField, CS: ConstraintSystem<F>>(
+    cs: &mut CS,
+    mut limited_width_scalar: Secp256ScalarNNField<F>,
+) -> Vec<Num<F>> {
+    limited_width_scalar.enforce_reduced(cs);
+    // we know that width is 128 bits, so just do BE decomposition and put into resulting array
+    let zero_num = Num::zero(cs);
+    for word in limited_width_scalar.limbs[9..].iter() {
+        let word = Num::from_variable(*word);
+        Num::enforce_equal(cs, &word, &zero_num);
+    }
+
+    let byte_split_id = cs
+        .get_table_id_for_marker::<ByteSplitTable<4>>()
+        .expect("table should exist");
+    let mut result = Vec::with_capacity(32);
+    // special case
+    {
+        let highest_word = limited_width_scalar.limbs[8];
+        let word = unsafe { UInt16::from_variable_unchecked(highest_word) };
+        let [high, low] = word.to_be_bytes(cs);
+        Num::enforce_equal(cs, &high.into_num(), &zero_num);
+        let [l, h] = cs.perform_lookup::<1, 2>(byte_split_id, &[low.get_variable()]);
+        Num::enforce_equal(cs, &Num::from_variable(h), &zero_num);
+        let l = Num::from_variable(l);
+        result.push(l);
+    }
+
+    for word in limited_width_scalar.limbs[..8].iter().rev() {
+        let word = unsafe { UInt16::from_variable_unchecked(*word) };
+        let [high, low] = word.to_be_bytes(cs);
+        for t in [high, low].into_iter() {
+            let [l, h] = cs.perform_lookup::<1, 2>(byte_split_id, &[t.get_variable()]);
+            let h = Num::from_variable(h);
+            let l = Num::from_variable(l);
+            result.push(h);
+            result.push(l);
+        }
+    }
+    assert_eq!(result.len(), NUM_MULTIPLICATION_STEPS_FOR_WIDTH_4);
+
+    result
+}
+
 fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     mut point: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>,
@@ -327,8 +592,7 @@ fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
 ) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
     scalar.enforce_reduced(cs);
 
-    let pow_2_128 = U256::from_dec_str(TWO_POW_128).unwrap();
-    let pow_2_128 = UInt512::allocated_constant(cs, (pow_2_128, U256::zero()));
+    let pow_2_128 = UInt512::allocated_constant(cs, (U256([0, 0, 1, 0]), U256::zero()));
 
     let beta = Secp256Fq::from_str(BETA).unwrap();
     let mut beta = Secp256BaseNNField::allocated_constant(cs, beta, &base_field_params);
@@ -798,13 +1062,21 @@ fn ecrecover_precompile_inner_routine<
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(cs, x, y);
 
     // now we do multiplication
-    let mut s_times_x = wnaf_scalar_mul(
+    let mut s_times_x = width_4_windowed_multiplication(
         cs,
         recovered_point.clone(),
         s_by_r_inv.clone(),
         &base_field_params,
         &scalar_field_params,
     );
+
+    // let mut s_times_x = wnaf_scalar_mul(
+    //     cs,
+    //     recovered_point.clone(),
+    //     s_by_r_inv.clone(),
+    //     &base_field_params,
+    //     &scalar_field_params,
+    // );
 
     let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv_negated, &base_field_params);
     // let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv, &base_field_params);
@@ -1397,12 +1669,18 @@ mod test {
 
             let base = Secp256Affine::one().mul(seed_2).into_affine();
 
+            // let mut seed = Secp256Fr::from_str("1234567890").unwrap();
+            // dbg!(base);
+            // dbg!(base.mul(seed).into_affine());
+
             let scalar = Secp256ScalarNNField::allocate_checked(cs, seed, &scalar_params);
             let x = Secp256BaseNNField::allocate_checked(cs, *base.as_xy().0, &base_params);
             let y = Secp256BaseNNField::allocate_checked(cs, *base.as_xy().1, &base_params);
             let point = SWProjectivePoint::from_xy_unchecked(cs, x, y);
 
-            let mut result = wnaf_scalar_mul(cs, point, scalar, &base_params, &scalar_params);
+            let mut result =
+                width_4_windowed_multiplication(cs, point, scalar, &base_params, &scalar_params);
+            // let mut result = wnaf_scalar_mul(cs, point, scalar, &base_params, &scalar_params);
             let ((result_x, result_y), _) =
                 result.convert_to_affine_or_default(cs, Secp256Affine::one());
 
