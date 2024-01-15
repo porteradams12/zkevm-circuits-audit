@@ -373,6 +373,7 @@ pub fn zksync_pubdata_into_monomial_form_poly(input: &[u8]) -> Vec<Bls12_381Fr> 
         buffer[..BLOB_CHUNK_SIZE].copy_from_slice(bytes);
         let mut repr = <Bls12_381Fr as boojum::pairing::ff::PrimeField>::Repr::default();
         repr.read_le(&buffer[..]).unwrap();
+        // Since repr only has 31 bytes, repr is guaranteed to be below the modulu
         let as_field_element = Bls12_381Fr::from_repr(repr).unwrap();
         poly.push(as_field_element);
     }
@@ -386,7 +387,8 @@ pub fn ethereum_4844_pubdata_into_bitreversed_lagrange_form_poly(input: &[u8]) -
     use boojum::pairing::ff::PrimeFieldRepr;
     for bytes in input.array_chunks::<32>().rev() {
         let mut repr = <Bls12_381Fr as boojum::pairing::ff::PrimeField>::Repr::default();
-        repr.read_be(&bytes[..]).unwrap();
+        repr.read_be(&bytes[..31]).unwrap();
+        // Since repr only has 31 bytes, repr is guaranteed to be below the modulu
         let as_field_element = Bls12_381Fr::from_repr(repr).unwrap();
         poly.push(as_field_element);
     }
