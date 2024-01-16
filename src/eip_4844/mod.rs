@@ -393,7 +393,7 @@ pub fn ethereum_4844_pubdata_into_bitreversed_lagrange_form_poly(input: &[u8]) -
         let mut repr = <Bls12_381Fr as boojum::pairing::ff::PrimeField>::Repr::default();
         repr.read_be(&bytes[..]).unwrap();
         let mut as_field_element = None;
-        for _ in 0..2 {
+        for _ in 0..3 {
             if let Ok(normalized_field_element) = Bls12_381Fr::from_repr(repr) {
                 as_field_element = Some(normalized_field_element);
                 break;
