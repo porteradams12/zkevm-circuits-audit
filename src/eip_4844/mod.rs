@@ -382,13 +382,32 @@ pub fn zksync_pubdata_into_monomial_form_poly(input: &[u8]) -> Vec<Bls12_381Fr> 
 }
 
 pub fn ethereum_4844_pubdata_into_bitreversed_lagrange_form_poly(input: &[u8]) -> Vec<Bls12_381Fr> {
+    let gte = |r1: <Bls12_381Fr as boojum::pairing::ff::PrimeField>::Repr,
+               r2: <Bls12_381Fr as boojum::pairing::ff::PrimeField>::Repr| {
+        for (e, modulus) in r1.0.iter().rev().zip(r2.0.iter().rev()) {
+            if e > modulus {
+                return true;
+            } else if e < modulus {
+                return false;
+            } else if e == modulus {
+                continue;
+            }
+        }
+
+        // if we end up here then e == modulus in all limbs and so we should subtract
+        true
+    };
+
     assert_eq!(input.len(), 32 * ELEMENTS_PER_4844_BLOCK);
     let mut poly = Vec::with_capacity(ELEMENTS_PER_4844_BLOCK);
     use boojum::pairing::ff::PrimeFieldRepr;
     for bytes in input.array_chunks::<32>().rev() {
         let mut repr = <Bls12_381Fr as boojum::pairing::ff::PrimeField>::Repr::default();
-        repr.read_be(&bytes[..31]).unwrap();
-        // Since repr only has 31 bytes, repr is guaranteed to be below the modulu
+        repr.read_be(&bytes[..]).unwrap();
+        let modulus = <Bls12_381Fr as boojum::pairing::ff::PrimeField>::char();
+        if gte(repr, modulus) {
+            repr.sub_noborrow(&modulus);
+        }
         let as_field_element = Bls12_381Fr::from_repr(repr).unwrap();
         poly.push(as_field_element);
     }
