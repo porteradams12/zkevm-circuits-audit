@@ -288,7 +288,6 @@ where
             &call_params,
             &state.precompile_call_params,
         );
-
         // also set timestamps
         state.timestamp_to_use_for_read = UInt32::conditionally_select(
             cs,
@@ -317,23 +316,16 @@ where
             ],
         );
 
-        let is_input_length_zero = state.precompile_call_params.input_memory_byte_length.is_zero(cs);
+        let is_input_length_zero = state
+            .precompile_call_params
+            .input_memory_byte_length
+            .is_zero(cs);
 
         // if we just have read a precompile call with zero length input, we want to perform only one padding round
-        let have_read_zero_length_call = Boolean::multi_and(
-            cs,
-            &[
-                state.read_precompile_call,
-                is_input_length_zero,
-            ],
-        );
-        state.padding_round = Boolean::multi_or(
-            cs,
-            &[
-                state.padding_round,
-                have_read_zero_length_call,
-            ],
-        );
+        let have_read_zero_length_call =
+            Boolean::multi_and(cs, &[state.read_precompile_call, is_input_length_zero]);
+        state.padding_round =
+            Boolean::multi_or(cs, &[state.padding_round, have_read_zero_length_call]);
         let havent_read_zero_length_call = have_read_zero_length_call.negated(cs);
         state.read_unaligned_words_for_round = Boolean::multi_and(
             cs,
