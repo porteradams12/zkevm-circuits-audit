@@ -470,6 +470,23 @@ where
             .input_memory_byte_length
             .is_zero(cs);
 
+        // if the buffer is empty right after reading, then it was empty before and we read zero bytes.
+        // In such case if the call needs extra padding round, state.padding_round can be false only if it's the first cycle for this call
+        // (otherwise it would be set at the end of the previous cycle).
+        // This case is only achievable for zero-length input data
+        let buffer_initially_empty = state.buffer.filled.is_zero(cs);
+        let only_padding_round = Boolean::multi_and(
+            cs,
+            &[
+                state.read_unaligned_words_for_round,
+                zero_bytes_left,
+                buffer_initially_empty,
+                state.precompile_call_params.needs_full_padding_round,
+            ],
+        );
+        state.read_unaligned_words_for_round = only_padding_round.negated(cs);
+        state.padding_round = only_padding_round;
+
         let currently_filled = state.buffer.filled;
         let almost_filled = UInt8::allocated_constant(cs, (KECCAK_RATE_BYTES - 1) as u8);
         let do_one_byte_of_padding = UInt8::equals(cs, &currently_filled, &almost_filled);
