@@ -288,6 +288,7 @@ where
             &call_params,
             &state.precompile_call_params,
         );
+
         // also set timestamps
         state.timestamp_to_use_for_read = UInt32::conditionally_select(
             cs,
@@ -315,6 +316,33 @@ where
                 state.read_unaligned_words_for_round,
             ],
         );
+
+        let is_input_length_zero = state.precompile_call_params.input_memory_byte_length.is_zero(cs);
+
+        // if we just have read a precompile call with zero length input, we want to perform only one padding round
+        let have_read_zero_length_call = Boolean::multi_and(
+            cs,
+            &[
+                state.read_precompile_call,
+                is_input_length_zero,
+            ],
+        );
+        state.padding_round = Boolean::multi_or(
+            cs,
+            &[
+                state.padding_round,
+                have_read_zero_length_call,
+            ],
+        );
+        let havent_read_zero_length_call = have_read_zero_length_call.negated(cs);
+        state.read_unaligned_words_for_round = Boolean::multi_and(
+            cs,
+            &[
+                state.read_unaligned_words_for_round,
+                havent_read_zero_length_call,
+            ],
+        );
+
         state.read_precompile_call = boolean_false;
 
         // ---------------------------------
@@ -469,23 +497,6 @@ where
             .precompile_call_params
             .input_memory_byte_length
             .is_zero(cs);
-
-        // if the buffer is empty right after reading, then it was empty before and we read zero bytes.
-        // In such case if the call needs extra padding round, state.padding_round can be false only if it's the first cycle for this call
-        // (otherwise it would be set at the end of the previous cycle).
-        // This case is only achievable for zero-length input data
-        let buffer_initially_empty = state.buffer.filled.is_zero(cs);
-        let only_padding_round = Boolean::multi_and(
-            cs,
-            &[
-                state.read_unaligned_words_for_round,
-                zero_bytes_left,
-                buffer_initially_empty,
-                state.precompile_call_params.needs_full_padding_round,
-            ],
-        );
-        state.read_unaligned_words_for_round = only_padding_round.negated(cs);
-        state.padding_round = only_padding_round;
 
         let currently_filled = state.buffer.filled;
         let almost_filled = UInt8::allocated_constant(cs, (KECCAK_RATE_BYTES - 1) as u8);
