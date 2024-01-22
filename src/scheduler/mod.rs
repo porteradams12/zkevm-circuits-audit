@@ -34,6 +34,7 @@ use crate::base_structures::recursion_query::*;
 use crate::demux_log_queue::DemuxOutput;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::linear_hasher::input::LinearHasherOutputData;
+use crate::recursion::recursion_tip::input::RecursionTipInput;
 use crate::recursion::recursion_tip::input::RECURSION_TIP_ARITY;
 use crate::recursion::VK_COMMITMENT_LENGTH;
 use crate::scheduler::auxiliary::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
@@ -64,7 +65,6 @@ use crate::fsm_input_output::*;
 use crate::log_sorter::input::*;
 use crate::ram_permutation::input::*;
 use crate::recursion::leaf_layer::input::*;
-use crate::recursion::node_layer::input::*;
 use crate::scheduler::auxiliary::*;
 use crate::sort_decommittment_requests::input::*;
 use crate::storage_application::input::*;
@@ -1091,9 +1091,6 @@ pub fn scheduler_function<
 
     let mut proof_witnesses = witness.proof_witnesses;
 
-    // create verifier
-    let r = cs as *mut CS;
-
     assert_eq!(
         config.vk_fixed_parameters.parameters,
         verifier_builder.geometry()
@@ -1101,59 +1098,60 @@ pub fn scheduler_function<
 
     let verifier = verifier_builder.create_recursive_verifier(cs);
 
-    drop(cs);
-
-    let cs = unsafe { &mut *r };
-
-    for (_idx, (circuit_type, state)) in SEQUENCE_OF_CIRCUIT_TYPES
-        .iter()
-        .zip(recursive_queue_state_tails.into_iter())
-        .enumerate()
     {
-        println!("Verifying circuit type {:?}", circuit_type);
+        let mut it = SEQUENCE_OF_CIRCUIT_TYPES
+            .iter()
+            .zip(recursive_queue_state_tails.into_iter())
+            .enumerate();
 
-        let should_skip = state.length.is_zero(cs);
-        let should_verify = should_skip.negated(cs);
+        for _ in 0..NUM_RECURSION_TIPS_USED {
+            let mut recursion_tip_input = RecursionTipInput::placeholder(cs);
+            recursion_tip_input.leaf_layer_parameters = leaf_layer_parameters;
+            recursion_tip_input.node_layer_vk_commitment = node_layer_vk_commitment;
 
-        let circuit_type = UInt8::allocated_constant(cs, *circuit_type as u8).into_num();
+            for (circuit_type_dst, state_dst) in recursion_tip_input
+                .branch_circuit_type_set
+                .iter_mut()
+                .zip(recursion_tip_input.queue_set.iter_mut())
+            {
+                if let Some((_idx, (circuit_type, state))) = it.next() {
+                    let circuit_type =
+                        UInt8::allocated_constant(cs, *circuit_type as u8).into_num();
+                    *circuit_type_dst = circuit_type;
+                    let mut queue_state = QueueState::empty(cs);
+                    queue_state.tail = state;
+                    *state_dst = queue_state;
+                }
+            }
 
-        let mut queue_state = QueueState::empty(cs);
-        queue_state.tail = state;
+            let expected_input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
+                commit_variable_length_encodable_item(cs, &recursion_tip_input, round_function);
 
-        let input: RecursionNodeInput<F> = RecursionNodeInput {
-            branch_circuit_type: circuit_type,
-            leaf_layer_parameters: leaf_layer_parameters,
-            node_layer_vk_commitment: node_layer_vk_commitment,
-            queue_state: queue_state,
-        };
+            let proof_witness = proof_witnesses.pop_front();
 
-        let expected_input_commitment: [_; INPUT_OUTPUT_COMMITMENT_LENGTH] =
-            commit_variable_length_encodable_item(cs, &input, round_function);
+            let proof = AllocatedProof::allocate_from_witness(
+                cs,
+                proof_witness,
+                &verifier,
+                &config.vk_fixed_parameters,
+                &config.proof_config,
+            );
 
-        let proof_witness = proof_witnesses.pop_front();
+            let (is_valid, inputs) = verifier.verify::<H, TR, CTR, POW>(
+                cs,
+                transcript_params.clone(),
+                &proof,
+                &config.vk_fixed_parameters,
+                &config.proof_config,
+                &node_layer_vk,
+            );
 
-        let proof = AllocatedProof::allocate_from_witness(
-            cs,
-            proof_witness,
-            &verifier,
-            &config.vk_fixed_parameters,
-            &config.proof_config,
-        );
+            Boolean::enforce_equal(cs, &is_valid, &boolean_true);
+            assert_eq!(inputs.len(), expected_input_commitment.len());
 
-        let (is_valid, inputs) = verifier.verify::<H, TR, CTR, POW>(
-            cs,
-            transcript_params.clone(),
-            &proof,
-            &config.vk_fixed_parameters,
-            &config.proof_config,
-            &node_layer_vk,
-        );
-
-        is_valid.conditionally_enforce_true(cs, should_verify);
-        assert_eq!(inputs.len(), expected_input_commitment.len());
-
-        for (a, b) in inputs.iter().zip(expected_input_commitment.iter()) {
-            Num::conditionally_enforce_equal(cs, should_verify, a, b);
+            for (a, b) in inputs.iter().zip(expected_input_commitment.iter()) {
+                Num::enforce_equal(cs, a, b);
+            }
         }
     }
 
