@@ -13,7 +13,6 @@ use boojum::cs::gates::ConstantAllocatableCS;
 use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::cs::Variable;
 use boojum::field::SmallField;
-use boojum::gadgets::blake2s::mixing_function::merge_byte_using_table;
 use boojum::gadgets::boolean::Boolean;
 use boojum::gadgets::curves::sw_projective::SWProjectivePoint;
 
@@ -231,90 +230,6 @@ fn convert_field_element_to_uint256<
     }
 
     UInt256 { inner: limbs }
-}
-
-fn to_wnaf<F: SmallField, CS: ConstraintSystem<F>>(
-    cs: &mut CS,
-    e: Secp256ScalarNNField<F>,
-    neg: Boolean<F>,
-    decomp_id: u32,
-    byte_split_id: u32,
-) -> Vec<UInt8<F>> {
-    let mut naf = vec![];
-    let mut bytes = e
-        .limbs
-        .iter()
-        .flat_map(|el| unsafe { UInt16::from_variable_unchecked(*el).to_le_bytes(cs) })
-        .collect::<Vec<UInt8<F>>>();
-
-    // Loop for max amount of bits in e to ensure homogenous circuit
-    for i in 0..33 {
-        // Since each lookup consumes 2 bits of information, and we need at least 3 bits for
-        // figuring out the NAF number, we can do two lookups before needing to propagated the
-        // changes up the bytestring.
-        let mut naf_overflow = None;
-        for j in 0..2 {
-            let res = cs.perform_lookup::<1, 2>(decomp_id, &[bytes[0].get_variable()]);
-            let wnaf_and_carry_bits = unsafe { UInt32::from_variable_unchecked(res[0]) };
-            let wnaf_bytes = wnaf_and_carry_bits.to_le_bytes(cs);
-            bytes[0] = unsafe { UInt8::from_variable_unchecked(res[1]) };
-            wnaf_bytes[..2].iter().for_each(|byte| {
-                let byte_neg = byte.negate(cs);
-                let byte = Selectable::conditionally_select(cs, neg, byte, &byte_neg);
-                naf.push(byte);
-            });
-            // Save carry bit.
-            // It only ever matters to save it on the first iteration as it is not possible
-            // to overflow for the second.
-            if j == 0 {
-                naf_overflow = Some(wnaf_bytes[2]);
-            }
-        }
-
-        // Break up the first byte into a lower chunk and a (potential) carry bit.
-        let res = cs.perform_lookup::<1, 2>(byte_split_id, &[bytes[0].get_variable()]);
-        let mut low = res[0];
-        let carry_bit = unsafe { UInt8::from_variable_unchecked(res[1]) };
-        let mut of = Boolean::allocated_constant(cs, true);
-
-        // Shift e and propagate carry.
-        // Because a GLV decomposed scalar is at most 129 bits, we only care to shift
-        // the lower 17 bytes of the number initially, and as we progress, more zero bytes
-        // will appear, lowering the amount of iterations needed to shift our number.
-        let num_iter = 16 - (i / 2);
-        bytes
-            .iter_mut()
-            .skip(1)
-            .take(num_iter)
-            .enumerate()
-            .for_each(|(i, b)| {
-                // Propagate carry
-                let (added_b, new_of) = b.overflowing_add(cs, &carry_bit);
-                *b = Selectable::conditionally_select(cs, of, &added_b, b);
-                of = new_of;
-                // If this is the first byte, we also add the NAF carry bit.
-                if i == 0 {
-                    let naf_of;
-                    (*b, naf_of) = b.overflowing_add(cs, &naf_overflow.unwrap());
-                    // If this overflows, we should remember to add a carry bit to the next element.
-                    of = Selectable::conditionally_select(cs, naf_of, &naf_of, &of);
-                }
-
-                // Glue bytes
-                let res = cs.perform_lookup::<1, 2>(byte_split_id, &[b.get_variable()]);
-                *b = unsafe {
-                    UInt8::from_variable_unchecked(merge_byte_using_table::<_, _, 4>(
-                        cs, low, res[0],
-                    ))
-                };
-                low = res[1];
-            });
-
-        // Shift up by one to align.
-        bytes = bytes[1..].to_vec();
-    }
-
-    naf
 }
 
 fn width_4_windowed_multiplication<F: SmallField, CS: ConstraintSystem<F>>(
@@ -576,197 +491,6 @@ fn to_width_4_window_form<F: SmallField, CS: ConstraintSystem<F>>(
     assert_eq!(result.len(), NUM_MULTIPLICATION_STEPS_FOR_WIDTH_4);
 
     result
-}
-
-#[deprecated]
-fn wnaf_scalar_mul<F: SmallField, CS: ConstraintSystem<F>>(
-    cs: &mut CS,
-    mut point: SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>,
-    mut scalar: Secp256ScalarNNField<F>,
-    base_field_params: &Arc<Secp256BaseNNFieldParams>,
-    scalar_field_params: &Arc<Secp256ScalarNNFieldParams>,
-) -> SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>> {
-    scalar.enforce_reduced(cs);
-
-    let pow_2_128 = UInt512::allocated_constant(cs, (U256([0, 0, 1, 0]), U256::zero()));
-
-    let beta = Secp256Fq::from_str(BETA).unwrap();
-    let mut beta = Secp256BaseNNField::allocated_constant(cs, beta, &base_field_params);
-
-    let bigint_from_hex_str = |cs: &mut CS, s: &str| -> UInt512<F> {
-        let v = U256::from_str_radix(s, 16).unwrap();
-        UInt512::allocated_constant(cs, (v, U256::zero()))
-    };
-
-    let modulus_minus_one_div_two = bigint_from_hex_str(cs, MODULUS_MINUS_ONE_DIV_TWO);
-
-    let u256_from_hex_str = |cs: &mut CS, s: &str| -> UInt256<F> {
-        let v = U256::from_str_radix(s, 16).unwrap();
-        UInt256::allocated_constant(cs, v)
-    };
-
-    let a1 = u256_from_hex_str(cs, A1);
-    let b1 = u256_from_hex_str(cs, B1);
-    let a2 = u256_from_hex_str(cs, A2);
-    let b2 = a1.clone();
-
-    let boolean_false = Boolean::allocated_constant(cs, false);
-
-    // Scalar decomposition
-    let (k1_neg, k1, k2_neg, k2) = {
-        let k = convert_field_element_to_uint256(cs, scalar.clone());
-
-        // We take 8 non-zero limbs for the scalar (since it could be of any size), and 4 for B2
-        // (since it fits in 128 bits).
-        let b2_times_k = k.widening_mul(cs, &b2, 8, 4);
-        // can not overflow u512
-        let (b2_times_k, of) = b2_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
-        Boolean::enforce_equal(cs, &of, &boolean_false);
-        let c1 = b2_times_k.to_high();
-
-        // We take 8 non-zero limbs for the scalar (since it could be of any size), and 4 for B1
-        // (since it fits in 128 bits).
-        let b1_times_k = k.widening_mul(cs, &b1, 8, 4);
-        // can not overflow u512
-        let (b1_times_k, of) = b1_times_k.overflowing_add(cs, &modulus_minus_one_div_two);
-        Boolean::enforce_equal(cs, &of, &boolean_false);
-        let c2 = b1_times_k.to_high();
-
-        let mut a1 = convert_uint256_to_field_element(cs, &a1, &scalar_field_params);
-        let mut b1 = convert_uint256_to_field_element(cs, &b1, &scalar_field_params);
-        let mut a2 = convert_uint256_to_field_element(cs, &a2, &scalar_field_params);
-        let mut b2 = a1.clone();
-        let mut c1 = convert_uint256_to_field_element(cs, &c1, &scalar_field_params);
-        let mut c2 = convert_uint256_to_field_element(cs, &c2, &scalar_field_params);
-
-        let mut c1_times_a1 = c1.mul(cs, &mut a1);
-        let mut c2_times_a2 = c2.mul(cs, &mut a2);
-        let mut k1 = scalar.sub(cs, &mut c1_times_a1).sub(cs, &mut c2_times_a2);
-        k1.normalize(cs);
-        let mut c2_times_b2 = c2.mul(cs, &mut b2);
-        let mut k2 = c1.mul(cs, &mut b1).sub(cs, &mut c2_times_b2);
-        k2.normalize(cs);
-
-        let k1_u256 = convert_field_element_to_uint256(cs, k1.clone());
-        let k2_u256 = convert_field_element_to_uint256(cs, k2.clone());
-        let low_pow_2_128 = pow_2_128.to_low();
-        let (_res, k1_neg) = k1_u256.overflowing_sub(cs, &low_pow_2_128);
-        let k1_negated = k1.negated(cs);
-        let k1 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
-            cs,
-            k1_neg,
-            &k1,
-            &k1_negated,
-        );
-        let (_res, k2_neg) = k2_u256.overflowing_sub(cs, &low_pow_2_128);
-        let k2_negated = k2.negated(cs);
-        let k2 = <Secp256ScalarNNField<F> as NonNativeField<F, Secp256Fr>>::conditionally_select(
-            cs,
-            k2_neg,
-            &k2,
-            &k2_negated,
-        );
-
-        (k1_neg, k1, k2_neg, k2)
-    };
-
-    // WNAF
-    // The scalar multiplication window size.
-    use super::decomp_table::WNAF_WINDOW_SIZE;
-
-    // The WNAF precomputation table length
-    const L: usize = 1 << (WNAF_WINDOW_SIZE - 1);
-
-    let mut t1 = Vec::with_capacity(L);
-    // We use `convert_to_affine_or_default`, but we don't need to worry about returning 1, since
-    // we know that the point is not infinity.
-    let (mut double, _) = point
-        .double(cs)
-        .convert_to_affine_or_default(cs, Secp256Affine::one());
-    t1.push(point.clone());
-    // we need 1P, 3P, 5P, ...
-    for i in 1..L {
-        let next = t1[i - 1].add_mixed(cs, &mut double);
-        t1.push(next);
-    }
-
-    // (x, y)
-    let t1 = t1
-        .iter_mut()
-        .map(|el| el.convert_to_affine_or_default(cs, Secp256Affine::one()).0)
-        .collect::<Vec<_>>();
-
-    // (x*beta, y)
-    let t2 = t1
-        .clone()
-        .into_iter()
-        .map(|mut el| (el.0.mul(cs, &mut beta), el.1))
-        .collect::<Vec<_>>();
-
-    let overflow_checker = UInt8::allocated_constant(cs, 1 << 7);
-    let decomp_id = cs
-        .get_table_id_for_marker::<WnafDecompTable>()
-        .expect("table should exist");
-    let byte_split_id = cs
-        .get_table_id_for_marker::<ByteSplitTable<4>>()
-        .expect("table should exist");
-
-    let naf_abs_div2_table_id = cs
-        .get_table_id_for_marker::<NafAbsDiv2Table>()
-        .expect("table must exist");
-    let naf_add =
-        |cs: &mut CS,
-         table: &[(Secp256BaseNNField<F>, Secp256BaseNNField<F>)],
-         naf: UInt8<F>,
-         acc: &mut SWProjectivePoint<F, Secp256Affine, Secp256BaseNNField<F>>| {
-            let is_zero = naf.is_zero(cs);
-            let index = unsafe {
-                UInt8::from_variable_unchecked(
-                    cs.perform_lookup::<1, 2>(naf_abs_div2_table_id, &[naf.get_variable()])[0],
-                )
-            };
-            // We assume that only one of the values in the table will be selected (since the index
-            // <= table.len()) and so we can iteratively conditionally select over all elements.
-            let mut sanity_checks = vec![index.is_zero(cs)];
-            let mut coords = table[0].clone();
-            for (i, v) in table.iter().enumerate().skip(1) {
-                assert!((i as u8) < u8::MAX);
-                let const_idx: UInt8<F> = UInt8::allocated_constant(cs, i as u8);
-                let correct_idx = UInt8::equals(cs, &index, &const_idx);
-                sanity_checks.push(correct_idx);
-                coords.0 = Selectable::conditionally_select(cs, correct_idx, &v.0, &coords.0);
-                coords.1 = Selectable::conditionally_select(cs, correct_idx, &v.1, &coords.1);
-            }
-            let matched = Boolean::multi_or(cs, &sanity_checks);
-            let boolean_true = Boolean::allocated_constant(cs, true);
-            Boolean::enforce_equal(cs, &matched, &boolean_true);
-
-            let mut p_1 =
-                SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::from_xy_unchecked(
-                    cs,
-                    coords.0.clone(),
-                    coords.1.clone(),
-                );
-            let (_, naf_is_positive) = naf.overflowing_sub(cs, &overflow_checker);
-            let p_1_neg = p_1.negated(cs);
-            p_1 = Selectable::conditionally_select(cs, naf_is_positive, &p_1, &p_1_neg);
-            let acc_added = acc.add_mixed(cs, &mut (p_1.x, p_1.y));
-            *acc = Selectable::conditionally_select(cs, is_zero, &acc, &acc_added);
-        };
-
-    let naf1 = to_wnaf(cs, k1, k1_neg, decomp_id, byte_split_id);
-    let naf2 = to_wnaf(cs, k2, k2_neg, decomp_id, byte_split_id);
-    let mut acc =
-        SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, &base_field_params);
-    for i in (0..129).rev() {
-        naf_add(cs, &t1, naf1[i], &mut acc);
-        naf_add(cs, &t2, naf2[i], &mut acc);
-        if i != 0 {
-            acc = acc.double(cs);
-        }
-    }
-
-    acc
 }
 
 fn fixed_base_mul<CS: ConstraintSystem<F>, F: SmallField>(
@@ -1066,16 +790,7 @@ fn ecrecover_precompile_inner_routine<
         &scalar_field_params,
     );
 
-    // let mut s_times_x = wnaf_scalar_mul(
-    //     cs,
-    //     recovered_point.clone(),
-    //     s_by_r_inv.clone(),
-    //     &base_field_params,
-    //     &scalar_field_params,
-    // );
-
     let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv_negated, &base_field_params);
-    // let mut hash_times_g = fixed_base_mul(cs, message_hash_by_r_inv, &base_field_params);
 
     let (mut q_acc, is_infinity) =
         hash_times_g.convert_to_affine_or_default(cs, Secp256Affine::one());
@@ -1374,7 +1089,6 @@ where
 #[cfg(test)]
 mod test {
     use boojum::field::goldilocks::GoldilocksField;
-    use boojum::gadgets::non_native_field::implementations::implementation_u16::FFProxyValue;
     use boojum::gadgets::traits::allocatable::CSAllocatable;
     use boojum::pairing::ff::{Field, PrimeField};
     use boojum::worker::Worker;
@@ -1674,7 +1388,6 @@ mod test {
 
             let mut result =
                 width_4_windowed_multiplication(cs, point, scalar, &base_params, &scalar_params);
-            // let mut result = wnaf_scalar_mul(cs, point, scalar, &base_params, &scalar_params);
             let ((result_x, result_y), _) =
                 result.convert_to_affine_or_default(cs, Secp256Affine::one());
 

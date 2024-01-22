@@ -195,7 +195,10 @@ fn secp256r1_verify_function_inner<F: SmallField, CS: ConstraintSystem<F>>(
     let mut q_acc =
         SWProjectivePoint::<F, Secp256Affine, Secp256BaseNNField<F>>::zero(cs, base_field_params);
 
-    assert_eq!(r_by_s_inv_normalized_lsb_bits.len(), message_hash_by_s_inv_lsb_bits.len());
+    assert_eq!(
+        r_by_s_inv_normalized_lsb_bits.len(),
+        message_hash_by_s_inv_lsb_bits.len()
+    );
 
     // we should start from MSB, double the accumulator, then conditionally add
     for (cycle, (pubkey_bit, generator_bit)) in r_by_s_inv_normalized_lsb_bits
@@ -581,11 +584,17 @@ mod test {
 
         let cs = &mut owned_cs;
 
-        let digest = hex::decode("3fec5769b5cf4e310a7d150508e82fb8e3eda1c2c94c61492d3bd8aea99e06c9").unwrap();
-        let pk_x = hex::decode("31a80482dadf89de6302b1988c82c29544c9c07bb910596158f6062517eb089a").unwrap();
-        let pk_y = hex::decode("2f54c9a0f348752950094d3228d3b940258c75fe2a413cb70baa21dc2e352fc5").unwrap();
-        let r = hex::decode("e22466e928fdccef0de49e3503d2657d00494a00e764fd437bdafa05f5922b1f").unwrap();
-        let s = hex::decode("bbb77c6817ccf50748419477e843d5bac67e6a70e97dde5a57e0c983b777e1ad").unwrap();
+        let digest =
+            hex::decode("3fec5769b5cf4e310a7d150508e82fb8e3eda1c2c94c61492d3bd8aea99e06c9")
+                .unwrap();
+        let pk_x = hex::decode("31a80482dadf89de6302b1988c82c29544c9c07bb910596158f6062517eb089a")
+            .unwrap();
+        let pk_y = hex::decode("2f54c9a0f348752950094d3228d3b940258c75fe2a413cb70baa21dc2e352fc5")
+            .unwrap();
+        let r = hex::decode("e22466e928fdccef0de49e3503d2657d00494a00e764fd437bdafa05f5922b1f")
+            .unwrap();
+        let s = hex::decode("bbb77c6817ccf50748419477e843d5bac67e6a70e97dde5a57e0c983b777e1ad")
+            .unwrap();
 
         let scalar_params = secp256r1_scalar_field_params();
         let base_params = secp256r1_base_field_params();

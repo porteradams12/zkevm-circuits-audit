@@ -26,10 +26,8 @@ pub mod secp256k1;
 
 pub const MEMORY_QUERIES_PER_CALL: usize = 4;
 
-pub mod naf_abs_div2_table;
-use naf_abs_div2_table::*;
 pub mod decomp_table;
-use decomp_table::*;
+pub mod naf_abs_div2_table;
 
 pub mod baseline;
 pub mod new_optimized;

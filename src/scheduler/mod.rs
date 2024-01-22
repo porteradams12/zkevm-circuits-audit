@@ -31,8 +31,10 @@ use crate::base_structures::memory_query::MemoryQuery;
 use crate::base_structures::memory_query::MemoryQueue;
 
 use crate::base_structures::recursion_query::*;
+use crate::demux_log_queue::DemuxOutput;
 use crate::fsm_input_output::circuit_inputs::INPUT_OUTPUT_COMMITMENT_LENGTH;
 use crate::linear_hasher::input::LinearHasherOutputData;
+use crate::recursion::recursion_tip::input::RECURSION_TIP_ARITY;
 use crate::recursion::VK_COMMITMENT_LENGTH;
 use crate::scheduler::auxiliary::NUM_CIRCUIT_TYPES_TO_SCHEDULE;
 use crate::utils::is_equal_queue_state;
@@ -74,6 +76,7 @@ pub const LEAF_LAYER_PARAMETERS_COMMITMENT_LENGTH: usize = 4;
 pub const QUEUE_FINAL_STATE_COMMITMENT_LENGTH: usize = 4;
 pub const IMPLEMENT_4844_FUNCTIONALITY: bool = false;
 pub const NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING: usize = NUM_CIRCUIT_TYPES_TO_SCHEDULE - 1;
+pub const NUM_RECURSION_TIPS_USED: usize = 1;
 
 pub const SEQUENCE_OF_CIRCUIT_TYPES: [BaseLayerCircuitType; NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING] = [
     BaseLayerCircuitType::VM,
@@ -137,6 +140,8 @@ pub fn scheduler_function<
     [(); <MemoryQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
     [(); <DecommitQuery<F> as CSAllocatableExt<F>>::INTERNAL_STRUCT_LEN]:,
 {
+    assert!(NUM_RECURSION_TIPS_USED * RECURSION_TIP_ARITY >= NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING);
+
     let prev_block_data = BlockPassthroughData::allocate(cs, witness.prev_block_data.clone());
     let block_meta_parameters =
         BlockMetaParameters::allocate(cs, witness.block_meta_parameters.clone());
@@ -197,6 +202,11 @@ pub fn scheduler_function<
     let ecrecover_observable_output =
         PrecompileFunctionOutputData::allocate(cs, witness.ecrecover_observable_output.clone());
 
+    let secp256r1_verify_observable_output = PrecompileFunctionOutputData::allocate(
+        cs,
+        witness.secp256r1_verify_observable_output.clone(),
+    );
+
     let storage_sorter_observable_output = StorageDeduplicatorOutputData::allocate(
         cs,
         witness.storage_sorter_observable_output.clone(),
@@ -232,6 +242,13 @@ pub fn scheduler_function<
     let l1messages_sorter_intermediate_queue_state = QueueTailState::allocate(
         cs,
         witness.l1messages_sorter_intermediate_queue_state.clone(),
+    );
+
+    let transient_storage_sorter_intermediate_queue_state = QueueTailState::allocate(
+        cs,
+        witness
+            .transient_storage_sorter_intermediate_queue_state
+            .clone(),
     );
 
     // final VM storage log state for our construction
@@ -306,12 +323,20 @@ pub fn scheduler_function<
         commit_variable_length_encodable_item(cs, &log_demuxer_observable_output, round_function);
 
     // all intermediate queues for sorters
+    let keccak256_access_queue_state =
+        log_demuxer_observable_output.output_queue_states[DemuxOutput::Keccak as usize];
+    let sha256_access_queue_state =
+        log_demuxer_observable_output.output_queue_states[DemuxOutput::Sha256 as usize];
+    let ecrecover_access_queue_state =
+        log_demuxer_observable_output.output_queue_states[DemuxOutput::ECRecover as usize];
+    let secp256r1_verify_access_queue_state =
+        log_demuxer_observable_output.output_queue_states[DemuxOutput::Secp256r1Verify as usize];
 
     // precompiles: keccak, sha256 and ecrecover
     let (keccak_circuit_observable_input_commitment, keccak_circuit_observable_output_commitment) =
         compute_precompile_commitment(
             cs,
-            &log_demuxer_observable_output.keccak256_access_queue_state,
+            &keccak256_access_queue_state,
             &code_decommitter_observable_output.memory_queue_final_state,
             &keccak256_observable_output.final_memory_state,
             round_function,
@@ -319,7 +344,7 @@ pub fn scheduler_function<
     let (sha256_circuit_observable_input_commitment, sha256_circuit_observable_output_commitment) =
         compute_precompile_commitment(
             cs,
-            &log_demuxer_observable_output.sha256_access_queue_state,
+            &sha256_access_queue_state,
             &keccak256_observable_output.final_memory_state,
             &sha256_observable_output.final_memory_state,
             round_function,
@@ -329,9 +354,19 @@ pub fn scheduler_function<
         ecrecover_circuit_observable_output_commitment,
     ) = compute_precompile_commitment(
         cs,
-        &log_demuxer_observable_output.ecrecover_access_queue_state,
+        &ecrecover_access_queue_state,
         &sha256_observable_output.final_memory_state,
         &ecrecover_observable_output.final_memory_state,
+        round_function,
+    );
+    let (
+        secp256r1_verify_circuit_observable_input_commitment,
+        secp256r1_verify_circuit_observable_output_commitment,
+    ) = compute_precompile_commitment(
+        cs,
+        &ecrecover_access_queue_state,
+        &ecrecover_observable_output.final_memory_state,
+        &secp256r1_verify_observable_output.final_memory_state,
         round_function,
     );
 
@@ -343,17 +378,24 @@ pub fn scheduler_function<
         QueueTailState::allocate(cs, witness.ram_sorted_queue_state.clone());
 
     let ram_validation_circuit_input = RamPermutationInputData {
-        unsorted_queue_initial_state: ecrecover_observable_output.final_memory_state,
+        unsorted_queue_initial_state: secp256r1_verify_observable_output.final_memory_state,
         sorted_queue_initial_state: ram_sorted_queue_state,
         non_deterministic_bootloader_memory_snapshot_length: bootloader_heap_memory_state.length,
     };
     let ram_validation_circuit_input_commitment =
         commit_variable_length_encodable_item(cs, &ram_validation_circuit_input, round_function);
 
+    let events_access_queue_state =
+        log_demuxer_observable_output.output_queue_states[DemuxOutput::Events as usize];
+    let l1messages_access_queue_state =
+        log_demuxer_observable_output.output_queue_states[DemuxOutput::L2ToL1Messages as usize];
+    let transient_storage_access_queue_state =
+        log_demuxer_observable_output.output_queue_states[DemuxOutput::TransientStorage as usize];
+
     // events reverts filter and merkelization
     let (events_filter_input_com, events_filter_output_com) = compute_filter_circuit_commitment(
         cs,
-        &log_demuxer_observable_output.events_access_queue_state,
+        &events_access_queue_state,
         &events_sorter_intermediate_queue_state,
         &events_sorter_observable_output.final_queue_state,
         round_function,
@@ -371,7 +413,7 @@ pub fn scheduler_function<
     let (l1_messages_filter_input_com, l1_messages_filter_output_com) =
         compute_filter_circuit_commitment(
             cs,
-            &log_demuxer_observable_output.l1messages_access_queue_state,
+            &l1messages_access_queue_state,
             &l1messages_sorter_intermediate_queue_state,
             &l1messages_sorter_observable_output.final_queue_state,
             round_function,
@@ -384,6 +426,18 @@ pub fn scheduler_function<
             &l1messages_linear_hasher_observable_output.keccak256_hash,
             round_function,
         );
+
+    // transient storage is independent of shards
+
+    let (transient_storage_checker_input_com, transient_storage_checker_output_com) =
+        compute_transient_storage_checker_circuit_commitment(
+            cs,
+            &transient_storage_access_queue_state,
+            &transient_storage_sorter_intermediate_queue_state,
+            round_function,
+        );
+
+    // and persistent storage is processed for rollup part only
 
     const NUM_PROCESSABLE_SHARDS: usize = 1;
 
@@ -399,7 +453,10 @@ pub fn scheduler_function<
     let mut storage_applicator_output_commitments =
         [empty_input_output_commitment; NUM_PROCESSABLE_SHARDS];
 
-    let storage_queues_state = [log_demuxer_observable_output.storage_access_queue_state];
+    let rollup_storage_access_queue_state =
+        log_demuxer_observable_output.output_queue_states[DemuxOutput::RollupStorage as usize];
+
+    let storage_queues_state = [rollup_storage_access_queue_state];
 
     let filtered_storage_queues_state = [storage_sorter_observable_output.final_sorted_queue_state];
 
@@ -509,6 +566,14 @@ pub fn scheduler_function<
                     BaseLayerCircuitType::L1MessagesHasher,
                     l1_messages_hasher_input_com,
                 ),
+                (
+                    BaseLayerCircuitType::TransientStorageChecker,
+                    transient_storage_checker_input_com,
+                ),
+                (
+                    BaseLayerCircuitType::Secp256r1Verify,
+                    secp256r1_verify_circuit_observable_input_commitment,
+                ),
             ]
             .into_iter(),
         );
@@ -565,9 +630,26 @@ pub fn scheduler_function<
                     BaseLayerCircuitType::L1MessagesHasher,
                     l1_messages_hasher_output_com,
                 ),
+                (
+                    BaseLayerCircuitType::TransientStorageChecker,
+                    transient_storage_checker_output_com,
+                ),
+                (
+                    BaseLayerCircuitType::Secp256r1Verify,
+                    secp256r1_verify_circuit_observable_output_commitment,
+                ),
             ]
             .into_iter(),
         );
+
+    assert_eq!(
+        input_commitments_as_map.len(),
+        NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING
+    );
+    assert_eq!(
+        output_commitments_as_map.len(),
+        NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING
+    );
 
     // self-check
     for pair in SEQUENCE_OF_CIRCUIT_TYPES.windows(2) {
@@ -575,7 +657,7 @@ pub fn scheduler_function<
     }
 
     // we can potentially skip some circuits
-    let mut skip_flags = [None; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
+    let mut skip_flags = [None; NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING];
     // we can skip everything except VM
     // and if we skip, then we should ensure some invariants over outputs!
 
@@ -623,7 +705,7 @@ pub fn scheduler_function<
             .length
             .is_zero(cs);
 
-        for subqueue in log_demuxer_observable_output
+        for (_, subqueue) in log_demuxer_observable_output
             .all_output_queues_refs()
             .into_iter()
         {
@@ -636,11 +718,7 @@ pub fn scheduler_function<
 
     // keccak, sha256 and ecrecover must not modify memory
     {
-        let should_skip = log_demuxer_observable_output
-            .keccak256_access_queue_state
-            .tail
-            .length
-            .is_zero(cs);
+        let should_skip = keccak256_access_queue_state.tail.length.is_zero(cs);
 
         let input_state = code_decommitter_observable_output.memory_queue_final_state;
         let output_state = keccak256_observable_output.final_memory_state;
@@ -651,11 +729,7 @@ pub fn scheduler_function<
         skip_flags[(BaseLayerCircuitType::KeccakPrecompile as u8 as usize) - 1] = Some(should_skip);
     }
     {
-        let should_skip = log_demuxer_observable_output
-            .sha256_access_queue_state
-            .tail
-            .length
-            .is_zero(cs);
+        let should_skip = sha256_access_queue_state.tail.length.is_zero(cs);
 
         let input_state = keccak256_observable_output.final_memory_state;
         let output_state = sha256_observable_output.final_memory_state;
@@ -666,11 +740,7 @@ pub fn scheduler_function<
         skip_flags[(BaseLayerCircuitType::Sha256Precompile as u8 as usize) - 1] = Some(should_skip);
     }
     {
-        let should_skip = log_demuxer_observable_output
-            .ecrecover_access_queue_state
-            .tail
-            .length
-            .is_zero(cs);
+        let should_skip = ecrecover_access_queue_state.tail.length.is_zero(cs);
 
         let input_state = sha256_observable_output.final_memory_state;
         let output_state = ecrecover_observable_output.final_memory_state;
@@ -680,6 +750,17 @@ pub fn scheduler_function<
 
         skip_flags[(BaseLayerCircuitType::EcrecoverPrecompile as u8 as usize) - 1] =
             Some(should_skip);
+    }
+    {
+        let should_skip = secp256r1_verify_access_queue_state.tail.length.is_zero(cs);
+
+        let input_state = ecrecover_observable_output.final_memory_state;
+        let output_state = secp256r1_verify_observable_output.final_memory_state;
+
+        let same_state = is_equal_queue_state(cs, &input_state, &output_state);
+        same_state.conditionally_enforce_true(cs, should_skip);
+
+        skip_flags[(BaseLayerCircuitType::Secp256r1Verify as u8 as usize) - 1] = Some(should_skip);
     }
 
     // well, in the very unlikely case of no RAM requests (that is unreachable because VM always starts) we just skip it as is
@@ -744,11 +825,7 @@ pub fn scheduler_function<
     }
     // events and l2 to l1 messages filters should produce empty output
     {
-        let should_skip = log_demuxer_observable_output
-            .events_access_queue_state
-            .tail
-            .length
-            .is_zero(cs);
+        let should_skip = events_access_queue_state.tail.length.is_zero(cs);
 
         let output_queue_is_empty = events_sorter_observable_output
             .final_queue_state
@@ -761,11 +838,7 @@ pub fn scheduler_function<
             Some(should_skip);
     }
     {
-        let should_skip = log_demuxer_observable_output
-            .l1messages_access_queue_state
-            .tail
-            .length
-            .is_zero(cs);
+        let should_skip = l1messages_access_queue_state.tail.length.is_zero(cs);
 
         let output_queue_is_empty = l1messages_sorter_observable_output
             .final_queue_state
@@ -775,6 +848,12 @@ pub fn scheduler_function<
         output_queue_is_empty.conditionally_enforce_true(cs, should_skip);
 
         skip_flags[(BaseLayerCircuitType::L1MessagesRevertsFilter as u8 as usize) - 1] =
+            Some(should_skip);
+    }
+    // transient storage doesn't produce an output
+    {
+        let should_skip = transient_storage_access_queue_state.tail.length.is_zero(cs);
+        skip_flags[(BaseLayerCircuitType::TransientStorageChecker as u8 as usize) - 1] =
             Some(should_skip);
     }
 
@@ -792,7 +871,7 @@ pub fn scheduler_function<
 
     // now we just walk one by one
 
-    let mut execution_stage_bitmask = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
+    let mut execution_stage_bitmask = [boolean_false; NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING];
     execution_stage_bitmask[0] = boolean_true; // VM
 
     assert_eq!(
@@ -805,12 +884,12 @@ pub fn scheduler_function<
 
     let empty_recursive_queue_state_tail = QueueTailState::empty(cs);
     let mut recursive_queue_state_tails =
-        [empty_recursive_queue_state_tail; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
+        [empty_recursive_queue_state_tail; NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING];
 
     let mut hidden_fsm_input_to_use = [zero_num; CLOSED_FORM_COMMITTMENT_LENGTH];
 
     for _idx in 0..config.capacity {
-        let mut next_mask = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
+        let mut next_mask = [boolean_false; NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING];
 
         let closed_form_input_witness = witness
             .per_circuit_closed_form_inputs
@@ -824,7 +903,8 @@ pub fn scheduler_function<
             Boolean::equals(cs, &closed_form_input.start_flag, &previous_completion_flag);
         start_of_next_when_previous_is_finished.conditionally_enforce_true(cs, execution_flag);
 
-        let mut computed_applicability_flags = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
+        let mut computed_applicability_flags =
+            [boolean_false; NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING];
         let mut circuit_type_to_use = Num::zero(cs);
 
         for (idx, ((circuit_type, stage_flag), skip_flag)) in SEQUENCE_OF_CIRCUIT_TYPES
@@ -964,7 +1044,7 @@ pub fn scheduler_function<
 
         previous_completion_flag = Boolean::multi_or(cs, &next_mask);
         // for the next stage we do shifted AND
-        let mut tmp = [boolean_false; NUM_CIRCUIT_TYPES_TO_SCHEDULE];
+        let mut tmp = [boolean_false; NUM_CIRCUITS_FOR_VARIABLE_SCHEDULING];
         // note skip(1)
         for (idx, start_next) in next_mask.iter().enumerate() {
             let finished_this_stage = *start_next;

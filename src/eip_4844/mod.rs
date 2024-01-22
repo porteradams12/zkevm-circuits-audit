@@ -723,6 +723,7 @@ mod tests {
 
     #[test]
     fn test_data_roundtrip() {
+        use rand::Rng;
         let mut rng = rand::XorShiftRng::new_unseeded();
         let zksync_data: Vec<u8> = (0..(31 * 4096)).map(|_| rng.gen()).collect();
         let monomial_form = zksync_pubdata_into_monomial_form_poly(&zksync_data);

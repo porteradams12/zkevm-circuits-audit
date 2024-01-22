@@ -49,6 +49,7 @@ pub struct SchedulerCircuitInstanceWitness<
     pub keccak256_observable_output: PrecompileFunctionOutputDataWitness<F>,
     pub sha256_observable_output: PrecompileFunctionOutputDataWitness<F>,
     pub ecrecover_observable_output: PrecompileFunctionOutputDataWitness<F>,
+    pub secp256r1_verify_observable_output: PrecompileFunctionOutputDataWitness<F>,
     // RAM permutation doesn't produce anything
     pub storage_sorter_observable_output: StorageDeduplicatorOutputDataWitness<F>,
     pub storage_application_observable_output: StorageApplicationOutputDataWitness<F>,
@@ -69,6 +70,8 @@ pub struct SchedulerCircuitInstanceWitness<
     pub rollup_storage_sorter_intermediate_queue_state: QueueTailStateWitness<F, QUEUE_STATE_WIDTH>,
     pub events_sorter_intermediate_queue_state: QueueTailStateWitness<F, QUEUE_STATE_WIDTH>,
     pub l1messages_sorter_intermediate_queue_state: QueueTailStateWitness<F, QUEUE_STATE_WIDTH>,
+    pub transient_storage_sorter_intermediate_queue_state:
+        QueueTailStateWitness<F, QUEUE_STATE_WIDTH>,
 
     // extra information about the previous block
     pub previous_block_meta_hash: [u8; 32],
@@ -100,9 +103,12 @@ impl<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, Ba
                 CodeDecommittmentsDeduplicatorOutputData::placeholder_witness(),
             code_decommitter_observable_output: CodeDecommitterOutputData::placeholder_witness(),
             log_demuxer_observable_output: LogDemuxerOutputData::placeholder_witness(),
+
             keccak256_observable_output: PrecompileFunctionOutputData::placeholder_witness(),
             sha256_observable_output: PrecompileFunctionOutputData::placeholder_witness(),
             ecrecover_observable_output: PrecompileFunctionOutputData::placeholder_witness(),
+            secp256r1_verify_observable_output: PrecompileFunctionOutputData::placeholder_witness(),
+
             storage_sorter_observable_output: StorageDeduplicatorOutputData::placeholder_witness(),
             storage_application_observable_output:
                 StorageApplicationOutputData::placeholder_witness(),
@@ -122,6 +128,8 @@ impl<F: SmallField, H: RecursiveTreeHasher<F, Num<F>>, EXT: FieldExtension<2, Ba
             rollup_storage_sorter_intermediate_queue_state: QueueTailState::placeholder_witness(),
             events_sorter_intermediate_queue_state: QueueTailState::placeholder_witness(),
             l1messages_sorter_intermediate_queue_state: QueueTailState::placeholder_witness(),
+            transient_storage_sorter_intermediate_queue_state: QueueTailState::placeholder_witness(
+            ),
 
             previous_block_meta_hash: [0u8; 32],
             previous_block_aux_hash: [0u8; 32],
