@@ -17,7 +17,6 @@ use crate::main_vm::witness_oracle::WitnessOracle;
 use boojum::algebraic_props::round_function::AlgebraicRoundFunction;
 use boojum::gadgets::traits::allocatable::CSAllocatableExt;
 use boojum::gadgets::traits::round_function::CircuitRoundFunction;
-use zkevm_opcode_defs::system_params::L1_MESSAGE_PUBDATA_BYTES;
 
 pub(crate) fn test_if_bit_is_set<F: SmallField, CS: ConstraintSystem<F>>(
     cs: &mut CS,
@@ -176,19 +175,19 @@ pub(crate) fn apply_log<
         common_opcode_state
             .decoded_opcode
             .properties_bits
-            .boolean_for_variant(STORAGE_READ_OPCODE)
+            .boolean_for_variant(DECOMMIT_OPCODE)
     };
     let is_transient_storage_read = {
         common_opcode_state
             .decoded_opcode
             .properties_bits
-            .boolean_for_variant(STORAGE_READ_OPCODE)
+            .boolean_for_variant(TRANSIENT_STORAGE_READ_OPCODE)
     };
     let is_transient_storage_write = {
         common_opcode_state
             .decoded_opcode
             .properties_bits
-            .boolean_for_variant(STORAGE_WRITE_OPCODE)
+            .boolean_for_variant(TRANSIENT_STORAGE_WRITE_OPCODE)
     };
 
     if crate::config::CIRCUIT_VERSOBE {
@@ -454,14 +453,8 @@ pub(crate) fn apply_log<
         &precompile_call_pubdata_cost,
         &final_pubdata_cost,
     );
-    let l1_message_pubdata_bytes_constant =
-        UInt32::allocated_constant(cs, L1_MESSAGE_PUBDATA_BYTES as u32);
-    let final_pubdata_cost = UInt32::conditionally_select(
-        cs,
-        is_l1_message,
-        &l1_message_pubdata_bytes_constant,
-        &final_pubdata_cost,
-    );
+    // NOTE: this intrinsic L1 message used L1 calldata, while our counter is for pubdata that can be propagated
+    // by some other way, so we do NOT add it here
 
     let oracle = witness_oracle.clone();
     // we should assemble all the dependencies here, and we will use AllocateExt here
